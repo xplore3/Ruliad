@@ -225,102 +225,118 @@ export default function Home() {
         <span style={{ fontSize: 13, color: '#6B7280' }}>按你的行业智能排序</span>
       </div>
 
-      {/* Masonry Card Grid */}
-      <div style={{ columnCount: 4, columnGap: 18 }}>
-        {filteredScenes.map((scene) => (
-          <div
-            key={scene.id}
-            onClick={() => navigate(`/scenario/${scene.id}`)}
-            style={{
-              breakInside: 'avoid', marginBottom: 18, cursor: 'pointer',
-              background: '#fff', borderRadius: 16, overflow: 'hidden',
-              boxShadow: '0 1px 2px rgba(16,24,40,.04), 0 10px 30px -14px rgba(16,24,40,.12)',
-              transition: 'transform .2s ease-out, box-shadow .2s ease-out',
-            }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-4px)';
-              (e.currentTarget as HTMLDivElement).style.boxShadow = '0 2px 4px rgba(16,24,40,.05), 0 18px 40px -16px rgba(16,24,40,.18)';
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLDivElement).style.transform = 'translateY(0)';
-              (e.currentTarget as HTMLDivElement).style.boxShadow = '0 1px 2px rgba(16,24,40,.04), 0 10px 30px -14px rgba(16,24,40,.12)';
-            }}
-          >
-            {/* Cover Image */}
-            <div style={{ position: 'relative' }}>
-              <img
-                src={`/avatars/${scene.image}`}
-                alt={scene.name}
-                style={{
-                  width: '100%', height: 170, objectFit: 'cover', objectPosition: 'center 20%', display: 'block',
-                }}
-                onError={(e) => {
-                  (e.target as HTMLImageElement).style.display = 'none';
-                  (e.target as HTMLImageElement).parentElement!.style.background = `linear-gradient(160deg, ${scene.categoryColor}22, #fff)`;
-                }}
-              />
-              {/* Category chip */}
-              <span style={{
-                position: 'absolute', top: 10, left: 10, zIndex: 1,
-                background: scene.categoryColor + '22', color: scene.categoryColor,
-                padding: '4px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600,
-                display: 'inline-flex', alignItems: 'center', gap: 5,
-              }}>
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: scene.categoryColor }} />
-                {scene.category}
-              </span>
-              {/* Difficulty */}
-              <span style={{
-                position: 'absolute', bottom: 10, right: 10, zIndex: 1,
-                fontSize: 11, color: '#1F2329', background: 'rgba(255,255,255,.92)',
-                padding: '2px 9px', borderRadius: 999,
-              }}>
-                {scene.difficulty} · {scene.duration}
-              </span>
-              {/* Practiced badge */}
-              {scene.practiced && scene.score !== null && (
-                <span style={{
-                  position: 'absolute', top: 10, right: 10, zIndex: 1,
-                  background: 'rgba(255,255,255,.94)', color: '#FF6B5B', fontSize: 11.5, fontWeight: 700,
-                  padding: '4px 10px', borderRadius: 999, boxShadow: '0 1px 4px rgba(16,24,40,.08)',
-                }}>
-                  已练习 · {scene.score} 分
-                </span>
-              )}
-            </div>
-            {/* Card Body */}
-            <div style={{ padding: '12px 14px 14px' }}>
-              <h3 style={{ fontSize: 15, marginBottom: 4, color: '#1F2329' }}>{scene.name}</h3>
-              <p style={{ fontSize: 12.5, color: '#6B7280', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-                {scene.description}
-              </p>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 12.5, color: '#6B7280' }}>
+      {/* Scene Card Grid - reliable grid layout */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+        gap: 18,
+      }}>
+        {filteredScenes.map((scene, idx) => {
+          // Vary cover height based on card type (matches prototype)
+          const coverHeights = [190, 155, 215, 170];
+          const coverH = coverHeights[idx % 4];
+          return (
+            <div
+              key={scene.id}
+              onClick={() => navigate(`/scenario/${scene.id}`)}
+              style={{
+                cursor: 'pointer',
+                background: '#fff', borderRadius: 16, overflow: 'hidden',
+                boxShadow: '0 1px 2px rgba(16,24,40,.04), 0 10px 30px -14px rgba(16,24,40,.12)',
+                transition: 'transform .2s ease-out, box-shadow .2s ease-out',
+                display: 'flex', flexDirection: 'column',
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-4px)';
+                (e.currentTarget as HTMLDivElement).style.boxShadow = '0 2px 4px rgba(16,24,40,.05), 0 18px 40px -16px rgba(16,24,40,.18)';
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLDivElement).style.transform = 'translateY(0)';
+                (e.currentTarget as HTMLDivElement).style.boxShadow = '0 1px 2px rgba(16,24,40,.04), 0 10px 30px -14px rgba(16,24,40,.12)';
+              }}
+            >
+              {/* Cover Image */}
+              <div style={{ position: 'relative', width: '100%', height: coverH, overflow: 'hidden' }}>
+                <img
+                  src={`/avatars/${scene.image}`}
+                  alt={scene.name}
+                  style={{
+                    width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center 20%', display: 'block',
+                  }}
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = 'none';
+                    (e.target as HTMLImageElement).parentElement!.style.background = `linear-gradient(160deg, ${scene.categoryColor}22, #fff)`;
+                  }}
+                />
+                {/* Bottom fade for readability */}
                 <div style={{
-                  width: 20, height: 20, borderRadius: '50%', overflow: 'hidden', flex: 'none',
+                  position: 'absolute', left: 0, right: 0, bottom: 0, height: 44,
+                  background: 'linear-gradient(transparent, rgba(31,35,41,.18)',
+                }} />
+                {/* Category chip */}
+                <span style={{
+                  position: 'absolute', top: 10, left: 10, zIndex: 1,
+                  background: 'rgba(255,255,255,.94)', color: scene.categoryColor,
+                  padding: '4px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600,
+                  display: 'inline-flex', alignItems: 'center', gap: 5,
+                  boxShadow: '0 1px 4px rgba(16,24,40,.08)',
                 }}>
-                  <img src={`/avatars/${scene.image}`} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                </div>
-                {scene.persona} · {scene.personaRole}
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
-                {scene.tags.map((tag) => (
-                  <span key={tag} style={{ fontSize: 11, color: '#6B7280', background: '#F3F4F6', padding: '2px 8px', borderRadius: 6 }}>
-                    {tag}
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: scene.categoryColor }} />
+                  {scene.category}
+                </span>
+                {/* Difficulty */}
+                <span style={{
+                  position: 'absolute', bottom: 10, right: 10, zIndex: 1,
+                  fontSize: 11, color: '#1F2329', background: 'rgba(255,255,255,.92)',
+                  padding: '2px 9px', borderRadius: 999,
+                }}>
+                  {scene.difficulty} · {scene.duration}
+                </span>
+                {/* Practiced badge */}
+                {scene.practiced && scene.score !== null && (
+                  <span style={{
+                    position: 'absolute', top: 10, right: 10, zIndex: 1,
+                    background: 'rgba(255,255,255,.94)', color: '#FF6B5B', fontSize: 11.5, fontWeight: 700,
+                    padding: '4px 10px', borderRadius: 999, boxShadow: '0 1px 4px rgba(16,24,40,.08)',
+                  }}>
+                    已练习 · {scene.score} 分
                   </span>
-                ))}
+                )}
               </div>
-              {scene.practiced && (
-                <button
-                  style={{ marginTop: 10, fontSize: 12.5, color: '#FF6B5B', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-                  onClick={(e) => { e.stopPropagation(); navigate('/practice/new'); }}
-                >
-                  再练一次 →
-                </button>
-              )}
+              {/* Card Body */}
+              <div style={{ padding: '12px 14px 14px', flex: 1, display: 'flex', flexDirection: 'column' }}>
+                <h3 style={{ fontSize: 15, marginBottom: 4, color: '#1F2329' }}>{scene.name}</h3>
+                <p style={{ fontSize: 12.5, color: '#6B7280', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                  {scene.description}
+                </p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 12.5, color: '#6B7280' }}>
+                  <div style={{
+                    width: 20, height: 20, borderRadius: '50%', overflow: 'hidden', flex: 'none',
+                  }}>
+                    <img src={`/avatars/${scene.image}`} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                  </div>
+                  {scene.persona} · {scene.personaRole}
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+                  {scene.tags.map((tag) => (
+                    <span key={tag} style={{ fontSize: 11, color: '#6B7280', background: '#F3F4F6', padding: '2px 8px', borderRadius: 6 }}>
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+                {scene.practiced && (
+                  <button
+                    style={{ marginTop: 10, fontSize: 12.5, color: '#FF6B5B', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', padding: 0, alignSelf: 'flex-start' }}
+                    onClick={(e) => { e.stopPropagation(); navigate('/practice/new'); }}
+                  >
+                    再练一次 →
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

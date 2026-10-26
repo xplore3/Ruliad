@@ -30,7 +30,7 @@ export default function Layout() {
       {!isFullscreen && <TopBar />}
 
       {/* Main content */}
-      <main className={!isFullscreen ? 'pt-16' : ''} style={{ maxWidth: 1200, margin: '0 auto', padding: '0 24px' }}>
+      <main style={{ maxWidth: 1200, margin: '0 auto', padding: isFullscreen ? '0 24px' : '64px 24px 24px' }}>
         <Outlet />
       </main>
 
