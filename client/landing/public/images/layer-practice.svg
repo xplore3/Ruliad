@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="520" height="300" viewBox="0 0 520 300" fill="none">
+  <!-- 左上：AI 客户头像（严肃） -->
+  <circle cx="90" cy="80" r="26" fill="#232E48" stroke="#3A4666" stroke-width="2"/>
+  <circle cx="82" cy="74" r="3" fill="#9BA3B5"/>
+  <circle cx="98" cy="74" r="3" fill="#9BA3B5"/>
+  <path d="M82 90 H 98" stroke="#9BA3B5" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- AI 客户施压气泡 -->
+  <path d="M130 50 h 150 a 12 12 0 0 1 12 12 v 44 a 12 12 0 0 1 -12 12 H 200 l -16 14 v -14 h -54 a 12 12 0 0 1 -12 -12 V 62 a 12 12 0 0 1 12 -12 z" fill="#232E48" stroke="#2E3A56"/>
+  <!-- 气泡内声波（语音施压） -->
+  <g stroke="#9BA3B5" stroke-width="2" stroke-linecap="round" fill="none">
+    <path d="M158 90 q 4 -10 8 0 q 4 10 8 0"/>
+    <path d="M188 90 q 4 -14 8 0 q 4 14 8 0"/>
+    <path d="M218 90 q 4 -10 8 0 q 4 10 8 0"/>
+    <path d="M248 90 q 4 -18 8 0 q 4 18 8 0"/>
+  </g>
+
+  <!-- 右下：学员头像 -->
+  <circle cx="430" cy="222" r="26" fill="none" stroke="#E85C62" stroke-width="2"/>
+  <circle cx="422" cy="216" r="3" fill="#E85C62"/>
+  <circle cx="438" cy="216" r="3" fill="#E85C62"/>
+  <path d="M423 230 q 7 6 14 0" stroke="#E85C62" stroke-width="2" stroke-linecap="round" fill="none"/>
+
+  <!-- 学员应对气泡 -->
+  <path d="M390 146 h -140 a 12 12 0 0 0 -12 12 v 44 a 12 12 0 0 0 12 12 H 320 l 16 14 v -14 h 54 a 12 12 0 0 0 12 -12 V 158 a 12 12 0 0 0 -12 -12 z" fill="#E85C62" fill-opacity="0.14" stroke="#E85C62" stroke-opacity="0.7"/>
+  <!-- 气泡内文字线 -->
+  <g stroke="#F2F4F8" stroke-opacity="0.5" stroke-width="3" stroke-linecap="round">
+    <path d="M268 170 h 90"/>
+    <path d="M268 186 h 110"/>
+    <path d="M268 202 h 70"/>
+  </g>
+
+  <!-- 中央对抗闪电 -->
+  <path d="M266 118 l -10 24 h 13 l -9 22" stroke="#E85C62" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke-opacity="0.85"/>
+</svg>

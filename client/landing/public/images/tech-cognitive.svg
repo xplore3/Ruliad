@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="480" viewBox="0 0 480 480" fill="none">
+  <!-- 脑形轮廓 -->
+  <path d="M240 90 C 165 90 115 145 115 215 C 115 268 145 305 190 325 L 190 375 L 290 375 L 290 325 C 335 305 365 268 365 215 C 365 145 315 90 240 90 Z" stroke="#E85C62" stroke-opacity="0.55" stroke-width="2.5" fill="#E85C62" fill-opacity="0.04"/>
+
+  <!-- 内部认知网络 -->
+  <g stroke="#E85C62" stroke-opacity="0.4" stroke-width="1.5">
+    <path d="M200 180 L 285 165"/>
+    <path d="M200 180 L 240 235"/>
+    <path d="M285 165 L 240 235"/>
+    <path d="M240 235 L 175 255"/>
+    <path d="M240 235 L 305 250"/>
+    <path d="M240 235 L 240 300"/>
+    <path d="M175 255 L 240 300"/>
+    <path d="M305 250 L 240 300"/>
+  </g>
+  <g>
+    <circle cx="200" cy="180" r="6" fill="#E85C62"/>
+    <circle cx="285" cy="165" r="6" fill="#E85C62"/>
+    <circle cx="240" cy="235" r="7" fill="#E85C62"/>
+    <circle cx="175" cy="255" r="5" fill="#34D399"/>
+    <circle cx="305" cy="250" r="5" fill="#34D399"/>
+    <circle cx="240" cy="300" r="5" fill="#34D399"/>
+  </g>
+
+  <!-- 外部思维脉冲 -->
+  <g stroke="#E85C62" stroke-opacity="0.2" stroke-width="1.5" fill="none">
+    <path d="M150 62 C 180 42, 300 42, 330 62"/>
+    <path d="M120 42 C 170 12, 310 12, 360 42"/>
+  </g>
+
+  <!-- 底部：感知-判断-决策-反馈 四阶段 -->
+  <g>
+    <circle cx="180" cy="424" r="4" fill="#3A4666"/>
+    <circle cx="220" cy="424" r="4" fill="#5A688A"/>
+    <circle cx="260" cy="424" r="4" fill="#E85C62" fill-opacity="0.8"/>
+    <circle cx="300" cy="424" r="4" fill="#34D399" fill-opacity="0.8"/>
+    <path d="M184 424 H 216 M224 424 H 256 M264 424 H 296" stroke="#3A4666"/>
+    <path d="M296 424 l -4 -3 m 4 3 l -3 4" stroke="#34D399" stroke-opacity="0.8" stroke-linecap="round" transform="translate(9 0)"/>
+  </g>
+</svg>

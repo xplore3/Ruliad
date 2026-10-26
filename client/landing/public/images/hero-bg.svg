@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" fill="none">
+  <defs>
+    <radialGradient id="hGlowA" cx="0.72" cy="0.28" r="0.55">
+      <stop offset="0" stop-color="#E85C62" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#E85C62" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="hGlowB" cx="0.16" cy="0.74" r="0.5">
+      <stop offset="0" stop-color="#34D399" stop-opacity="0.1"/>
+      <stop offset="1" stop-color="#34D399" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="hDots" width="34" height="34" patternUnits="userSpaceOnUse">
+      <circle cx="1.5" cy="1.5" r="1.1" fill="#33405E" fill-opacity="0.55"/>
+    </pattern>
+    <linearGradient id="hFlow" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#E85C62" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#E85C62" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#E85C62" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1440" height="900" fill="url(#hDots)"/>
+  <rect width="1440" height="900" fill="url(#hGlowA)"/>
+  <rect width="1440" height="900" fill="url(#hGlowB)"/>
+
+  <!-- 神经网络连线 -->
+  <g stroke="#3A4666" stroke-opacity="0.55" stroke-width="1">
+    <path d="M170 210 C 400 150, 560 330, 830 270 S 1210 190, 1330 320"/>
+    <path d="M110 640 C 380 700, 520 520, 780 560 S 1160 640, 1330 520"/>
+    <path d="M830 270 L 780 560"/>
+    <path d="M450 390 C 560 420, 650 470, 780 560"/>
+    <path d="M170 210 L 450 390"/>
+    <path d="M1330 320 L 1180 470"/>
+  </g>
+
+  <!-- 认知流线 -->
+  <path d="M0 450 C 300 380, 620 530, 920 440 S 1320 350, 1440 415" stroke="url(#hFlow)" stroke-width="1.6"/>
+
+  <!-- 节点 -->
+  <g>
+    <circle cx="830" cy="270" r="5" fill="#E85C62"/>
+    <circle cx="830" cy="270" r="12" stroke="#E85C62" stroke-opacity="0.35" fill="none"/>
+    <circle cx="170" cy="210" r="4" fill="#5A688A"/>
+    <circle cx="450" cy="390" r="4" fill="#5A688A"/>
+    <circle cx="1330" cy="320" r="4" fill="#5A688A"/>
+    <circle cx="780" cy="560" r="5" fill="#34D399"/>
+    <circle cx="780" cy="560" r="11" stroke="#34D399" stroke-opacity="0.3" fill="none"/>
+    <circle cx="110" cy="640" r="3.5" fill="#5A688A"/>
+    <circle cx="1330" cy="520" r="3.5" fill="#E85C62" fill-opacity="0.75"/>
+    <circle cx="1180" cy="470" r="3.5" fill="#5A688A"/>
+    <circle cx="620" cy="300" r="2.5" fill="#5A688A" fill-opacity="0.7"/>
+    <circle cx="1000" cy="580" r="2.5" fill="#5A688A" fill-opacity="0.7"/>
+    <circle cx="520" cy="700" r="2.5" fill="#5A688A" fill-opacity="0.5"/>
+  </g>
+</svg>

@@ -1,0 +1,14 @@
+node_modules
+dist
+*.log
+.env
+.env.local
+.env.*.local
+.DS_Store
+uploads
+# 对练录像本地存储（VIDEO_STORAGE_DIR 默认值）
+data/videos
+*.tsbuildinfo
+*.db
+*.db-journal
+.turbo

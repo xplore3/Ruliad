@@ -1,0 +1,39 @@
+{
+  "name": "@grasp-mvp/api-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "api-gateway": "./dist/server.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node --env-file-if-exists=.env dist/server.js",
+    "seed": "pnpm build && node --env-file-if-exists=.env dist/seed-demo.js",
+    "test": "vitest run --passWithNoTests",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.2.0",
+    "@fastify/multipart": "^9.0.3",
+    "@fastify/swagger": "^9.5.0",
+    "@fastify/swagger-ui": "^5.2.2",
+    "@fastify/websocket": "^11.0.2",
+    "@grasp-mvp/core": "workspace:*",
+    "@grasp-mvp/infra": "workspace:*",
+    "@grasp-mvp/llm-gateway": "workspace:*",
+    "@grasp-mvp/role-engine": "workspace:*",
+    "@grasp-mvp/scoring-engine": "workspace:*",
+    "@grasp-mvp/speech-gateway": "workspace:*",
+    "fastify": "^5.3.0",
+    "livekit-server-sdk": "^2.8.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.10",
+    "typescript": "^5.8.0",
+    "vitest": "^3.0.0"
+  }
+}

@@ -1,0 +1,975 @@
+import type { SeedData } from './store.js';
+import { hashPassword } from './password.js';
+
+const TENANT = 'tenant-demo';
+
+/** 华东一区考核名单 23 人（5 名主管团队成员 + 18 名新人班学员） */
+export const Q3_ROSTER_USER_IDS = [
+  'user-trainee-1',
+  'user-trainee-2',
+  'user-trainee-3',
+  'user-trainee-4',
+  'user-trainee-5',
+  ...Array.from({ length: 18 }, (_, i) => `user-new-${String(i + 1).padStart(2, '0')}`),
+];
+
+const NEWBIE_NAMES = [
+  '陈晨',
+  '李想',
+  '王雪',
+  '张帆',
+  '刘畅',
+  '杨帆',
+  '黄睿',
+  '周洁',
+  '吴迪',
+  '郑楠',
+  '孙阳',
+  '马悦',
+  '朱琳',
+  '胡波',
+  '郭静',
+  '林涛',
+  '高翔',
+  '罗成',
+];
+
+/**
+ * 演示种子数据：医药行业 AI 销售陪练场景（对齐 docs/*.png 设计稿）。
+ * - 5 个大区组织；华东一区含主管团队（5 人）、新人班（18 人）、直营二组（批量用户）
+ * - 6 个核心技能点 + 1 个锁定技能点（多方决策链拆解）
+ * - 3 个客户角色 / 4 个场景 / 1 条新人学习路径 / 4 个考核窗口
+ * 所有 id 使用稳定字符串，可重复执行不产生差异。
+ * 所有种子用户密码统一为 '123456'（scrypt 哈希，随机 salt，每次构建不同属正常）。
+ */
+export function buildSeedData(): SeedData {
+  const passwordHash = hashPassword('123456');
+
+  const trainee = (
+    id: string,
+    name: string,
+    username: string,
+    orgId: string,
+    teamId?: string
+  ) => ({
+    id,
+    tenantId: TENANT,
+    orgId,
+    ...(teamId ? { teamId } : {}),
+    name,
+    role: 'trainee' as const,
+    username,
+    passwordHash,
+  });
+
+  // 每个大区的批量学员（承载组织×技能点基线考核数据）
+  const bulkOrgs = [
+    { orgId: 'org-hd1', teamId: 'team-hd1-a', key: 'hd1' },
+    { orgId: 'org-hd2', teamId: 'team-hd2-a', key: 'hd2' },
+    { orgId: 'org-hb', teamId: 'team-hb-a', key: 'hb' },
+    { orgId: 'org-hn', teamId: 'team-hn-a', key: 'hn' },
+    { orgId: 'org-xb', teamId: 'team-xb-a', key: 'xb' },
+  ];
+  const bulkUsers = bulkOrgs.flatMap(({ orgId, teamId, key }) =>
+    Array.from({ length: 10 }, (_, i) =>
+      trainee(
+        `user-bulk-${key}-${String(i + 1).padStart(2, '0')}`,
+        `${key.toUpperCase()} 学员 ${String(i + 1).padStart(2, '0')}`,
+        `bulk-${key}-${String(i + 1).padStart(2, '0')}`,
+        orgId,
+        teamId
+      )
+    )
+  );
+  // POC 对照组（未参训）
+  const controlUsers = Array.from({ length: 10 }, (_, i) =>
+    trainee(
+      `user-ctrl-${String(i + 1).padStart(2, '0')}`,
+      `对照组学员 ${String(i + 1).padStart(2, '0')}`,
+      `ctrl-${String(i + 1).padStart(2, '0')}`,
+      'org-hd2',
+      'team-hd2-b'
+    )
+  );
+
+  // ── 批量生成 60+ 个陪练员（覆盖多行业 / 多角色 / 多难度） ──
+  // 优先级排序：保险客户 → 教育家长 → 软件采购 → 金融客户 → 医药医生 → 奢侈品 → 其他B2B
+  const INDUSTRY_ROLES: Array<{
+    industry: string;
+    role: string;
+    occupation: string;
+    names: string[];
+    bgs: string[];
+    tagsList: string[][];
+    targets: string[];
+  }> = [
+    // ══ 第一优先级：保险客户 ══
+    {
+      industry: '保险',
+      role: '客户',
+      occupation: '保险客户',
+      names: ['孟建国', '冯桂英', '蒋文昊', '薛雅琴', '魏志强'],
+      bgs: ['中年家庭支柱，38岁，保障意识强但预算有限；需要性价比高的综合方案，对分红险收益敏感。', '退休阿姨，65岁，健康焦虑型；热衷重疾险但担心保费倒挂，容易被亲情牌打动。', '年轻白领，28岁，保险意识弱；需要用风险场景教育引发需求，对数字化服务接受度高。', '企业主夫人，42岁，高端医疗需求；关注私立医院直付与海外就医，对服务体验要求极高。', '二胎妈妈，35岁，家庭保障型；对少儿险和教育金有强烈需求，偏好从朋友口碑了解产品。'],
+      tagsList: [['预算敏感', '重保障'], ['健康焦虑', '重情感'], ['场景驱动', '数字化'], ['高端需求', '重服务'], ['家庭型', '重口碑']],
+      targets: ['用高性价比方案满足预算型客户', '用情感共鸣缓解健康焦虑', '用风险场景唤醒保险意识', '用高端服务满足品质需求', '用家庭方案赢得信任'],
+    },
+    // ══ 第二优先级：教育培训机构家长客户 ══
+    {
+      industry: '教育',
+      role: '家长',
+      occupation: '培训机构家长',
+      names: ['韩文博', '沈丽娟', '高鹏飞', '田雨萌', '朱子轩'],
+      bgs: ['小学生家长，35岁，教育焦虑型；对效果数据敏感但反感过度营销，需要看到真实提分案例。', '初中生家长，40岁，升学导向型；关注名师资质与升学率，愿意为结果付费。', '高中生家长，45岁，理性决策型；重视课程体系完整性与性价比，喜欢对比多家机构。', '幼儿家长，30岁，体验驱动型；需要试听课验证教学风格与环境，对师资稳定性敏感。', '研学营家长，38岁，视野开拓型；关注课程体系国际化和安全保障，对价格不太敏感。'],
+      tagsList: [['焦虑型', '重效果'], ['升学型', '重师资'], ['理性型', '重体系'], ['体验型', '重感受', '视野型重品质']],
+      targets: ['用真实案例缓解教育焦虑', '用师资实力打动升学型家长', '用课程体系说服理性决策型', '用试听体验赢得体验型家长', '用国际化品质吸引视野开拓型'],
+    },
+    // ══ 第三优先级：企业软件采购 ══
+    {
+      industry: '软件',
+      role: '采购总监',
+      occupation: 'IT采购负责人',
+      names: ['顾长风', '陆婉清', '袁俊豪', '叶思琪', '廖海龙'],
+      bgs: ['大型企业IT采购总监，40岁，预算敏感但重视长期TCO；需要对比多家供应商才能决策。', '外企采购经理，35岁，流程标准化；对合规与SLA要求极高，谈判周期长。', '国企信息中心主任，50岁，合规优先；走招标流程，对私下承诺零容忍。', '互联网公司采购，30岁，速度优先；决策快但多变，喜欢用竞品压价。', '制造业IT经理，42岁，务实型；关注集成成本与上线周期，对PPT推销反感。'],
+      tagsList: [['TCO导向', '比价型'], ['合规优先', 'SLA导向'], ['招标型', '流程严'], ['速度型', '善变'], ['务实型', '集成导向']],
+      targets: ['用TCO优势打动比价型采购', '用SLA承诺赢得外企', '用合规流程服务国企', '用效率优势打动互联网公司', '用集成方案说服制造业'],
+    },
+    // ══ 第四优先级：金融理财客户 ══
+    {
+      industry: '金融',
+      role: '客户',
+      occupation: '理财客户',
+      names: ['顾明远', '罗淑芬', '蔡伟民', '曹丽萍', '邓文杰'],
+      bgs: ['高净值客户，50岁企业家，注重资产安全与稳健收益；对高风险产品零容忍。', '中产白领，35岁IT高管，有一定金融知识；喜欢自己研究后再做决策。', '退休教师，65岁，保守型投资者；对复杂术语反感，需要通俗易懂的解释。', '企业财务总监，40岁，专业型客户；对费率与隐性成本极度敏感。', '小企业主，45岁，现金流紧张；需要灵活的理财方案，对锁定期反感。'],
+      tagsList: [['资产安全', '稳健型'], ['专业型', '自主决策'], ['保守型', '厌恶术语'], ['费率敏感', '专业型'], ['现金流导向', '灵活需求']],
+      targets: ['用稳健方案打动保守型客户', '用专业数据赢得专业型客户', '用通俗语言建立信任', '用费率透明度打动财务型', '用灵活方案解决现金流痛点'],
+    },
+    // ══ 第五优先级：医药医生 ══
+    {
+      industry: '医药',
+      role: '医生',
+      occupation: '科室主任',
+      names: ['张博文', '李慧芳', '赵建国', '孙晓燕', '吴明远'],
+      bgs: ['三甲医院心血管科主任，严谨务实，重视临床数据与循证医学；时间紧张，反感冗长介绍。', '三甲医院肿瘤科主任，学术权威，对数据来源要求极高；不喜欢被推销式的沟通。', '三甲医院神经内科主任，研究型医生，关注最新文献；对夸大表述零容忍。', '三甲医院呼吸科主任，临床经验丰富，重视安全性；对副作用隐瞒行为极度反感。', '三甲医院消化科主任，注重患者获益与性价比平衡；喜欢直入主题的沟通。'],
+      tagsList: [['学术型', '时间紧张'], ['数据驱动', '严谨'], ['研究导向', '高冷'], ['安全第一', '直率'], ['务实', '效率优先']],
+      targets: ['用循证数据打动学术型主任', '用严谨表述赢得信任', '用最新文献引发兴趣', '用安全数据建立安心', '用性价比方案打动务实派'],
+    },
+    // ══ 第六优先级：奢侈品客户 ══
+    {
+      industry: '奢侈品',
+      role: '客户',
+      occupation: '高消费客户',
+      names: ['项雅诗', '上官龙', '欧阳文轩', '司徒慧', '公孙雯'],
+      bgs: ['时尚博主，28岁，追求限量款与联名款；注重包装仪式感与社交媒体曝光价值。', '企业家夫人，45岁，注重品牌传承与稀有度；需要专属顾问服务，对大众化推荐反感。', '富二代，22岁，热衷潮流与新品首发；互动社区感强的消费体验。', '外企高管，38岁，低调奢华型；重视材质与工艺细节，对品牌故事感兴趣。', '资深收藏家，55岁，关注保值与拍卖市场；需要专业的投资建议与鉴定服务。'],
+      tagsList: [['社交驱动', '追限量'], ['传承型', '重专属', '潮流型重首发'], ['低调奢华', '重工艺'], ['收藏型', '重保值']],
+      targets: ['用稀缺性与社交价值打动博主', '用专属服务赢得高端客户', '用潮流新品吸引年轻客群', '用工艺故事打动低调奢华型', '用专业投资视角服务收藏家'],
+    },
+    // ══ 第七优先级：企业CFO ══
+    {
+      industry: '金融',
+      role: '企业客户',
+      occupation: '企业CFO',
+      names: ['林志远', '郑慧敏', '蔡国庆', '邓文豪', '韩雪梅'],
+      bgs: ['上市公司CFO，45岁，对融资成本极度敏感；需要看到详细的ROI计算。', '创业公司CFO，35岁，成长导向；愿意承担一定风险但需要清晰的退出路径。', '制造业CFO，50岁，稳健型；对供应链金融感兴趣但需要案例支撑。', '科技公司CFO，38岁，技术导向；喜欢用数据模型做决策。', '零售业CFO，42岁，季节性现金流波动大；需要灵活的授信方案。'],
+      tagsList: [['成本敏感', 'ROI导向'], ['成长型', '风险偏好'], ['稳健型', '案例驱动'], ['数据导向', '技术型'], ['季节性', '灵活需求']],
+      targets: ['用ROI计算打动上市公司CFO', '用退出路径赢得创业公司', '用行业案例说服制造业CFO', '用数据模型打动科技CFO', '用灵活授信解决零售业痛点'],
+    },
+    // ══ 第八优先级：医药采购 ══
+    {
+      industry: '医药',
+      role: '采购',
+      occupation: '采购科长',
+      names: ['周敏华', '郑国强', '王秀英', '刘德志', '陈丽娟'],
+      bgs: ['省级医院采购科长，集采合规导向，价格敏感；惯用竞品低价对比压价。', '市级医院采购科长，流程严格，重视资质与合规；对私下让利零容忍。', '区级医院采购科长，预算有限，注重性价比；决策前需多方比价。', '连锁医院集团采购总监，规模化采购思维，重视长期合作与返利机制。', '民营医院采购负责人，利润导向，灵活但多变；喜欢用拖延策略压价。'],
+      tagsList: [['价格敏感', '合规导向'], ['流程严格', '资质优先'], ['预算有限', '比价型'], ['规模化', '长期合作'], ['灵活', '善拖延']],
+      targets: ['用价值重述化解价格异议', '用合规资质赢得信任', '用性价比方案打动预算型', '用长期价值说服集团采购', '用紧迫感破解拖延策略'],
+    },
+    // ══ 第九优先级：B2B销售场景 ══
+    {
+      industry: '软件',
+      role: '技术负责人',
+      occupation: 'CTO',
+      names: ['程一鸣', '袁晓东', '萧文华', '段志远', '石慧敏'],
+      bgs: ['科技公司CTO，38岁，技术深度型；对PPT式推销反感，需要看到架构细节。', '传统企业IT总监，45岁，安全优先；对云方案有顾虑，重视数据主权。', '金融科技CTO，35岁，效率优先；技术选型快但对稳定性要求极高。', '制造业IT负责人，42岁，务实型；关注集成成本与迁移风险。', '零售企业CTO，40岁，增长导向；希望通过技术驱动业务增长。'],
+      tagsList: [['技术深度', '反感PPT'], ['安全优先', '数据主权'], ['效率优先', '稳定性'], ['务实型', '集成导向'], ['增长导向', '业务驱动']],
+      targets: ['用架构细节打动技术CTO', '用安全方案赢得传统企业', '用稳定性承诺打动金融科技', '用集成方案说服制造业', '用增长技术打动零售业'],
+    },
+    {
+      industry: '地产',
+      role: '企业客户',
+      occupation: '企业行政',
+      names: ['简志豪', '聂文静', '尤文斌', '柯丽琼', '颜浩天'],
+      bgs: ['500强企业行政总监，42岁，对办公选址要求高；需要看到长期成本对比。', '创业公司行政经理，32岁，预算有限；需要灵活的租赁方案。', '制造业行政负责人，48岁，务实型；关注通勤与配套设施。', '外企行政总监，38岁，标准高；对物业管理和商务配套要求极高。', '互联网公司行政，29岁，体验优先；注重办公环境的创新与灵活性。'],
+      tagsList: [['高要求', '长期成本'], ['预算有限', '灵活型'], ['务实', '配套导向'], ['高标准', '物业优先'], ['体验优先', '创新型']],
+      targets: ['用成本对比打动500强', '用灵活方案解决创业公司', '用配套优势说服制造业', '用高标准服务赢得外企', '用创新体验打动互联网公司'],
+    },
+    // ══ 第十优先级：电商商家 ══
+    {
+      industry: '电商',
+      role: '商家',
+      occupation: '电商商家',
+      names: ['邱明轩', '秦丽芳', '余国庆', '丁晓峰', '魏文豪'],
+      bgs: ['天猫大卖家，35岁，流量导向；对ROI极度敏感，需要看到转化数据。', '拼多多商家，30岁，价格敏感型；利润薄但对走量方案感兴趣。', '抖音电商商家，28岁，内容驱动型；关注短视频带货与直播能力。', '跨境电商卖家，32岁，物流导向；对仓储与配送成本敏感。', '传统品牌转型电商，42岁，品牌导向；需要看到品牌价值与渠道平衡。'],
+      tagsList: [['流量导向', 'ROI敏感'], ['价格敏感', '走量型'], ['内容驱动', '直播型'], ['物流导向', '成本敏感'], ['品牌导向', '渠道平衡']],
+      targets: ['用转化数据打动流量型卖家', '用走量方案说服价格型', '用直播能力打动内容型', '用物流方案解决跨境痛点', '用品牌价值打动传统品牌'],
+    },
+    // ══ 第十一优先级：地产购房者 ══
+    {
+      industry: '地产',
+      role: '购房者',
+      occupation: '购房客户',
+      names: ['方圆', '叶志刚', '白晓梅', '邹文博', '龙慧珊'],
+      bgs: ['刚需购房者，30岁，预算有限但对学区有要求；犹豫不决，需要多方对比。', '改善型购房者，40岁，对品质有要求但价格敏感；喜欢用竞品压价。', '投资型购房者，45岁，关注升值潜力与租金回报；对空置率敏感。', '首套刚需，28岁，资金紧张；需要低首付方案但对交付时间有顾虑。', '高端改善型，50岁，注重社区品质与物业服务；对细节极度挑剔。'],
+      tagsList: [['刚需型', '学区导向'], ['改善型', '价格敏感'], ['投资型', '回报导向'], ['首套', '低预算'], ['高端型', '品质挑剔']],
+      targets: ['用学区优势打动刚需客', '用品质对比说服改善型', '用投资回报打动投资客', '用低首付方案解决首套痛点', '用细节品质打动高端客'],
+    },
+  ];
+
+  const VOICE_POOL_M = ['longxiaocheng_v2', 'longtian_v2', 'longhua_v2', 'longjie_v2', 'longshu_v2'];
+  const VOICE_POOL_F = ['longxiaoxia_v2', 'longcheng_v2', 'longjing_v2', 'longyue_v2', 'longfei_v2'];
+
+  const generatedPersonas = INDUSTRY_ROLES.flatMap((tmpl, gi) =>
+    tmpl.names.map((name, ni) => {
+      const idx = gi * 5 + ni;
+      const isMale = ni % 2 === 0;
+      const difficulty = ni === 0 ? 1 : ni <= 2 ? 2 : 3;
+      return {
+        id: `persona-gen-${String(idx + 1).padStart(2, '0')}`,
+        tenantId: TENANT,
+        name,
+        background: tmpl.bgs[ni],
+        age: 30 + ni * 5 + gi * 2,
+        occupation: tmpl.occupation,
+        voiceProfile: { voice: isMale ? VOICE_POOL_M[ni % 5] : VOICE_POOL_F[ni % 5] },
+        elementIds: [],
+        behaviorBands: [
+          { minArousal: 0, maxArousal: 0.4, key: 'calm', instruction: '正常沟通，愿意听学员介绍' },
+          { minArousal: 0.4, maxArousal: 0.7, key: 'guarded', instruction: '开始质疑，提出反对意见' },
+          { minArousal: 0.7, maxArousal: 1.0, key: 'annoyed', instruction: '不耐烦，要求结束对话或直接拒绝' },
+        ],
+        knowledgeBoundary: {
+          mustNotKnow: ['学员所在公司的内部销售政策', '学员的业绩指标与提成'],
+          loadedKnowledge: ['同行业竞品的基本信息与价格区间'],
+        },
+        sourceMeta: {
+          archetype: `${tmpl.industry} · ${tmpl.occupation}`,
+          recordings: 3 + ni,
+          recordingsKind: '模拟构建',
+          lastCalibrated: '2026-0' + (1 + (ni % 6)),
+          practiceCount: 100 + idx * 15,
+          calibrationStatus: idx % 3 === 0 ? '待校准' : '已校准',
+        },
+        version: 1,
+      };
+    })
+  );
+
+  return {
+    organizations: [
+      { id: 'org-hd1', tenantId: TENANT, name: '华东一区' },
+      { id: 'org-hd2', tenantId: TENANT, name: '华东二区' },
+      { id: 'org-hb', tenantId: TENANT, name: '华北大区' },
+      { id: 'org-hn', tenantId: TENANT, name: '华南大区' },
+      { id: 'org-xb', tenantId: TENANT, name: '西部大区' },
+    ],
+    teams: [
+      { id: 'team-hd1', orgId: 'org-hd1', name: '华东一区·直营一组', supervisorId: 'user-supervisor-1' },
+      { id: 'team-hd1-new', orgId: 'org-hd1', name: '华东一区·新人班' },
+      { id: 'team-hd1-a', orgId: 'org-hd1', name: '华东一区·直营二组' },
+      { id: 'team-hd2-a', orgId: 'org-hd2', name: '华东二区·直营一组' },
+      { id: 'team-hd2-b', orgId: 'org-hd2', name: '华东二区·对照组（POC·未参训）' },
+      { id: 'team-hb-a', orgId: 'org-hb', name: '华北大区·直营一组' },
+      { id: 'team-hn-a', orgId: 'org-hn', name: '华南大区·直营一组' },
+      { id: 'team-xb-a', orgId: 'org-xb', name: '西部大区·直营一组' },
+    ],
+    users: [
+      trainee('user-trainee-1', '林小满', 'trainee1', 'org-hd1', 'team-hd1'),
+      trainee('user-trainee-2', '赵川', 'trainee2', 'org-hd1', 'team-hd1'),
+      trainee('user-trainee-3', '沈亦', 'trainee3', 'org-hd1', 'team-hd1'),
+      trainee('user-trainee-4', '何薇', 'trainee4', 'org-hd1', 'team-hd1'),
+      trainee('user-trainee-5', '周迪', 'trainee5', 'org-hd1', 'team-hd1'),
+      ...NEWBIE_NAMES.map((name, i) =>
+        trainee(
+          `user-new-${String(i + 1).padStart(2, '0')}`,
+          name,
+          `trainee${String(i + 6).padStart(2, '0')}`,
+          'org-hd1',
+          'team-hd1-new'
+        )
+      ),
+      ...bulkUsers,
+      ...controlUsers,
+      {
+        id: 'user-admin-1',
+        tenantId: TENANT,
+        orgId: 'org-hd1',
+        name: '培训管理员',
+        role: 'admin',
+        username: 'admin1',
+        passwordHash,
+      },
+      {
+        id: 'user-supervisor-1',
+        tenantId: TENANT,
+        orgId: 'org-hd1',
+        teamId: 'team-hd1',
+        name: '王主管',
+        role: 'supervisor',
+        username: 'supervisor1',
+        passwordHash,
+      },
+      {
+        id: 'user-executive-1',
+        tenantId: TENANT,
+        orgId: 'org-hd1',
+        name: '陈总',
+        role: 'executive',
+        username: 'executive1',
+        passwordHash,
+      },
+    ],
+    methodologyConfigs: [
+      {
+        id: 'methodology-demo',
+        tenantId: TENANT,
+        name: '医药代表合规营销方法论',
+        skillWeights: {
+          'sp-icebreak': 1,
+          'sp-need': 1,
+          'sp-value': 1,
+          'sp-objection': 1,
+          'sp-compliance': 1,
+          'sp-closing': 1,
+        },
+        redlinePhrases: ['保证疗效', '根治', '所有患者都能达标', '绝对有效', '无任何副作用', '治愈率'],
+        fillerWords: ['其实', '那个', '就是说', '然后', '嗯'],
+        passScore: 75,
+      },
+    ],
+    elements: [
+      {
+        id: 'elem-e-academic',
+        type: 'E',
+        layer: 'tenant',
+        tenantId: TENANT,
+        name: '学术警觉',
+        version: 1,
+        content: '对夸大疗效、无数据支撑的表述高度敏感，听到绝对化用词会明显反感并追问证据。',
+        dynamics: {
+          triggers: [
+            {
+              id: 'trig-absolutize',
+              keywords: ['所有患者', '保证', '根治', '绝对', '一定能'],
+              escalation: 0.35,
+              description: '绝对化/夸大表述触发强烈反感',
+            },
+            {
+              id: 'trig-data',
+              keywords: ['数据', '研究', '试验', '文献'],
+              escalation: 0.1,
+              description: '数据类话题触发追问出处',
+            },
+          ],
+          decayPerTurn: 0.08,
+          baseArousal: 0.35,
+        },
+      },
+      {
+        id: 'elem-c-evidence',
+        type: 'C',
+        layer: 'tenant',
+        tenantId: TENANT,
+        name: '循证医学信念',
+        version: 1,
+        content: '只信任 III 期临床研究、指南推荐与真实世界数据，对厂家自建数据持怀疑态度。',
+      },
+      {
+        id: 'elem-b-busy',
+        type: 'B',
+        layer: 'tenant',
+        tenantId: TENANT,
+        name: '门诊高压节奏',
+        version: 1,
+        content: '门诊间隙接待，时间以分钟计，开场 30 秒无价值信息即结束对话。',
+      },
+      {
+        id: 'elem-e-price',
+        type: 'E',
+        layer: 'tenant',
+        tenantId: TENANT,
+        name: '价格戒备',
+        version: 1,
+        content: '集采背景下对价格高度敏感，听到报价先压价，习惯用竞品低价做对比。',
+        dynamics: {
+          triggers: [
+            {
+              id: 'trig-quote',
+              keywords: ['价格', '报价', '贵', '预算', '集采'],
+              escalation: 0.25,
+              description: '价格类话题触发戒备与压价',
+            },
+          ],
+          decayPerTurn: 0.06,
+          baseArousal: 0.4,
+        },
+      },
+      {
+        id: 'elem-c-gpo',
+        type: 'C',
+        layer: 'tenant',
+        tenantId: TENANT,
+        name: '集采合规导向',
+        version: 1,
+        content: '采购决策以集采目录与合规流程为先，私下让利承诺会被直接拒绝并质疑动机。',
+      },
+      {
+        id: 'elem-b-profit',
+        type: 'B',
+        layer: 'tenant',
+        tenantId: TENANT,
+        name: '利润导向决策',
+        version: 1,
+        content: '关注毛利与动销速度，决策快但多变，拿不定主意时用「再考虑一下」拖延。',
+      },
+    ],
+    personaConfigs: [
+      {
+        id: 'persona-chen',
+        tenantId: TENANT,
+        name: '孟建国',
+        background: '中年家庭支柱，38岁工程师，保障意识强但预算有限；需要性价比高的综合保障方案，对分红险收益极为敏感。',
+        age: 38,
+        occupation: '保险客户',
+        voiceProfile: { voice: 'longxiaocheng_v2' },
+        elementIds: [],
+        behaviorBands: [
+          { minArousal: 0, maxArousal: 0.4, key: 'calm', instruction: '愿意了解，主动询问保障范围与保费' },
+          { minArousal: 0.4, maxArousal: 0.7, key: 'guarded', instruction: '开始对比其他产品，提出收益质疑' },
+          { minArousal: 0.7, maxArousal: 1.0, key: 'annoyed', instruction: '认为不划算，表示再考虑考虑或直接拒绝' },
+        ],
+        knowledgeBoundary: {
+          mustNotKnow: ['学员所在公司的内部销售政策', '学员的业绩指标与提成'],
+          loadedKnowledge: ['市面主流保险产品的保费区间与保障范围'],
+        },
+        sourceMeta: {
+          archetype: '保险客户 · 预算保障型',
+          recordings: 10,
+          recordingsKind: '模拟构建',
+          lastCalibrated: '2026-08',
+          practiceCount: 520,
+          calibrationStatus: '已校准',
+        },
+        version: 1,
+      },
+      {
+        id: 'persona-liu',
+        tenantId: TENANT,
+        name: '韩文博',
+        background: '小学生家长，35岁，教育焦虑型；对培训效果数据敏感但反感过度营销，需要看到真实提分案例才愿付费。',
+        age: 35,
+        occupation: '培训机构家长',
+        voiceProfile: { voice: 'longxiaoxia_v2' },
+        elementIds: [],
+        behaviorBands: [
+          { minArousal: 0, maxArousal: 0.4, key: 'calm', instruction: '愿意试听，关注师资与课程体系' },
+          { minArousal: 0.4, maxArousal: 0.7, key: 'guarded', instruction: '开始对比其他机构，质疑效果承诺' },
+          { minArousal: 0.7, maxArousal: 1.0, key: 'annoyed', instruction: '认为是在焦虑营销，直接拒绝沟通' },
+        ],
+        knowledgeBoundary: {
+          mustNotKnow: ['学员所在机构的内部运营数据'],
+          loadedKnowledge: ['本地培训机构的口碑与价格区间'],
+        },
+        sourceMeta: {
+          archetype: '教育培训家长 · 效果驱动型',
+          recordings: 8,
+          recordingsKind: '模拟构建',
+          lastCalibrated: '2026-07',
+          practiceCount: 380,
+          calibrationStatus: '已校准',
+        },
+        version: 1,
+      },
+      {
+        id: 'persona-zhao',
+        tenantId: TENANT,
+        name: '顾长风',
+        background: '大型企业IT采购总监，40岁，预算敏感但重视长期TCO；需要对比多家供应商才能决策，对PPT推销反感。',
+        age: 40,
+        occupation: 'IT采购负责人',
+        voiceProfile: { voice: 'longtian_v2' },
+        elementIds: [],
+        behaviorBands: [
+          { minArousal: 0, maxArousal: 0.4, key: 'calm', instruction: '按流程沟通，要求提供TCO对比与资质文件' },
+          { minArousal: 0.4, maxArousal: 0.7, key: 'guarded', instruction: '开始用竞品对比压价，要求更多优惠' },
+          { minArousal: 0.7, maxArousal: 1.0, key: 'annoyed', instruction: '质疑性价比，终止谈判流程' },
+        ],
+        knowledgeBoundary: {
+          mustNotKnow: ['学员公司的内部底价与折扣权限'],
+          loadedKnowledge: ['同行业软件的采购价格区间与SLA标准'],
+        },
+        sourceMeta: {
+          archetype: '软件采购 · TCO导向型',
+          recordings: 6,
+          recordingsKind: '模拟构建',
+          lastCalibrated: '2026-06',
+          practiceCount: 290,
+          calibrationStatus: '已校准',
+        },
+        version: 1,
+      },
+      ...generatedPersonas,
+    ],
+    skillPoints: [
+      {
+        id: 'sp-icebreak',
+        tenantId: TENANT,
+        name: '破冰',
+        description: '开场 30 秒建立信任并赢得对话时间',
+        assetName: '张伟三步破冰法',
+        author: '张伟（华东销冠）',
+        source: '来自 张伟（华东销冠）',
+        practiceCount: 1284,
+        achievementRate: 41,
+        badge: '已验证',
+      },
+      {
+        id: 'sp-need',
+        tenantId: TENANT,
+        name: '需求挖掘',
+        description: '通过开放式提问识别医生真实诊疗需求',
+        assetName: '需求追问四步曲',
+        author: '陈静（华南销冠）',
+        source: '来自 陈静（华南销冠）',
+        practiceCount: 388,
+        achievementRate: 35,
+        badge: '已验证',
+      },
+      {
+        id: 'sp-value',
+        tenantId: TENANT,
+        name: '价值传递',
+        description: '用价值重述化解价格异议，不直接让价',
+        assetName: '价值重述应对价格异议',
+        author: '李蔓（大区亚军）',
+        source: '来自 李蔓（大区亚军）',
+        practiceCount: 962,
+        achievementRate: 33,
+        badge: '观察中',
+      },
+      {
+        id: 'sp-objection',
+        tenantId: TENANT,
+        name: '异议处理',
+        description: '共情澄清后回应客户异议，不急于反驳',
+        assetName: '异议共情澄清法',
+        author: '李蔓（大区亚军）',
+        source: '来自 李蔓（大区亚军）',
+        practiceCount: 356,
+        achievementRate: 26,
+        badge: '观察中',
+      },
+      {
+        id: 'sp-compliance',
+        tenantId: TENANT,
+        name: '合规表达',
+        description: '严格按获批适应症与证据等级表述，不越界',
+        assetName: '适应症合规表达',
+        author: '医学部',
+        source: '来自 医学部话术手册 §3.2',
+        practiceCount: 610,
+        achievementRate: 29,
+        badge: '已验证',
+      },
+      {
+        id: 'sp-closing',
+        tenantId: TENANT,
+        name: '推进成交',
+        description: '识别拖延信号，确认顾虑归属并给出下一步小承诺',
+        assetName: '再考虑一下的推进法',
+        author: '王岩（KA 总监）',
+        source: '来自 王岩（KA 总监）',
+        practiceCount: 731,
+        achievementRate: 22,
+        badge: '待复审',
+      },
+      {
+        id: 'sp-chain',
+        tenantId: TENANT,
+        name: '多方决策链',
+        description: '拆解科室/药剂科/采购多方决策链并各个击破',
+        assetName: '多方决策链拆解',
+        author: '周迪',
+        source: '来自 待解锁',
+        practiceCount: 402,
+        badge: '观察中',
+        locked: true,
+      },
+      {
+        id: 'sp-empathy',
+        tenantId: TENANT,
+        name: '倾听共情',
+        description: '识别客户情绪并给予共情回应，不急于解决问题',
+        assetName: '共情式倾听回应',
+        author: '王岩（KA 总监）',
+        source: '来自 王岩（KA 总监）',
+        practiceCount: 520,
+        achievementRate: 31,
+        badge: '观察中',
+      },
+      {
+        id: 'sp-clarity',
+        tenantId: TENANT,
+        name: '表达清晰',
+        description: '用简洁结构化语言传递信息，避免冗余词和模糊表达',
+        assetName: '简洁结构化表达',
+        author: '李蔓（大区亚军）',
+        source: '来自 李蔓（大区亚军）',
+        practiceCount: 445,
+        achievementRate: 28,
+        badge: '观察中',
+      },
+    ],
+    scenarios: [
+      {
+        id: 'scenario-first-visit',
+        tenantId: TENANT,
+        name: '首访破冰·门诊主任',
+        personaConfigId: 'persona-chen',
+        skillPointIds: ['sp-icebreak', 'sp-need'],
+        successCriteria: { passScore: 75 },
+        durationMinutes: 10,
+        difficulty: 2,
+        coverageTopics: ['开场自我介绍与时间承诺', '循证证据引用', '适应症合规表述', '异议首反应', '下一步约定'],
+        personaTitle: '冷淡型客户，时间只给 8 分钟',
+        methodology: '张伟三步破冰法 · L2',
+      },
+      {
+        id: 'scenario-price-objection',
+        tenantId: TENANT,
+        name: '价格异议·采购科长',
+        personaConfigId: 'persona-liu',
+        skillPointIds: ['sp-value', 'sp-objection'],
+        successCriteria: { passScore: 70 },
+        durationMinutes: 10,
+        difficulty: 2,
+        coverageTopics: ['价值重述', '价格异议首反应', '合规让利边界'],
+        personaTitle: '预算收紧，压价强硬',
+        methodology: '价值重述应对价格异议 · L1',
+      },
+      {
+        id: 'scenario-push-forward',
+        tenantId: TENANT,
+        name: '「再考虑一下」推进',
+        personaConfigId: 'persona-zhao',
+        skillPointIds: ['sp-closing', 'sp-objection'],
+        successCriteria: { passScore: 75 },
+        durationMinutes: 12,
+        difficulty: 3,
+        coverageTopics: ['顾虑归属确认', '小承诺推进', '时间节点约定'],
+        personaTitle: '态度温和但迟迟不表态',
+        methodology: '再考虑一下的推进法 · L2',
+      },
+      {
+        id: 'scenario-compliance',
+        tenantId: TENANT,
+        name: '合规适应症表达',
+        personaConfigId: 'persona-chen',
+        skillPointIds: ['sp-compliance'],
+        successCriteria: { passScore: 80 },
+        durationMinutes: 10,
+        difficulty: 3,
+        coverageTopics: ['适应症边界', '证据等级说明', '禁忌提示'],
+        personaTitle: '循证严格，追问数据出处',
+        methodology: '适应症合规表达 · L3',
+      },
+    ],
+    learningPaths: [
+      {
+        id: 'path-newbie',
+        tenantId: TENANT,
+        name: '新人首月认证包',
+        items: [
+          { scenarioId: 'scenario-first-visit', passScore: 75, order: 1 },
+          { scenarioId: 'scenario-price-objection', passScore: 70, order: 2 },
+          { scenarioId: 'scenario-push-forward', passScore: 75, order: 3 },
+          { scenarioId: 'scenario-compliance', passScore: 80, order: 4 },
+        ],
+        assignedTeamIds: ['team-hd1-new'],
+      },
+    ],
+    scoreItemDefs: [
+      {
+        id: 'item-icebreak-1',
+        tenantId: TENANT,
+        skillPointId: 'sp-icebreak',
+        name: '开场与时间承诺',
+        behaviorAnchor: '开场 30 秒内完成自我介绍并给出明确时间承诺',
+        judgePrompt:
+          '请判定学员的开场破冰质量（自我介绍、时间承诺、引发兴趣）。根据对话记录选择最匹配的档位，按 JSON 输出 levelKey、quote、quoteTurnSeq、rationale。',
+        weight: 1,
+        levels: [
+          { key: 'poor', label: '差', score: 30, description: '无自我介绍或冗长无重点' },
+          { key: 'ok', label: '中', score: 60, description: '有介绍但无时间承诺或吸引力不足' },
+          { key: 'good', label: '好', score: 90, description: '简洁介绍 + 时间承诺 + 悬念式开场' },
+        ],
+        layer: 'company',
+        isObservation: false,
+      },
+      {
+        id: 'item-need-1',
+        tenantId: TENANT,
+        skillPointId: 'sp-need',
+        name: '开放式提问',
+        behaviorAnchor: '用开放式问题引导客户表达真实诊疗需求',
+        judgePrompt:
+          '请判定学员的提问质量。根据对话记录选择最匹配的档位，按 JSON 输出 levelKey、quote、quoteTurnSeq、rationale。',
+        weight: 1,
+        levels: [
+          { key: 'poor', label: '差', score: 30, description: '只顾介绍产品，基本不提问' },
+          { key: 'ok', label: '中', score: 60, description: '有提问但多为封闭式' },
+          { key: 'good', label: '好', score: 90, description: '开放式提问并追问细节' },
+        ],
+        layer: 'company',
+        isObservation: false,
+      },
+      {
+        id: 'item-value-1',
+        tenantId: TENANT,
+        skillPointId: 'sp-value',
+        name: '价值重述',
+        behaviorAnchor: '面对价格异议先重述价值，不直接让价',
+        judgePrompt:
+          '请判定学员面对价格异议时的价值重述质量。根据对话记录选择最匹配的档位，按 JSON 输出 levelKey、quote、quoteTurnSeq、rationale。',
+        weight: 1,
+        levels: [
+          { key: 'poor', label: '差', score: 30, description: '直接让价或与竞品拼价格' },
+          { key: 'ok', label: '中', score: 60, description: '有价值表述但空泛' },
+          { key: 'good', label: '好', score: 90, description: '价值重述具体、有数据支撑，稳住价格体系' },
+        ],
+        layer: 'company',
+        isObservation: false,
+      },
+      {
+        id: 'item-obj-1',
+        tenantId: TENANT,
+        skillPointId: 'sp-objection',
+        name: '异议首反应',
+        behaviorAnchor: '面对异议先共情澄清，不急于反驳或承诺',
+        judgePrompt:
+          '请判定学员面对客户异议时的首反应质量。根据对话记录选择最匹配的档位，按 JSON 输出 levelKey、quote、quoteTurnSeq、rationale。',
+        weight: 1,
+        levels: [
+          { key: 'poor', label: '差', score: 30, description: '直接反驳客户或做出违规承诺' },
+          { key: 'ok', label: '中', score: 60, description: '有回应但缺乏共情与澄清' },
+          { key: 'good', label: '好', score: 90, description: '先共情澄清再有针对性地回应' },
+        ],
+        layer: 'company',
+        isObservation: false,
+      },
+      {
+        id: 'item-obj-2',
+        tenantId: TENANT,
+        skillPointId: 'sp-objection',
+        name: '证据引用规范',
+        behaviorAnchor: '引用证据时说明研究类型、人群与数据出处',
+        judgePrompt:
+          '请判定学员引用临床证据的规范性。根据对话记录选择最匹配的档位，按 JSON 输出 levelKey、quote、quoteTurnSeq、rationale。',
+        weight: 1,
+        levels: [
+          { key: 'poor', label: '差', score: 30, description: '无数据或编造数据' },
+          { key: 'ok', label: '中', score: 60, description: '有数据但未说明出处与人群' },
+          { key: 'good', label: '好', score: 90, description: '研究类型、亚组人群、数据出处齐全' },
+        ],
+        layer: 'company',
+        isObservation: false,
+      },
+      {
+        id: 'item-comp-1',
+        tenantId: TENANT,
+        skillPointId: 'sp-compliance',
+        name: '适应症合规表述',
+        behaviorAnchor: '严格按获批适应症表述，不夸大、不越界',
+        judgePrompt:
+          '请判定学员的适应症表述合规性。根据对话记录选择最匹配的档位，按 JSON 输出 levelKey、quote、quoteTurnSeq、rationale。',
+        weight: 1,
+        levels: [
+          { key: 'poor', label: '差', score: 30, description: '夸大疗效或超适应症承诺' },
+          { key: 'ok', label: '中', score: 60, description: '表述基本合规但边界含糊' },
+          { key: 'good', label: '好', score: 90, description: '严格限定获批适应症并主动提示禁忌' },
+        ],
+        layer: 'company',
+        isObservation: false,
+      },
+      {
+        id: 'item-closing-1',
+        tenantId: TENANT,
+        skillPointId: 'sp-closing',
+        name: '小承诺推进',
+        behaviorAnchor: '面对拖延先确认顾虑归属，再给出下一步小承诺',
+        judgePrompt:
+          '请判定学员的推进表现。根据对话记录选择最匹配的档位，按 JSON 输出 levelKey、quote、quoteTurnSeq、rationale。',
+        weight: 1,
+        levels: [
+          { key: 'poor', label: '差', score: 30, description: '放任客户拖延或强行逼单' },
+          { key: 'ok', label: '中', score: 60, description: '有推进但未确认顾虑归属' },
+          { key: 'good', label: '好', score: 90, description: '确认顾虑归属并约定具体下一步与时间' },
+        ],
+        layer: 'company',
+        isObservation: false,
+      },
+    ],
+    goldenCases: [
+      {
+        id: 'golden-case-1',
+        name: '首访破冰标准示范（张伟）',
+        transcript: [
+          { seq: 1, speaker: 'persona', text: '你有什么事快说，我一会儿还有个会。' },
+          { seq: 2, speaker: 'trainee', text: '主任您好，我是××的小林，今天只用三分钟，跟您汇报一个新的降糖方案。' },
+          { seq: 3, speaker: 'persona', text: '又是新药？你们这类产品我看过太多了，数据都是自己做的吧。' },
+          { seq: 4, speaker: 'trainee', text: '主任，我不谈所有患者。III 期研究中在××亚组的达标率是 62%，这是研究摘要，您先看数据再判断。' },
+          { seq: 5, speaker: 'persona', text: '行，摘要放这儿吧。下次带上你们的医学部同事。' },
+          { seq: 6, speaker: 'trainee', text: '好的，我周四上午带医学部同事来拜访您，十分钟就够，您看方便吗？' },
+        ],
+        expected: [
+          { itemId: 'item-icebreak-1', levelKey: 'good' },
+          { itemId: 'item-obj-1', levelKey: 'good' },
+          { itemId: 'item-obj-2', levelKey: 'good' },
+        ],
+      },
+    ],
+    productKBs: [
+      {
+        id: 'kb-glucose',
+        tenantId: TENANT,
+        name: '降糖产品线话术手册',
+        version: 4,
+        effectiveAt: '2026-05-01T00:00:00.000Z',
+        entries: [
+          {
+            id: 'kb-faq-data',
+            kind: 'faq',
+            title: '「数据是你们自己做的吧」',
+            content: '最优应对：引第三方研究 + 邀医学部同行',
+            frequency: 38,
+          },
+          {
+            id: 'kb-faq-later',
+            kind: 'faq',
+            title: '「再考虑一下」',
+            content: '最优应对：推进法：确认顾虑归属 + 给下一步小承诺',
+            frequency: 31,
+          },
+          {
+            id: 'kb-faq-expensive',
+            kind: 'faq',
+            title: '「太贵了」',
+            content: '最优应对：价值重述四句式',
+            frequency: 27,
+          },
+          {
+            id: 'kb-kp-1',
+            kind: 'keypoint',
+            title: '核心卖点：亚组达标率',
+            content: 'III 期研究 ×× 亚组达标率 62%，引用时必须说明研究类型与人群。',
+          },
+          {
+            id: 'kb-red-1',
+            kind: 'redline',
+            title: '禁止绝对化疗效承诺',
+            content: '禁止使用「保证疗效」「所有患者都能达标」「根治」等绝对化表述。',
+          },
+          {
+            id: 'kb-red-2',
+            kind: 'redline',
+            title: '禁止超适应症推广',
+            content: '仅可围绕获批适应症沟通，超适应症内容一律不得主动提及。',
+          },
+          {
+            id: 'kb-comp-1',
+            kind: 'competitor',
+            title: '竞品 A 价格对比',
+            content: '竞品 A 集采中标价低约 15%，但亚组证据不足，应对以价值重述为主。',
+          },
+        ],
+      },
+    ],
+    examWindows: [
+      {
+        id: 'exam-window-l1',
+        tenantId: TENANT,
+        name: 'L1 认证考核',
+        startsAt: '2026-05-10T09:00:00+08:00',
+        endsAt: '2026-06-10T18:00:00+08:00',
+        scenarioIds: ['scenario-first-visit'],
+        userIds: ['user-trainee-1', 'user-trainee-2', 'user-trainee-4', 'user-trainee-5'],
+        status: 'closed',
+        retakeCooldownDays: 7,
+      },
+      {
+        id: 'exam-window-comp-l3',
+        tenantId: TENANT,
+        name: '合规表达认证 L3',
+        startsAt: '2026-06-15T09:00:00+08:00',
+        endsAt: '2026-06-20T18:00:00+08:00',
+        scenarioIds: ['scenario-compliance'],
+        userIds: ['user-trainee-1'],
+        status: 'closed',
+        retakeCooldownDays: 7,
+      },
+      {
+        id: 'exam-window-l2-jul',
+        tenantId: TENANT,
+        name: 'L2 认证考核（7 月）',
+        startsAt: '2026-07-10T09:00:00+08:00',
+        endsAt: '2026-07-20T18:00:00+08:00',
+        scenarioIds: ['scenario-price-objection', 'scenario-push-forward'],
+        userIds: ['user-trainee-1', 'user-trainee-2', 'user-trainee-5'],
+        status: 'closed',
+        retakeCooldownDays: 7,
+      },
+      {
+        id: 'exam-window-q3',
+        tenantId: TENANT,
+        name: '2026 Q3 L2 认证',
+        startsAt: '2026-08-14T09:00:00+08:00',
+        endsAt: '2026-08-19T18:00:00+08:00',
+        scenarioIds: ['scenario-first-visit', 'scenario-price-objection', 'scenario-push-forward'],
+        userIds: Q3_ROSTER_USER_IDS,
+        status: 'open',
+        retakeCooldownDays: 7,
+        proctoring: {
+          disableHints: true,
+          maxAttemptsPerScenario: 1,
+        },
+      },
+    ],
+    extractionProjects: [
+      {
+        id: 'ext-project-1',
+        tenantId: TENANT,
+        name: '张伟（华东销冠）录音萃取',
+        recordingRefs: ['rec-zhangwei-001.mp3', 'rec-zhangwei-002.mp3', 'rec-zhangwei-003.mp3'],
+        diffFindings: [
+          {
+            topic: '开场破冰',
+            championDid: '30 秒内自我介绍 + 时间承诺 + 悬念式开场',
+            averageDid: '冗长公司介绍，无时间承诺',
+          },
+        ],
+        interviewNotes: ['张伟：先给主任一个「只听三分钟」的理由，再谈产品。'],
+        trialValidation: { passed: true, note: '试打 3 场均达标', at: '2026-05-20T10:00:00.000Z' },
+        status: 'done',
+        createdAt: '2026-04-15T09:00:00.000Z',
+      },
+      {
+        id: 'ext-project-2',
+        tenantId: TENANT,
+        name: '连锁药房老板访谈萃取（赵总）',
+        recordingRefs: ['int-zhao-001.mp3'],
+        diffFindings: [],
+        interviewNotes: ['赵总：「再考虑一下」多半是毛利没算过来。'],
+        status: 'collecting',
+        createdAt: '2026-07-02T09:00:00.000Z',
+      },
+    ],
+  };
+}

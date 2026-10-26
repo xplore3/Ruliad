@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="640" viewBox="0 0 1440 640" fill="none">
+  <!-- 左侧：AI 的规整世界（网格 + 电路） -->
+  <g stroke="#2E3A56" stroke-opacity="0.65">
+    <path d="M60 100 H 580 M60 200 H 580 M60 300 H 580 M60 400 H 580 M60 500 H 580"/>
+    <path d="M100 60 V 540 M220 60 V 540 M340 60 V 540 M460 60 V 540 M580 60 V 540"/>
+  </g>
+  <g fill="#3A4666">
+    <rect x="112" y="112" width="12" height="12" rx="2"/>
+    <rect x="352" y="212" width="12" height="12" rx="2"/>
+    <rect x="232" y="312" width="12" height="12" rx="2"/>
+    <rect x="472" y="412" width="12" height="12" rx="2"/>
+    <rect x="112" y="412" width="12" height="12" rx="2"/>
+    <rect x="352" y="512" width="12" height="12" rx="2"/>
+  </g>
+  <g stroke="#3A4666" stroke-opacity="0.8">
+    <path d="M124 118 H 352"/>
+    <path d="M358 224 V 312"/>
+    <path d="M244 318 H 465"/>
+    <path d="M118 418 H 226"/>
+  </g>
+
+  <!-- 中间：断层线 -->
+  <path d="M690 60 L 640 200 L 700 300 L 630 420 L 690 580" stroke="#E85C62" stroke-width="2" stroke-opacity="0.55"/>
+  <path d="M712 60 L 662 200 L 722 300 L 652 420 L 712 580" stroke="#E85C62" stroke-width="0.8" stroke-opacity="0.3"/>
+
+  <!-- 右侧：人的有机世界（头像轮廓 + 思维涟漪 + 人际网络） -->
+  <g stroke="#E85C62" stroke-opacity="0.5" stroke-width="2" stroke-linecap="round">
+    <circle cx="880" cy="220" r="46" fill="none"/>
+    <path d="M810 420 C 820 340, 850 300, 880 296 C 910 300, 940 340, 950 420"/>
+  </g>
+  <circle cx="880" cy="220" r="6" fill="#E85C62" fill-opacity="0.8"/>
+  <circle cx="880" cy="220" r="14" stroke="#E85C62" stroke-opacity="0.3" fill="none"/>
+  <g stroke="#E85C62" stroke-opacity="0.22" fill="none">
+    <circle cx="880" cy="220" r="70"/>
+    <circle cx="880" cy="220" r="100"/>
+  </g>
+
+  <!-- 人际博弈网络 -->
+  <g stroke="#E85C62" stroke-opacity="0.25" stroke-dasharray="4 6">
+    <path d="M1020 180 L 1090 280 L 1180 210 M1090 280 L 1250 330 L 1150 420"/>
+  </g>
+  <g fill="#E85C62" fill-opacity="0.5">
+    <circle cx="1020" cy="180" r="3"/>
+    <circle cx="1090" cy="280" r="2.5"/>
+    <circle cx="1180" cy="210" r="2"/>
+    <circle cx="1250" cy="330" r="3"/>
+    <circle cx="1150" cy="420" r="2.5"/>
+    <circle cx="1300" cy="450" r="2"/>
+    <circle cx="1060" cy="480" r="2"/>
+  </g>
+</svg>

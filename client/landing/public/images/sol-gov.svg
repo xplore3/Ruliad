@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360" fill="none">
+  <defs>
+    <radialGradient id="govGlow" cx="0.5" cy="0.28" r="0.65">
+      <stop offset="0" stop-color="#E85C62" stop-opacity="0.1"/>
+      <stop offset="1" stop-color="#E85C62" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="640" height="360" fill="#141B2D"/>
+  <rect width="640" height="360" fill="url(#govGlow)"/>
+
+  <!-- 旗杆与旗 -->
+  <path d="M320 58 V 22" stroke="#9BA3B5" stroke-width="2" stroke-linecap="round"/>
+  <path d="M321 24 h 36 l -9 8 9 8 h -36 z" fill="#E85C62"/>
+
+  <!-- 山墙 -->
+  <path d="M320 58 L 470 150 L 170 150 Z" fill="#1A2236" stroke="#2E3A56" stroke-width="1.5"/>
+  <!-- 山墙星 -->
+  <polygon points="320,88 323.8,98.7 335.2,99.1 326.2,106 329.4,116.9 320,110.5 310.6,116.9 313.8,106 304.8,99.1 316.2,98.7" fill="#E85C62" fill-opacity="0.9"/>
+
+  <!-- 楼体与柱 -->
+  <rect x="170" y="150" width="300" height="130" fill="#1A2236"/>
+  <g fill="#232E48" stroke="#2E3A56" stroke-width="1">
+    <rect x="184" y="150" width="16" height="130"/>
+    <rect x="230" y="150" width="16" height="130"/>
+    <rect x="276" y="150" width="16" height="130"/>
+    <rect x="348" y="150" width="16" height="130"/>
+    <rect x="394" y="150" width="16" height="130"/>
+    <rect x="440" y="150" width="16" height="130"/>
+  </g>
+  <!-- 中央门 -->
+  <rect x="296" y="196" width="48" height="84" fill="#0F1420" stroke="#3A4666" stroke-width="1.5"/>
+
+  <!-- 台阶 -->
+  <g fill="#1A2236" stroke="#2E3A56" stroke-width="1">
+    <rect x="150" y="280" width="340" height="9"/>
+    <rect x="130" y="289" width="380" height="9"/>
+    <rect x="110" y="298" width="420" height="9"/>
+  </g>
+  <path d="M0 307 H 640" stroke="#2E3A56" stroke-width="1.5"/>
+
+  <!-- 前景盾牌：合规可信 -->
+  <path d="M540 176 L 584 194 V 236 C 584 266 564 284 540 296 C 516 284 496 266 496 236 V 194 Z" fill="#1A2236" stroke="#34D399" stroke-width="2.5"/>
+  <path d="M522 240 L 536 254 L 560 220" stroke="#34D399" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+
+  <!-- 左前景：数据流线 -->
+  <g stroke="#3A4666" stroke-dasharray="3 8">
+    <path d="M40 330 H 180"/>
+    <path d="M60 312 H 150"/>
+  </g>
+  <circle cx="188" cy="330" r="3.5" fill="#34D399" fill-opacity="0.7"/>
+</svg>

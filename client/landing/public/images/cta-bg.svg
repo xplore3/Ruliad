@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="500" viewBox="0 0 1200 500" fill="none">
+  <defs>
+    <radialGradient id="cg" cx="0.5" cy="1" r="0.9">
+      <stop offset="0" stop-color="#E85C62" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#E85C62" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="cr" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#E85C62" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#E85C62" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="500" fill="url(#cg)"/>
+
+  <!-- 向上辐射线 -->
+  <g stroke="url(#cr)" stroke-width="1.5">
+    <path d="M600 500 L 420 40"/>
+    <path d="M600 500 L 600 24"/>
+    <path d="M600 500 L 780 40"/>
+    <path d="M600 500 L 300 170"/>
+    <path d="M600 500 L 900 170"/>
+    <path d="M600 500 L 200 330"/>
+    <path d="M600 500 L 1000 330"/>
+  </g>
+
+  <!-- 上升小箭头 -->
+  <g stroke="#E85C62" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M414 62 l 6 -13 6 13 M420 49 v 20" opacity="0.8"/>
+    <path d="M594 34 l 6 -13 6 13 M600 21 v 20" opacity="0.9"/>
+    <path d="M774 62 l 6 -13 6 13 M780 49 v 20" opacity="0.8"/>
+    <path d="M294 148 l 5 -10 5 10 M299 138 v 15" opacity="0.5"/>
+    <path d="M894 148 l 5 -10 5 10 M899 138 v 15" opacity="0.5"/>
+    <path d="M196 322 l 4 -9 4 9 M200 313 v 13" opacity="0.35"/>
+    <path d="M996 322 l 4 -9 4 9 M1000 313 v 13" opacity="0.35"/>
+  </g>
+
+  <!-- 散点 -->
+  <g fill="#E85C62">
+    <circle cx="500" cy="120" r="2.5" opacity="0.6"/>
+    <circle cx="700" cy="90" r="2" opacity="0.5"/>
+    <circle cx="360" cy="230" r="2" opacity="0.4"/>
+    <circle cx="850" cy="210" r="2.5" opacity="0.5"/>
+    <circle cx="600" cy="205" r="3" opacity="0.7"/>
+    <circle cx="460" cy="320" r="2" opacity="0.35"/>
+    <circle cx="760" cy="330" r="2" opacity="0.35"/>
+  </g>
+</svg>

@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="520" height="300" viewBox="0 0 520 300" fill="none">
+  <!-- 五维雷达网格 -->
+  <g stroke="#2E3A56" stroke-opacity="0.9">
+    <polygon points="240,50 335,119 299,231 181,231 145,119"/>
+    <polygon points="240,84 303,130 279,203 201,203 177,130"/>
+    <polygon points="240,117 271,140 259,177 221,177 209,140"/>
+    <path d="M240 150 L 240 50 M240 150 L 335 119 M240 150 L 299 231 M240 150 L 181 231 M240 150 L 145 119"/>
+  </g>
+
+  <!-- 训练前（灰） -->
+  <polygon points="240,98 276,138 266,186 222,174 194,135" fill="#3A4666" fill-opacity="0.3" stroke="#5A688A" stroke-width="1.5"/>
+
+  <!-- 训练后（珊瑚） -->
+  <polygon points="240,50 321,124 287,215 187,223 173,128" fill="#E85C62" fill-opacity="0.22" stroke="#E85C62" stroke-width="2.5" stroke-linejoin="round"/>
+
+  <!-- 训练后顶点 -->
+  <g fill="#E85C62">
+    <circle cx="240" cy="50" r="4.5"/>
+    <circle cx="321" cy="124" r="4.5"/>
+    <circle cx="287" cy="215" r="4.5"/>
+    <circle cx="187" cy="223" r="4.5"/>
+    <circle cx="173" cy="128" r="4.5"/>
+  </g>
+  <circle cx="240" cy="150" r="3.5" fill="#F2F4F8" fill-opacity="0.8"/>
+
+  <!-- 右侧：能力上升趋势 -->
+  <g stroke="#34D399" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M428 236 h 34 M445 236 v -58 M436 190 l 9 -12 9 12" opacity="0.85"/>
+  </g>
+  <g fill="#34D399" fill-opacity="0.6">
+    <circle cx="445" cy="150" r="2.5"/>
+    <circle cx="470" cy="170" r="2"/>
+    <circle cx="420" cy="120" r="2"/>
+  </g>
+</svg>

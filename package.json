@@ -1,0 +1,33 @@
+{
+  "name": "grasp-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Grasp MVP — 轻量级前后端模拟基础设施",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "db:migrate": "pnpm --filter @grasp-mvp/infra exec prisma migrate dev",
+    "db:deploy": "pnpm --filter @grasp-mvp/infra exec prisma migrate deploy",
+    "db:generate": "pnpm --filter @grasp-mvp/infra exec prisma generate",
+    "db:studio": "pnpm --filter @grasp-mvp/infra exec prisma studio",
+    "dev:all": "concurrently -n API,WEB,ADMIN -c blue,cyan,red \"pnpm --filter @grasp-mvp/api-gateway start\" \"pnpm --filter grasp-web dev\" \"pnpm --filter admin-web dev\"",
+    "dev:api": "pnpm --filter @grasp-mvp/api-gateway start",
+    "seed": "pnpm --filter @grasp-mvp/api-gateway seed",
+    "dev:web": "concurrently -n API,WEB -c blue,cyan \"pnpm --filter @grasp-mvp/api-gateway start\" \"pnpm --filter grasp-web dev\"",
+    "dev:admin": "concurrently -n API,ADMIN -c blue,red \"pnpm --filter @grasp-mvp/api-gateway start\" \"pnpm --filter admin-web dev\"",
+    "dev:landing": "pnpm --filter grasp-landing dev",
+    "stop:all": "npx kill-port 3060 5173 5174 5175 5180"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "kill-port": "^2.0.1",
+    "turbo": "^2.5.0",
+    "typescript": "^5.8.0"
+  },
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

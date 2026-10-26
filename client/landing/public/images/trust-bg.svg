@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="500" viewBox="0 0 1440 500" fill="none">
+  <!-- 放射线 -->
+  <g stroke="#2E3A56" stroke-opacity="0.45">
+    <path d="M720 250 L 420 130"/>
+    <path d="M720 250 L 1020 130"/>
+    <path d="M720 250 L 340 300"/>
+    <path d="M720 250 L 1100 300"/>
+    <path d="M720 250 L 520 60"/>
+    <path d="M720 250 L 920 60"/>
+    <path d="M720 250 L 240 170"/>
+    <path d="M720 250 L 1200 170"/>
+  </g>
+
+  <!-- 中央盾牌 -->
+  <path d="M720 128 L 792 160 V 240 C 792 302 756 344 720 364 C 684 344 648 302 648 240 V 160 Z" stroke="#3A4666" stroke-width="2" fill="#3A4666" fill-opacity="0.08"/>
+  <path d="M694 244 L 714 264 L 750 218" stroke="#34D399" stroke-opacity="0.45" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+
+  <!-- 两侧数据流 -->
+  <g stroke="#3A4666" stroke-dasharray="2 10">
+    <path d="M60 250 H 560"/>
+    <path d="M880 250 H 1380"/>
+    <path d="M140 180 H 480"/>
+    <path d="M960 180 H 1300"/>
+    <path d="M180 330 H 500"/>
+    <path d="M940 330 H 1260"/>
+  </g>
+  <circle cx="560" cy="250" r="4" fill="#34D399" fill-opacity="0.55"/>
+  <circle cx="880" cy="250" r="4" fill="#34D399" fill-opacity="0.55"/>
+  <circle cx="480" cy="180" r="3" fill="#E85C62" fill-opacity="0.5"/>
+  <circle cx="1300" cy="180" r="3" fill="#E85C62" fill-opacity="0.5"/>
+  <circle cx="500" cy="330" r="3" fill="#E85C62" fill-opacity="0.4"/>
+  <circle cx="1260" cy="330" r="3" fill="#E85C62" fill-opacity="0.4"/>
+</svg>

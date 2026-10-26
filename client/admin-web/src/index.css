@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+@theme {
+  /* 覆盖 orange 色系为珊瑚红色板 */
+  --color-orange-50: #fdf0f1;
+  --color-orange-100: #fbe0e2;
+  --color-orange-200: #f7c1c5;
+  --color-orange-300: #f09da4;
+  --color-orange-400: #e85c62;
+  --color-orange-500: #e85c62;
+  --color-orange-600: #d04a52;
+  --color-orange-700: #b83d44;
+  --color-orange-800: #99333a;
+  --color-orange-900: #7d2b30;
+}

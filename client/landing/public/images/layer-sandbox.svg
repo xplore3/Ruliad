@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="520" height="300" viewBox="0 0 520 300" fill="none">
+  <!-- 背景等高线（地形） -->
+  <g stroke="#232E48" stroke-width="1.5" fill="none">
+    <path d="M40 170 C 120 130, 180 170, 260 140 S 400 180, 500 120"/>
+    <path d="M30 100 C 110 70, 200 100, 280 80 S 420 110, 490 70"/>
+    <path d="M60 240 C 140 210, 240 240, 340 210 S 460 230, 510 190"/>
+  </g>
+
+  <!-- 我方路径（珊瑚，实线） -->
+  <path d="M80 210 C 160 180, 200 120, 300 130 S 430 90, 456 62" stroke="#E85C62" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- 路径箭头 -->
+  <path d="M456 62 l -12 -1 M456 62 l -1 12" stroke="#E85C62" stroke-width="2.5" stroke-linecap="round"/>
+
+  <!-- 对方路径（薄荷，虚线：AI 竞对） -->
+  <path d="M140 232 C 240 242, 330 200, 420 150" stroke="#34D399" stroke-width="2" stroke-dasharray="7 6" stroke-opacity="0.8"/>
+  <path d="M420 150 l -12 -3 M420 150 l -5 11" stroke="#34D399" stroke-width="2" stroke-linecap="round" stroke-opacity="0.8"/>
+
+  <!-- 节点：我方棋子 -->
+  <circle cx="80" cy="210" r="8" fill="#E85C62"/>
+  <circle cx="80" cy="210" r="15" stroke="#E85C62" stroke-opacity="0.3" fill="none"/>
+  <!-- 中继点 -->
+  <circle cx="300" cy="130" r="7" fill="#1A2236" stroke="#E85C62" stroke-width="2"/>
+  <!-- 对方棋子 -->
+  <circle cx="140" cy="232" r="8" fill="#34D399"/>
+  <circle cx="420" cy="150" r="7" fill="#1A2236" stroke="#34D399" stroke-width="2"/>
+
+  <!-- 目标旗帜 -->
+  <g>
+    <path d="M460 60 V 96" stroke="#9BA3B5" stroke-width="2" stroke-linecap="round"/>
+    <path d="M461 63 h 24 l -7 7 7 7 h -24 z" fill="#E85C62"/>
+  </g>
+
+  <!-- 底部筹码条 -->
+  <g>
+    <rect x="60" y="256" width="90" height="8" rx="4" fill="#E85C62" fill-opacity="0.85"/>
+    <rect x="160" y="256" width="60" height="8" rx="4" fill="#3A4666"/>
+    <rect x="230" y="256" width="40" height="8" rx="4" fill="#3A4666"/>
+    <rect x="280" y="256" width="110" height="8" rx="4" fill="#34D399" fill-opacity="0.7"/>
+    <rect x="400" y="256" width="50" height="8" rx="4" fill="#3A4666"/>
+  </g>
+</svg>

@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+@theme {
+  /* ── 主色：深蓝/深灰（专业感）── */
+  --color-ink-950: #0B0F1A;
+  --color-ink-900: #0F1420;
+  --color-ink-850: #141B2D;
+  --color-ink-800: #1A2236;
+  --color-ink-700: #232E48;
+  --color-ink-600: #2E3A56;
+
+  /* ── 强调色：珊瑚红（数据高亮 / CTA）── */
+  --color-accent-400: #F07380;
+  --color-accent-500: #E85C62;
+  --color-accent-600: #D04A52;
+
+  /* ── 强调色：绿（信任 / 成功指标）── */
+  --color-mint-400: #4ADE94;
+  --color-mint-500: #34D399;
+
+  /* ── 文本 ── */
+  --color-text-main: #F2F4F8;
+  --color-text-sub: #9BA3B5;
+  --color-text-dim: #6B7384;
+
+  /* ── 语义别名 ── */
+  --color-coral: #E85C62;
+  --color-coral-light: #F07380;
+  --color-charcoal: #0F1420;
+  --color-panel: #141B2D;
+  --color-success: #34D399;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    margin: 0;
+    background-color: #0F1420;
+    color: #F2F4F8;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'PingFang SC',
+      'Microsoft YaHei', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* ── 动效工具类 ── */
+@keyframes bubble-in {
+  0% { opacity: 0; transform: translateY(8px) scale(0.96); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.animate-bubble-in {
+  animation: bubble-in 0.5s ease-out forwards;
+}
+
+@keyframes score-roll {
+  0% { opacity: 0; transform: scale(0.8); }
+  60% { opacity: 1; transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+.animate-score-roll {
+  animation: score-roll 0.8s ease-out forwards;
+  animation-delay: 0.6s;
+  opacity: 0;
+}
+
+@keyframes fade-up {
+  0% { opacity: 0; transform: translateY(16px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-up {
+  animation: fade-up 0.6s ease-out forwards;
+}

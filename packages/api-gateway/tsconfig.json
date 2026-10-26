@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "tsBuildInfoFile": "./dist/.tsbuildinfo.json"
+  },
+  "references": [
+    { "path": "../core" },
+    { "path": "../infra" },
+    { "path": "../llm-gateway" },
+    { "path": "../role-engine" },
+    { "path": "../scoring-engine" }
+  ],
+  "include": ["src/**/*"]
+}

@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360" fill="none">
+  <defs>
+    <radialGradient id="storeGlow" cx="0.42" cy="0.3" r="0.7">
+      <stop offset="0" stop-color="#E85C62" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#E85C62" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="awn">
+      <path d="M112 108 H 408 V 132 Q 400 148 386 148 H 134 Q 120 148 112 132 Z"/>
+    </clipPath>
+  </defs>
+
+  <rect width="640" height="360" fill="#141B2D"/>
+  <rect width="640" height="360" fill="url(#storeGlow)"/>
+
+  <!-- 地面 -->
+  <path d="M0 272 H 640" stroke="#2E3A56" stroke-width="1.5"/>
+  <ellipse cx="270" cy="304" rx="210" ry="13" fill="#E85C62" fill-opacity="0.06"/>
+
+  <!-- 招牌灯牌 -->
+  <rect x="180" y="58" width="160" height="24" rx="12" fill="#E85C62" fill-opacity="0.9"/>
+  <rect x="204" y="68" width="112" height="4" rx="2" fill="#0B0F1A" fill-opacity="0.65"/>
+  <rect x="196" y="54" width="128" height="2" rx="1" fill="#E85C62" fill-opacity="0.35"/>
+
+  <!-- 门楣 -->
+  <rect x="120" y="90" width="280" height="18" fill="#232E48"/>
+
+  <!-- 遮阳篷（条纹） -->
+  <g clip-path="url(#awn)">
+    <rect x="112" y="108" width="296" height="40" fill="#232E48"/>
+    <g fill="#E85C62" fill-opacity="0.85">
+      <rect x="128" y="108" width="24" height="40"/>
+      <rect x="176" y="108" width="24" height="40"/>
+      <rect x="224" y="108" width="24" height="40"/>
+      <rect x="272" y="108" width="24" height="40"/>
+      <rect x="320" y="108" width="24" height="40"/>
+      <rect x="368" y="108" width="24" height="40"/>
+    </g>
+  </g>
+
+  <!-- 橱窗 -->
+  <rect x="140" y="172" width="120" height="88" fill="#0F1420" stroke="#3A4666" stroke-width="2"/>
+  <rect x="152" y="184" width="96" height="52" fill="#E85C62" fill-opacity="0.08"/>
+  <!-- 橱窗内展台 -->
+  <path d="M170 236 h 60 l -6 -14 h -48 z" fill="#232E48" stroke="#3A4666"/>
+  <circle cx="188" cy="212" r="6" fill="#E85C62" fill-opacity="0.7"/>
+  <circle cx="212" cy="206" r="6" fill="#34D399" fill-opacity="0.6"/>
+
+  <!-- 店门 -->
+  <rect x="292" y="162" width="72" height="110" fill="#1A2236" stroke="#3A4666" stroke-width="2"/>
+  <rect x="304" y="176" width="48" height="72" fill="#0F1420" stroke="#2E3A56"/>
+  <circle cx="354" cy="222" r="3" fill="#9BA3B5"/>
+
+  <!-- 手机即练 -->
+  <rect x="466" y="102" width="92" height="184" rx="16" fill="#1A2236" stroke="#3A4666" stroke-width="2.5"/>
+  <rect x="476" y="118" width="72" height="146" rx="6" fill="#0F1420" stroke="#2E3A56"/>
+  <circle cx="512" cy="272" r="6" stroke="#3A4666" stroke-width="2" fill="none"/>
+  <!-- 屏内对话 -->
+  <rect x="482" y="128" width="44" height="16" rx="8" fill="#232E48"/>
+  <rect x="494" y="152" width="48" height="16" rx="8" fill="#E85C62" fill-opacity="0.75"/>
+  <rect x="482" y="176" width="36" height="16" rx="8" fill="#232E48"/>
+  <rect x="494" y="200" width="44" height="16" rx="8" fill="#E85C62" fill-opacity="0.45"/>
+  <!-- 屏内进度 -->
+  <rect x="482" y="240" width="60" height="6" rx="3" fill="#2E3A56"/>
+  <rect x="482" y="240" width="42" height="6" rx="3" fill="#34D399"/>
+</svg>

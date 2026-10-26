@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="480" viewBox="0 0 480 480" fill="none">
+  <!-- 跨会话记忆弧 -->
+  <path d="M240 55 a 185 185 0 1 1 -130 54" stroke="#34D399" stroke-opacity="0.3" stroke-width="1.5" fill="none"/>
+
+  <!-- 中心：博弈主体（AI 客户） -->
+  <circle cx="240" cy="240" r="34" fill="#1A2236" stroke="#E85C62" stroke-width="2.5"/>
+  <circle cx="240" cy="230" r="9" fill="#E85C62"/>
+  <path d="M224 254 a 16 10 0 0 1 32 0" fill="#E85C62"/>
+
+  <!-- 五要素与主体的连线 -->
+  <g stroke="#3A4666" stroke-width="1.5">
+    <path d="M240 240 L 240 100"/>
+    <path d="M240 240 L 373 197"/>
+    <path d="M240 240 L 322 353"/>
+    <path d="M240 240 L 158 353"/>
+    <path d="M240 240 L 107 197"/>
+  </g>
+
+  <!-- 五要素之间的张力环 -->
+  <path d="M240 100 L 373 197 L 322 353 L 158 353 L 107 197 Z" stroke="#3A4666" stroke-opacity="0.6" stroke-dasharray="5 7" fill="none"/>
+
+  <!-- 五要素卫星节点 -->
+  <g>
+    <circle cx="240" cy="100" r="14" fill="#232E48" stroke="#34D399" stroke-width="2"/>
+    <circle cx="373" cy="197" r="14" fill="#232E48" stroke="#34D399" stroke-width="2"/>
+    <circle cx="322" cy="353" r="14" fill="#232E48" stroke="#E85C62" stroke-width="2"/>
+    <circle cx="158" cy="353" r="14" fill="#232E48" stroke="#34D399" stroke-width="2"/>
+    <circle cx="107" cy="197" r="14" fill="#232E48" stroke="#E85C62" stroke-width="2"/>
+  </g>
+
+  <!-- 卫星节点内的小标记 -->
+  <g fill="#34D399">
+    <circle cx="240" cy="100" r="3.5" fill-opacity="0.9"/>
+    <circle cx="373" cy="197" r="3.5" fill-opacity="0.9"/>
+    <circle cx="158" cy="353" r="3.5" fill-opacity="0.9"/>
+  </g>
+  <g fill="#E85C62">
+    <circle cx="322" cy="353" r="3.5" fill-opacity="0.9"/>
+    <circle cx="107" cy="197" r="3.5" fill-opacity="0.9"/>
+  </g>
+</svg>

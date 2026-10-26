@@ -1,0 +1,288 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// AI 销售陪练与认证系统 — 数据模型（文档表风格：索引列 + JSON 文本载荷）
+// 存储：SQLite（Prisma 不支持 Json 列，data/payload 为 JSON.stringify 后的 String）
+// 隔离规则：所有租户表必须带 tenantId；练习/考核隔离靠 Session.mode
+// ============================================================
+
+model Organization {
+  id       String  @id @default(uuid())
+  tenantId String
+  name     String
+  parentId String?
+  data     String
+
+  @@index([tenantId])
+}
+
+model Team {
+  id           String  @id @default(uuid())
+  orgId        String
+  name         String
+  supervisorId String?
+  data         String
+
+  @@index([orgId])
+}
+
+model User {
+  id       String  @id @default(uuid())
+  tenantId String
+  orgId    String
+  teamId   String?
+  name     String
+  role     String // trainee | supervisor | admin | executive | platform
+  data     String
+
+  @@index([tenantId, role])
+  @@index([teamId])
+}
+
+model MethodologyConfig {
+  id       String @id @default(uuid())
+  tenantId String
+  name     String
+  data     String
+
+  @@index([tenantId])
+}
+
+// ---------------- 要素资产库 ----------------
+
+model Element {
+  id       String  @id @default(uuid())
+  type     String // C | E | B | S
+  layer    String // platform | industry | tenant
+  tenantId String?
+  name     String
+  version  Int     @default(1)
+  data     String
+
+  @@index([layer, tenantId])
+  @@index([type])
+}
+
+model CalibrationEvent {
+  id        String  @id @default(uuid())
+  elementId String?
+  kind      String
+  data      String
+  createdAt DateTime @default(now())
+
+  @@index([elementId])
+}
+
+// ---------------- 角色 / 场景 ----------------
+
+model PersonaConfig {
+  id       String @id @default(uuid())
+  tenantId String
+  name     String
+  version  Int    @default(1)
+  data     String
+
+  @@index([tenantId])
+}
+
+model SkillPoint {
+  id       String @id @default(uuid())
+  tenantId String
+  name     String
+  data     String
+
+  @@index([tenantId])
+}
+
+model Scenario {
+  id              String @id @default(uuid())
+  tenantId        String
+  name            String
+  personaConfigId String
+  data            String
+
+  @@index([tenantId])
+}
+
+model LearningPath {
+  id       String @id @default(uuid())
+  tenantId String
+  name     String
+  data     String
+
+  @@index([tenantId])
+}
+
+model ScenarioTask {
+  id         String @id @default(uuid())
+  userId     String
+  scenarioId String
+  status     String
+  data       String
+
+  @@unique([userId, scenarioId])
+  @@index([userId, status])
+}
+
+// ---------------- 会话与评分 ----------------
+
+model Session {
+  id           String    @id @default(uuid())
+  tenantId     String
+  userId       String
+  scenarioId   String
+  mode         String // practice | exam —— 数据隔离的根字段
+  status       String
+  examWindowId String?
+  startedAt    DateTime
+  endedAt      DateTime?
+  data         String
+
+  @@index([userId, mode])
+  @@index([tenantId, mode])
+  @@index([scenarioId])
+}
+
+model ScoreReport {
+  id          String @id @default(uuid())
+  sessionId   String @unique
+  totalScore  Float
+  passed      Boolean
+  data        String
+  createdAt   DateTime @default(now())
+}
+
+model ScoreItemDef {
+  id          String @id @default(uuid())
+  tenantId    String
+  skillPointId String
+  name        String
+  layer       String // company | team | personal
+  data        String
+
+  @@index([tenantId, skillPointId])
+}
+
+model Appeal {
+  id        String   @id @default(uuid())
+  sessionId String
+  userId    String
+  status    String // pending | upheld | rejected
+  data      String
+  createdAt DateTime @default(now())
+
+  @@index([status])
+  @@index([sessionId])
+}
+
+// ---------------- 考核认证 ----------------
+
+model ExamWindow {
+  id       String   @id @default(uuid())
+  tenantId String
+  name     String
+  status   String
+  startsAt DateTime
+  endsAt   DateTime
+  data     String
+
+  @@index([tenantId, status])
+}
+
+model CertRecord {
+  id           String @id @default(uuid())
+  tenantId     String
+  userId       String
+  examWindowId String
+  passed       Boolean
+  data         String
+
+  @@index([tenantId, userId])
+  @@index([examWindowId])
+}
+
+model UserSkillState {
+  id           String @id @default(uuid())
+  userId       String
+  skillPointId String
+  data         String
+
+  @@unique([userId, skillPointId])
+}
+
+// ---------------- 内容工坊 / 企业私有数据 ----------------
+
+model ProductKB {
+  id       String @id @default(uuid())
+  tenantId String
+  name     String
+  version  Int    @default(1)
+  data     String
+
+  @@index([tenantId])
+}
+
+model ExtractionProject {
+  id       String @id @default(uuid())
+  tenantId String
+  name     String
+  status   String
+  data     String
+
+  @@index([tenantId])
+}
+
+model DataConsent {
+  id       String @id @default(uuid())
+  tenantId String
+  data     String
+
+  @@index([tenantId])
+}
+
+model GoldenCase {
+  id   String @id @default(uuid())
+  name String
+  data String
+}
+
+model RegressionRun {
+  id     String   @id @default(uuid())
+  at     DateTime @default(now())
+  passed Boolean
+  data   String
+}
+
+model QuizQuestion {
+  id         String  @id @default(uuid())
+  tenantId   String
+  scenarioId String?
+  skillPointId String?
+  type       String
+  data       String
+
+  @@index([tenantId])
+  @@index([tenantId, scenarioId])
+}
+
+// ---------------- 事件流（append-only） ----------------
+
+model DomainEvent {
+  id        String   @id @default(uuid())
+  type      String
+  tenantId  String?
+  sessionId String?
+  userId    String?
+  payload   String
+  at        DateTime @default(now())
+
+  @@index([sessionId])
+  @@index([tenantId, type])
+}
