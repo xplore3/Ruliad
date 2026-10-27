@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import type { BehaviorBand, ChatMessage, PersonaConfig, Scenario, TranscriptTurn } from '@grasp-mvp/core';
+import type { BehaviorBand, ChatMessage, PersonaConfig, Scenario, ScenarioParticipant, ScenarioScript, SceneType, TranscriptTurn } from '@grasp-mvp/core';
 import { bandFor, compilePersona, PersonaActor } from '@grasp-mvp/role-engine';
 import type { RouteContext } from '../ctx.js';
 import { requireRoles } from '../auth.js';
@@ -92,12 +92,19 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
       productKBId?: string;
       methodology?: string;
       source?: string;
+      hasScript?: boolean;
+      sceneType?: SceneType;
+      script?: ScenarioScript;
+      participants?: ScenarioParticipant[];
     };
   }>('/scenarios', { preHandler: requireRoles('admin') }, async (request, reply) => {
-    const { name, personaConfigId, skillPointIds, passScore, durationMinutes, difficulty, coverageTopics, productKBId, methodology, source } =
+    const { name, personaConfigId, skillPointIds, passScore, durationMinutes, difficulty, coverageTopics, productKBId, methodology, source, hasScript, sceneType, script, participants } =
       request.body ?? {};
     if (!name || !personaConfigId || !Array.isArray(skillPointIds) || skillPointIds.length === 0) {
       return reply.code(400).send({ error: 'name / personaConfigId / skillPointIds 必填' });
+    }
+    if (sceneType !== undefined && sceneType !== 'drill' && sceneType !== 'practical') {
+      return reply.code(400).send({ error: "sceneType 仅支持 'drill' | 'practical'" });
     }
     if (typeof passScore !== 'number' || typeof durationMinutes !== 'number') {
       return reply.code(400).send({ error: 'passScore / durationMinutes 必须为数字' });
@@ -123,6 +130,11 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
       coverageTopics,
       methodology,
       source,
+      // 未显式指定时按场景类型同步：实战训练=无剧本，实用场景=有剧本
+      hasScript: hasScript ?? (sceneType ?? 'practical') !== 'drill',
+      sceneType,
+      script,
+      participants,
     };
     await store.saveScenario(scenario);
     return reply.code(201).send(scenario);
@@ -142,6 +154,10 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
       productKBId?: string | null;
       methodology?: string;
       source?: string;
+      hasScript?: boolean;
+      sceneType?: SceneType;
+      script?: ScenarioScript | null;
+      participants?: ScenarioParticipant[] | null;
     };
   }>('/scenarios/:id', { preHandler: requireRoles('admin') }, async (request, reply) => {
     const existing = await store.getScenario(request.params.id);
@@ -184,6 +200,17 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     if (body.productKBId !== undefined) scenario.productKBId = body.productKBId || undefined;
     if (body.methodology !== undefined) scenario.methodology = body.methodology;
     if (body.source !== undefined) scenario.source = body.source;
+    if (body.hasScript !== undefined) scenario.hasScript = body.hasScript;
+    if (body.sceneType !== undefined) {
+      if (body.sceneType !== 'drill' && body.sceneType !== 'practical') {
+        return reply.code(400).send({ error: "sceneType 仅支持 'drill' | 'practical'" });
+      }
+      scenario.sceneType = body.sceneType;
+      // 场景类型变化且未显式传 hasScript 时同步：实战训练=无剧本
+      if (body.hasScript === undefined) scenario.hasScript = body.sceneType !== 'drill';
+    }
+    if (body.script !== undefined) scenario.script = body.script ?? undefined;
+    if (body.participants !== undefined) scenario.participants = body.participants ?? undefined;
     await store.saveScenario(scenario);
     return scenario;
   });

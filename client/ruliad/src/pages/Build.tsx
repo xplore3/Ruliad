@@ -14,10 +14,10 @@ import {
   apiError,
 } from '../api';
 import type { ScenarioExtractResult } from '../api';
-import type { Scenario, SkillPoint } from '../types';
+import type { Scenario, ScenarioParticipant, SkillPoint } from '../types';
 import { PcmRecorder, pcmToWav } from '../voice';
 
-type EditorStep = 'base' | 'goal' | 'role' | 'params' | 'eval';
+type EditorStep = 'base' | 'goal' | 'role' | 'params' | 'eval' | 'script' | 'participants';
 
 const STEPS: { key: EditorStep; label: string }[] = [
   { key: 'base', label: '场景基础' },
@@ -25,13 +25,20 @@ const STEPS: { key: EditorStep; label: string }[] = [
   { key: 'role', label: '角色画像' },
   { key: 'params', label: '对话参数' },
   { key: 'eval', label: '评估配置' },
+  { key: 'script', label: '剧本配置' },
+  { key: 'participants', label: '参与者' },
 ];
+
+const SCENE_TYPES = [
+  { key: 'practical', label: '实用场景', desc: '单点考核 · 有剧本对练' },
+  { key: 'drill', label: '实战训练', desc: '自由对练' },
+] as const;
 
 const CATEGORIES = [
   { key: '电话销售', icon: '📞', dot: 'bg-cat-phone', type: 't1' },
-  { key: '客户主动咨询', icon: '💬', dot: 'bg-cat-inquiry', type: 't2' },
-  { key: '成交谈判', icon: '🤝', dot: 'bg-cat-deal', type: 't3' },
-  { key: '地推破冰', icon: '🚶', dot: 'bg-cat-ground', type: 't4' },
+  { key: '咨询接待', icon: '💬', dot: 'bg-cat-inquiry', type: 't2' },
+  { key: '现场成交', icon: '🤝', dot: 'bg-cat-deal', type: 't3' },
+  { key: '地推引流课', icon: '🚶', dot: 'bg-cat-ground', type: 't4' },
 ];
 
 const PERSONALITY_TAGS = ['谨慎', '重数据', '爱压价', '爽快', '强势', '善拖延', '话多', '戒备'];
@@ -110,6 +117,7 @@ interface BuildForm {
   description: string;
   difficulty: number;
   duration: number;
+  sceneType: 'drill' | 'practical';
   goal: string;
   successCriteria: string;
   doNot: string;
@@ -125,7 +133,23 @@ interface BuildForm {
   interruptLevel: 'off' | 'weak' | 'strong';
   skillPointIds: string[];
   dimensionWeights: Record<string, number>;
+  /** 剧本（多值字段用换行/分号分隔，保存时拆成数组） */
+  scriptExecutionOrder: string;
+  scriptPurpose: string;
+  scriptTopics: string;
+  scriptCustomerQuestions: string;
+  scriptAssessmentPoints: string;
+  participants: ScenarioParticipant[];
 }
+
+const EMPTY_PARTICIPANT: ScenarioParticipant = {
+  name: '',
+  traits: '',
+  speakingStyle: '',
+  speechScope: '',
+  languageRequirements: '',
+  goal: '',
+};
 
 const EMPTY_FORM: BuildForm = {
   name: '',
@@ -133,6 +157,7 @@ const EMPTY_FORM: BuildForm = {
   description: '',
   difficulty: 1,
   duration: 5,
+  sceneType: 'practical',
   goal: '',
   successCriteria: '60',
   doNot: '',
@@ -148,6 +173,12 @@ const EMPTY_FORM: BuildForm = {
   interruptLevel: 'weak',
   skillPointIds: [],
   dimensionWeights: { ...DEFAULT_WEIGHTS },
+  scriptExecutionOrder: '',
+  scriptPurpose: '',
+  scriptTopics: '',
+  scriptCustomerQuestions: '',
+  scriptAssessmentPoints: '',
+  participants: [],
 };
 
 interface TrialMsg {
@@ -462,11 +493,18 @@ export default function Build() {
       description: scenario.coverageTopics?.[0] ?? '',
       difficulty: scenario.difficulty || 1,
       duration: scenario.durationMinutes || 5,
+      sceneType: scenario.sceneType ?? 'practical',
       successCriteria: String(scenario.successCriteria?.passScore ?? 60),
       roleName: scenario.personaName ?? '',
       roleTitle: scenario.personaTitle ?? '',
       skillPointIds: skillIdsFromNames(scenario.skillPointNames),
       dimensionWeights: loadWeights(scenario.id) ?? { ...DEFAULT_WEIGHTS },
+      scriptExecutionOrder: scenario.script?.executionOrder ?? '',
+      scriptPurpose: scenario.script?.purpose ?? '',
+      scriptTopics: (scenario.script?.topics ?? []).join('\n'),
+      scriptCustomerQuestions: (scenario.script?.customerQuestions ?? []).join('\n'),
+      scriptAssessmentPoints: (scenario.script?.assessmentPoints ?? []).join('\n'),
+      participants: (scenario.participants ?? []).map((p) => ({ ...EMPTY_PARTICIPANT, ...p })),
     });
     resetTrial();
     setActiveStep('base');
@@ -487,6 +525,9 @@ export default function Build() {
         coverageTopics: scenario.coverageTopics,
         methodology: scenario.methodology,
         source: scenario.source ?? '自建',
+        sceneType: scenario.sceneType,
+        script: scenario.script,
+        participants: scenario.participants,
       });
       const weights = loadWeights(scenario.id);
       if (weights) saveWeights(created.id, weights);
@@ -533,6 +574,17 @@ export default function Build() {
     ];
   };
 
+  const addParticipant = () =>
+    updateForm({ participants: [...form.participants, { ...EMPTY_PARTICIPANT }] });
+
+  const updateParticipant = (idx: number, patch: Partial<ScenarioParticipant>) =>
+    updateForm({
+      participants: form.participants.map((p, i) => (i === idx ? { ...p, ...patch } : p)),
+    });
+
+  const removeParticipant = (idx: number) =>
+    updateForm({ participants: form.participants.filter((_, i) => i !== idx) });
+
   const handleSave = async () => {
     if (!isAdmin || saving) return;
     if (!form.name.trim()) {
@@ -545,6 +597,29 @@ export default function Build() {
     }
     const parsed = Number(form.successCriteria);
     const passScore = Number.isFinite(parsed) && parsed > 0 ? Math.min(100, Math.round(parsed)) : 60;
+    /** 多值文本（换行/分号分隔）拆成数组 */
+    const splitLines = (s: string) => s.split(/[\n；;]/).map((x) => x.trim()).filter(Boolean);
+    // 实战训练为无剧本自由对练：不保存剧本，并清空已有剧本
+    const scriptPayload =
+      form.sceneType === 'practical'
+        ? {
+            executionOrder: form.scriptExecutionOrder.trim() || undefined,
+            purpose: form.scriptPurpose.trim() || undefined,
+            topics: splitLines(form.scriptTopics),
+            customerQuestions: splitLines(form.scriptCustomerQuestions),
+            assessmentPoints: splitLines(form.scriptAssessmentPoints),
+          }
+        : null;
+    const participantsPayload = form.participants
+      .filter((p) => p.name.trim())
+      .map((p) => ({
+        name: p.name.trim(),
+        traits: p.traits?.trim() || undefined,
+        speakingStyle: p.speakingStyle?.trim() || undefined,
+        speechScope: p.speechScope?.trim() || undefined,
+        languageRequirements: p.languageRequirements?.trim() || undefined,
+        goal: p.goal?.trim() || undefined,
+      }));
     const personaPayload = {
       name: form.roleName.trim() || `${form.name.trim()}角色`,
       background: buildBackground(),
@@ -566,6 +641,9 @@ export default function Build() {
           coverageTopics: form.description.trim() ? [form.description.trim()] : [],
           methodology: form.category,
           source: '自建',
+          sceneType: form.sceneType,
+          script: scriptPayload,
+          participants: participantsPayload,
         });
       } else {
         const { persona } = await createPersonaConfig(personaPayload);
@@ -580,6 +658,9 @@ export default function Build() {
           coverageTopics: form.description.trim() ? [form.description.trim()] : [],
           methodology: form.category,
           source: '自建',
+          sceneType: form.sceneType,
+          script: scriptPayload ?? undefined,
+          participants: participantsPayload,
         });
         scenarioId = scenario.id;
         setEditingScenarioId(scenario.id);
@@ -636,7 +717,7 @@ export default function Build() {
   const catType = (key: string) => CATEGORIES.find((c) => c.key === key)?.type ?? 't1';
   const catDot = (key: string) => CATEGORIES.find((c) => c.key === key)?.dot ?? 'bg-cat-phone';
   const catChip = (key: string) => {
-    const map: Record<string, string> = { '电话销售': 'chip-coral', '客户主动咨询': 'chip-blue', '成交谈判': 'chip-amber', '地推破冰': 'chip-green' };
+    const map: Record<string, string> = { '电话销售': 'chip-coral', '咨询接待': 'chip-blue', '现场成交': 'chip-amber', '地推引流课': 'chip-green' };
     return map[key] ?? 'chip-coral';
   };
   const cardCategory = (s: Scenario) =>
@@ -700,6 +781,9 @@ export default function Build() {
                           '暂无描述'}
                       </p>
                       <div className="who">
+                        <span className={`chip ${(scenario.sceneType ?? 'practical') === 'drill' ? 'green' : 'blue'}`}>
+                          {(scenario.sceneType ?? 'practical') === 'drill' ? '实战训练' : '实用场景'}
+                        </span>
                         {(scenario.practiceCount ?? 0) > 0
                           ? <span className="chip green">已练 {scenario.practiceCount} 次</span>
                           : <span className="chip gray">未练习</span>}
@@ -865,6 +949,17 @@ export default function Build() {
                   <input type="text" value={form.name} onChange={(e) => updateForm({ name: e.target.value })} className="input" placeholder="如：首次电话邀约" maxLength={30} />
                 </div>
                 <div className="field">
+                  <label>场景类型</label>
+                  <div className="pick">
+                    {SCENE_TYPES.map((t) => (
+                      <span key={t.key} onClick={() => updateForm({ sceneType: t.key })} className={`chip ${form.sceneType === t.key ? 'on' : ''}`}>
+                        {t.label}（{t.desc}）
+                      </span>
+                    ))}
+                  </div>
+                  <div className="hint">实战训练从首页「实战训练」模块进入；实用场景从首页「实用场景」模块进入，支持剧本与考核。</div>
+                </div>
+                <div className="field">
                   <label>场景类别</label>
                   <div className="pick">
                     {CATEGORIES.map((cat) => (
@@ -1004,6 +1099,85 @@ export default function Build() {
                 <div className="hint" style={{ marginTop: 12 }}>
                   权重合计需 = 100%（当前 {totalWeight}%{totalWeight === 100 ? ' ✅' : '，请调整'}）
                 </div>
+              </div>
+
+              {/* ⑥ 剧本配置（仅实用场景） */}
+              <div className="card formsec" id="bsec-script">
+                <div className="fs-head"><h3>⑥ 剧本配置</h3><span className="sub">有剧本对练的流程与考核点</span></div>
+                {form.sceneType === 'drill' ? (
+                  <div className="hint">当前为「实战训练」类型，无需配置剧本。</div>
+                ) : (
+                  <>
+                    <div className="field">
+                      <label>执行顺序</label>
+                      <textarea value={form.scriptExecutionOrder} onChange={(e) => updateForm({ scriptExecutionOrder: e.target.value })} className="input" rows={2} placeholder="如：开场破冰 → 需求探询 → 异议处理 → 推进成交" maxLength={200} />
+                    </div>
+                    <div className="field">
+                      <label>目的</label>
+                      <textarea value={form.scriptPurpose} onChange={(e) => updateForm({ scriptPurpose: e.target.value })} className="input" rows={2} placeholder="这个剧本要训练学员达成什么" maxLength={200} />
+                    </div>
+                    <div className="field">
+                      <label>话题</label>
+                      <textarea value={form.scriptTopics} onChange={(e) => updateForm({ scriptTopics: e.target.value })} className="input" rows={2} placeholder="一行一个或用分号分隔" />
+                    </div>
+                    <div className="field">
+                      <label>客户的主要问题</label>
+                      <textarea value={form.scriptCustomerQuestions} onChange={(e) => updateForm({ scriptCustomerQuestions: e.target.value })} className="input" rows={3} placeholder="一行一个，角色会在对练中抛出" />
+                    </div>
+                    <div className="field">
+                      <label>主要考核点</label>
+                      <textarea value={form.scriptAssessmentPoints} onChange={(e) => updateForm({ scriptAssessmentPoints: e.target.value })} className="input" rows={3} placeholder="一行一个，作为评分参照" />
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* ⑦ 参与者 */}
+              <div className="card formsec" id="bsec-participants">
+                <div className="fs-head"><h3>⑦ 参与者</h3><span className="sub">各参与者的特征、说话方式与参与目的</span></div>
+                {form.participants.length === 0 && (
+                  <div className="hint" style={{ marginBottom: 8 }}>尚未添加参与者，点击下方按钮添加（通常包含学员与客户两方）。</div>
+                )}
+                {form.participants.map((p, idx) => (
+                  <div key={idx} className="participant-row">
+                    <div className="row2">
+                      <div className="field">
+                        <label>名称 / 角色</label>
+                        <input type="text" value={p.name} onChange={(e) => updateParticipant(idx, { name: e.target.value })} className="input" placeholder="如：孟建国（门诊主任）" maxLength={30} />
+                      </div>
+                      <div className="field">
+                        <label>参与目的</label>
+                        <input type="text" value={p.goal ?? ''} onChange={(e) => updateParticipant(idx, { goal: e.target.value })} className="input" placeholder="TA 参与这场对话想达成什么" maxLength={100} />
+                      </div>
+                    </div>
+                    <div className="row2">
+                      <div className="field">
+                        <label>主要特征</label>
+                        <input type="text" value={p.traits ?? ''} onChange={(e) => updateParticipant(idx, { traits: e.target.value })} className="input" placeholder="如：冷淡型客户，时间紧张" maxLength={100} />
+                      </div>
+                      <div className="field">
+                        <label>说话特点</label>
+                        <input type="text" value={p.speakingStyle ?? ''} onChange={(e) => updateParticipant(idx, { speakingStyle: e.target.value })} className="input" placeholder="如：语速快、打断多、问题直接" maxLength={100} />
+                      </div>
+                    </div>
+                    <div className="row2">
+                      <div className="field">
+                        <label>话语范围</label>
+                        <input type="text" value={p.speechScope ?? ''} onChange={(e) => updateParticipant(idx, { speechScope: e.target.value })} className="input" placeholder="如：只谈商务条件，不聊产品细节" maxLength={100} />
+                      </div>
+                      <div className="field">
+                        <label>言语要求</label>
+                        <input type="text" value={p.languageRequirements ?? ''} onChange={(e) => updateParticipant(idx, { languageRequirements: e.target.value })} className="input" placeholder="如：不接受夸大表述，要求数据出处" maxLength={100} />
+                      </div>
+                    </div>
+                    <button type="button" className="act-btn danger participant-del" onClick={() => removeParticipant(idx)}>
+                      🗑 删除该参与者
+                    </button>
+                  </div>
+                ))}
+                <button type="button" className="btn btn-ghost btn-sm" onClick={addParticipant}>
+                  ＋ 添加参与者
+                </button>
               </div>
               </>)}
 

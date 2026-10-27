@@ -10,6 +10,38 @@ export interface User {
   avatar?: string;
 }
 
+/** 场景类型：drill=实战训练（无剧本自由对练）；practical=实用场景（单点考核，有剧本） */
+export type SceneType = 'drill' | 'practical';
+
+/** 剧本维度 */
+export interface ScenarioScript {
+  /** 执行顺序（剧本流程/步骤） */
+  executionOrder?: string;
+  /** 目的 */
+  purpose?: string;
+  /** 话题 */
+  topics?: string[];
+  /** 客户的主要问题 */
+  customerQuestions?: string[];
+  /** 主要考核点 */
+  assessmentPoints?: string[];
+}
+
+/** 参与者维度 */
+export interface ScenarioParticipant {
+  name: string;
+  /** 主要特征 */
+  traits?: string;
+  /** 说话特点 */
+  speakingStyle?: string;
+  /** 话语范围 */
+  speechScope?: string;
+  /** 言语要求 */
+  languageRequirements?: string;
+  /** 参与目的 */
+  goal?: string;
+}
+
 export interface Scenario {
   id: string;
   tenantId: string;
@@ -25,6 +57,14 @@ export interface Scenario {
   methodology?: string;
   source?: string;
   practiceCount?: number;
+  /** 是否带剧本（实用场景=有剧本；实战训练自由对练=无剧本） */
+  hasScript?: boolean;
+  /** 场景类型（缺省视为 practical） */
+  sceneType?: SceneType;
+  /** 剧本（实用场景） */
+  script?: ScenarioScript;
+  /** 参与者设定 */
+  participants?: ScenarioParticipant[];
 }
 
 export interface PersonaConfig {
@@ -258,6 +298,31 @@ export interface TurnResult {
 export interface SessionCreated {
   session: Session;
   persona: { name: string; age?: number; occupation?: string; background: string; avatar?: string };
-  scenario: { name: string; durationMinutes: number; coverageTopics?: string[] };
+  scenario: {
+    name: string;
+    durationMinutes: number;
+    coverageTopics?: string[];
+    hasScript?: boolean;
+    sceneType?: SceneType;
+    script?: ScenarioScript;
+    participants?: ScenarioParticipant[];
+  };
   remainingSeconds: number;
+}
+
+/** 学员视角考核窗口（GET /exam-windows 返回，含我的状态） */
+export interface ExamWindow {
+  id: string;
+  tenantId: string;
+  name: string;
+  startsAt: string;
+  endsAt: string;
+  scenarioIds: string[];
+  userIds: string[];
+  status: 'draft' | 'open' | 'closed' | 'published';
+  retakeCooldownDays: number;
+  scenarioNames?: (string | null)[];
+  myStatus: 'not_started' | 'in_progress' | 'passed' | 'failed' | 'cooldown';
+  myBestScore: number | null;
+  nextRetakeAt: string | null;
 }

@@ -1,16 +1,51 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchScenarios, fetchMySessions, fetchGrowth, createSession, apiError } from '../api';
+import { fetchScenarios, fetchMySessions, fetchExamWindows, createSession, apiError, getStoredUser } from '../api';
 import type { MySessionRecord } from '../api';
-import type { GrowthData, Scenario } from '../types';
+import type { ExamWindow, Scenario } from '../types';
+import { CATEGORY_RULES, categoryOf, matchCategory } from '../lib/categories';
 
-/** 分类关键词匹配：按场景名称与 coverageTopics 归类 */
-const CATEGORY_RULES = [
-  { label: '电话销售', color: '#FF6B5B', keywords: ['电话', '外呼', '电销', '前台'] },
-  { label: '客户主动咨询', color: '#4B7BEC', keywords: ['咨询', '来电', '上门', '询价', '比价'] },
-  { label: '成交谈判', color: '#F5A623', keywords: ['谈判', '成交', '续约', '涨价', '条款', '价格', '签约'] },
-  { label: '地推引流课', color: '#2FAE7B', keywords: ['地推', '破冰', '陌生', '展会', '商场', '摊位', '驻足'] },
+/** 实战训练模块卡片配置（后续增删卡片改这里即可） */
+const TRAINING_MODULES = [
+  {
+    key: 'ground-push',
+    label: '地推引流课',
+    icon: '👋',
+    color: '#2FAE7B',
+    desc: '陌生拜访与破冰开场，练在街头商场快速建立对话',
+    entry: 'practice',
+    categoryLabel: '地推引流课',
+  },
+  {
+    key: 'phone',
+    label: '电话销售',
+    icon: '📞',
+    color: '#FF6B5B',
+    desc: '外呼开场与异议应对，练在 30 秒内抓住客户注意力',
+    entry: 'call',
+    categoryLabel: '电话销售',
+  },
+  {
+    key: 'inquiry',
+    label: '咨询接待',
+    icon: '💬',
+    color: '#4B7BEC',
+    desc: '承接主动咨询与询价比价，练需求挖掘与专业解答',
+    entry: 'practice',
+    categoryLabel: '咨询接待',
+  },
+  {
+    key: 'deal',
+    label: '现场成交',
+    icon: '🤝',
+    color: '#F5A623',
+    desc: '价格谈判与签约推进，练临门一脚的成交能力',
+    entry: 'practice',
+    categoryLabel: '现场成交',
+  },
 ] as const;
+
+type TrainingModule = (typeof TRAINING_MODULES)[number];
 
 const CATEGORIES = [
   { label: '全部', value: '', color: '' },
@@ -33,34 +68,35 @@ function hashId(id: string): number {
   return h;
 }
 
-function scenarioText(s: Scenario): string {
-  return [s.name, s.personaName ?? '', ...(s.coverageTopics ?? [])].join(' ');
-}
-
-function categoryOf(s: Scenario) {
-  const text = scenarioText(s);
-  return CATEGORY_RULES.find((r) => r.keywords.some((k) => text.includes(k))) ?? null;
-}
-
-function matchCategory(s: Scenario, value: string): boolean {
-  if (!value) return true;
-  const rule = CATEGORY_RULES.find((r) => r.label === value);
-  if (!rule) return true;
-  const text = scenarioText(s);
-  return rule.keywords.some((k) => text.includes(k));
-}
-
 function difficultyLabel(d: number): string {
   if (d <= 2) return '初级';
   if (d === 3) return '进阶';
   return '挑战';
 }
 
+/** 该场景是否有可参加的考核窗口（与后端 sessions.ts 的校验口径对齐） */
+function examWindowFor(windows: ExamWindow[], scenarioId: string): ExamWindow | null {
+  const userId = getStoredUser()?.id;
+  const nowMs = Date.now();
+  return (
+    windows.find(
+      (w) =>
+        w.status === 'open' &&
+        w.scenarioIds.includes(scenarioId) &&
+        (!userId || w.userIds.includes(userId)) &&
+        nowMs >= new Date(w.startsAt).getTime() &&
+        nowMs <= new Date(w.endsAt).getTime() &&
+        w.myStatus !== 'passed' &&
+        w.myStatus !== 'cooldown'
+    ) ?? null
+  );
+}
+
 export default function Home() {
   const navigate = useNavigate();
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [records, setRecords] = useState<MySessionRecord[]>([]);
-  const [growth, setGrowth] = useState<GrowthData | null>(null);
+  const [examWindows, setExamWindows] = useState<ExamWindow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeCategory, setActiveCategory] = useState('');
@@ -68,7 +104,32 @@ export default function Home() {
   const [startingId, setStartingId] = useState<string | null>(null);
   const [startError, setStartError] = useState('');
 
-  /** 点击场景：直接创建会话并进入练习页（轮次语音模式） */
+  /** 实战训练卡片：从场景类型为「实战训练」的场景中匹配（优先按卡片类别，回退到该类型第一个） */
+  const drillScenarios = useMemo(() => scenarios.filter((s) => s.sceneType === 'drill'), [scenarios]);
+
+  const drillFor = (mod: TrainingModule): Scenario | null =>
+    drillScenarios.find((s) => matchCategory(s, mod.categoryLabel)) ?? drillScenarios[0] ?? null;
+
+  const startTraining = async (mod: TrainingModule) => {
+    if (startingId) return;
+    const hit = drillFor(mod);
+    if (!hit) return;
+    setStartingId(mod.key);
+    setStartError('');
+    try {
+      const data = await createSession(hit.id, 'practice');
+      if (mod.entry === 'call') {
+        navigate(`/call?sessionId=${data.session.id}`);
+      } else {
+        navigate(`/practice/${data.session.id}?mode=voice&script=none`);
+      }
+    } catch (err) {
+      setStartError(apiError(err, '创建会话失败，请稍后重试'));
+      setStartingId(null);
+    }
+  };
+
+  /** 实用场景 - 练习（有剧本，由场景 hasScript 决定） */
   const startPractice = async (scenarioId: string) => {
     if (startingId) return;
     setStartingId(scenarioId);
@@ -82,18 +143,34 @@ export default function Home() {
     }
   };
 
+  /** 实用场景 - 考核（需存在覆盖该场景的开放考核窗口） */
+  const startExam = async (scene: Scenario) => {
+    if (startingId) return;
+    const window = examWindowFor(examWindows, scene.id);
+    if (!window) return;
+    setStartingId(scene.id);
+    setStartError('');
+    try {
+      const data = await createSession(scene.id, 'exam', window.id);
+      navigate(`/practice/${data.session.id}?mode=voice`);
+    } catch (err) {
+      setStartError(apiError(err, '创建考核会话失败，请稍后重试'));
+      setStartingId(null);
+    }
+  };
+
   const load = () => {
     setLoading(true);
     setError('');
     Promise.all([
       fetchScenarios(),
       fetchMySessions().catch(() => ({ records: [] as MySessionRecord[] })),
-      fetchGrowth().catch(() => null),
+      fetchExamWindows().catch(() => ({ windows: [] as ExamWindow[] })),
     ])
-      .then(([s, r, g]) => {
+      .then(([s, r, w]) => {
         setScenarios(s.scenarios);
         setRecords(r.records);
-        setGrowth(g);
+        setExamWindows(w.windows);
       })
       .catch((err) => setError(apiError(err, '场景加载失败，请稍后重试')))
       .finally(() => setLoading(false));
@@ -112,20 +189,9 @@ export default function Home() {
     return map;
   }, [records]);
 
-  /** 为你推荐：取 currentLevel 最低的技能，匹配 skillPointNames 含该技能的第一个场景 */
-  const hero = useMemo(() => {
-    if (scenarios.length === 0) return null;
-    const weakest = growth?.skills?.length
-      ? [...growth.skills].sort((a, b) => a.currentLevel - b.currentLevel)[0]
-      : null;
-    if (weakest) {
-      const hit = scenarios.find((s) => s.skillPointNames?.includes(weakest.name));
-      if (hit) return { scenario: hit, skillName: weakest.name };
-    }
-    return { scenario: scenarios[0], skillName: null as string | null };
-  }, [scenarios, growth]);
-
   const filteredScenes = scenarios.filter((s) => {
+    // 实用场景模块只列「实用场景」类型（缺省按 practical 兼容存量数据）
+    if ((s.sceneType ?? 'practical') === 'drill') return false;
     if (!matchCategory(s, activeCategory)) return false;
     if (practicedOnly && !bestScores.has(s.id)) return false;
     return true;
@@ -133,26 +199,6 @@ export default function Home() {
 
   return (
     <div>
-      {/* 类别胶囊条 - matches prototype .cats */}
-      <div className="cats">
-        {CATEGORIES.map((cat) => (
-          <span
-            key={cat.value}
-            onClick={() => setActiveCategory(cat.value)}
-            className={`chip ${activeCategory === cat.value ? 'all' : 'gray'}`}
-          >
-            {cat.color && <i className="cdot" style={{ background: cat.color }} />}
-            {cat.label}
-          </span>
-        ))}
-        <span
-          onClick={() => setPracticedOnly((v) => !v)}
-          className={`chip ${practicedOnly ? 'all' : 'gray'}`}
-        >
-          仅看已练习
-        </span>
-      </div>
-
       {loading ? (
         <div className="flex items-center justify-center h-64">
           <div className="w-8 h-8 border-3 border-coral/30 border-t-coral rounded-full animate-spin" />
@@ -160,86 +206,102 @@ export default function Home() {
       ) : error ? (
         <div className="flex flex-col items-center justify-center h-64 gap-3">
           <p className="text-sm text-text-secondary">{error}</p>
-          <button className="btn ghost sm" onClick={load}>重试</button>
+          <button className="btn-ghost btn btn-sm" onClick={load}>重试</button>
         </div>
       ) : (
         <>
-          {/* 为你推荐 Hero - matches prototype .hero */}
-          {hero && (
-            <section className="card hero">
-              <div className="avatar">
-                <span style={{ fontSize: 28, lineHeight: 1 }}>{COVERS[hashId(hero.scenario.id) % COVERS.length].em}</span>
-              </div>
-              <div>
-                <span className="chip coral" style={{ marginBottom: 6 }}>
-                  {hero.skillName ? `为你推荐 · 针对弱项「${hero.skillName}」` : '为你推荐'}
-                </span>
-                <h2>{hero.scenario.name}</h2>
-                <p>
-                  {hero.scenario.methodology ??
-                    `对手：${hero.scenario.personaName ?? 'AI 客户'}${hero.scenario.personaTitle ? ` · ${hero.scenario.personaTitle}` : ''}，时长约 ${hero.scenario.durationMinutes} 分钟。`}
-                </p>
-              </div>
-              <div className="cta">
-                <button className="btn primary" disabled={startingId !== null} onClick={() => startPractice(hero.scenario.id)}>
-                  {startingId === hero.scenario.id ? '创建会话中…' : '立即开练'}
-                </button>
-              </div>
-            </section>
-          )}
-
-          {/* 热门场景 - matches prototype .sec-head */}
+          {/* 实战训练 */}
           <div className="sec-head">
-            <h2 className="bar">热门场景</h2>
-            <span className="more">按你的行业智能排序</span>
+            <h2 className="bar-title">实战训练</h2>
           </div>
-
           {startError && (
             <p className="text-xs text-coral" style={{ marginBottom: 8 }}>{startError}</p>
           )}
+          <div className="train-grid" style={{ marginBottom: 28 }}>
+            {TRAINING_MODULES.map((mod) => {
+              const available = drillFor(mod) !== null;
+              const starting = startingId === mod.key;
+              return (
+                <div
+                  key={mod.key}
+                  className={`card train-card${available && !startingId ? '' : ' disabled'}`}
+                  onClick={() => startTraining(mod)}
+                >
+                  <div className="train-icon" style={{ background: mod.color }}>
+                    {mod.icon}
+                  </div>
+                  <h3>{mod.label}</h3>
+                  <p className="desc">{available ? mod.desc : '该类别暂无可用场景'}</p>
+                  <div className="train-meta">
+                    <span className="train-go" style={{ background: mod.color }}>
+                      {starting ? '创建会话中…' : mod.entry === 'call' ? '发起通话 →' : '开始练习 →'}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
 
-          {/* 瀑布流卡片 - matches prototype .masonry */}
+          {/* 实用场景 */}
+          <div className="sec-head">
+            <h2 className="bar-title">实用场景</h2>
+            <span className="more">从场景库选择 · 有剧本对练</span>
+          </div>
+
+          {/* 类别筛选 */}
+          <div className="cats">
+            {CATEGORIES.map((cat) => (
+              <span
+                key={cat.value}
+                onClick={() => setActiveCategory(cat.value)}
+                className={`chip ${activeCategory === cat.value ? 'active' : 'chip-gray'}`}
+              >
+                {cat.color && <i className="cdot" style={{ background: cat.color }} />}
+                {cat.label}
+              </span>
+            ))}
+            <span
+              onClick={() => setPracticedOnly((v) => !v)}
+              className={`chip ${practicedOnly ? 'active' : 'chip-gray'}`}
+            >
+              仅看已练习
+            </span>
+          </div>
+
           {filteredScenes.length === 0 ? (
             <div className="flex items-center justify-center h-40">
               <p className="text-sm text-text-tertiary">暂无符合条件的场景</p>
             </div>
           ) : (
-            <div className="masonry">
+            <div className="scene-grid">
               {filteredScenes.map((scene) => {
-                const h = hashId(scene.id);
-                const cover = COVERS[h % COVERS.length];
-                const tier = (h % 4) + 1;
+                const cover = COVERS[hashId(scene.id) % COVERS.length];
                 const cat = categoryOf(scene);
                 const score = bestScores.get(scene.id);
-                const practiced = score != null || records.some((r) => r.scenarioId === scene.id);
+                const examWindow = examWindowFor(examWindows, scene.id);
                 const tags = [...new Set([...(scene.skillPointNames ?? []), ...(scene.coverageTopics ?? [])])].slice(0, 4);
+                const busy = startingId === scene.id;
                 return (
                   <div
                     key={scene.id}
-                    onClick={() => startPractice(scene.id)}
                     className="card scene-card"
-                    style={startingId === scene.id ? { opacity: 0.6, pointerEvents: 'none' } : undefined}
+                    style={busy ? { opacity: 0.6, pointerEvents: 'none' } : undefined}
                   >
                     {/* 封面 */}
-                    <div
-                      className={`cover t${tier}`}
-                      style={{ background: cover.g, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                    >
-                      <span style={{ fontSize: 44, lineHeight: 1 }}>{cover.em}</span>
+                    <div className="cover" style={{ background: cover.g }}>
+                      <span style={{ fontSize: 26, lineHeight: 1 }}>{cover.em}</span>
                       <span className="chip cat">
                         <i className="cdot" style={{ background: cat?.color ?? '#8A8F98' }} />
                         {cat?.label ?? '综合场景'}
                       </span>
+                      {scene.hasScript && <span className="scripted">有剧本</span>}
                       <span className="diff">{difficultyLabel(scene.difficulty)} · 约 {scene.durationMinutes} 分钟</span>
-                      {practiced && score != null && (
-                        <span className="practiced">已练习 · {score} 分</span>
-                      )}
+                      {score != null && <span className="practiced">已练习 · {score} 分</span>}
                     </div>
 
-                    {/* 文字区 - matches prototype .sbody */}
+                    {/* 文字区 */}
                     <div className="sbody">
                       <h3>{scene.name}</h3>
-                      {scene.methodology && <p className="desc">{scene.methodology}</p>}
                       {(scene.personaName || scene.personaTitle) && (
                         <div className="who">
                           <div
@@ -258,17 +320,25 @@ export default function Home() {
                           ))}
                         </div>
                       )}
-                      {practiced && (
+                      <div className="scene-actions">
                         <button
-                          className="again"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            startPractice(scene.id);
-                          }}
+                          className="btn btn-soft btn-sm"
+                          disabled={startingId !== null}
+                          onClick={() => startPractice(scene.id)}
                         >
-                          再练一次 →
+                          {busy ? '创建会话中…' : '练习'}
                         </button>
-                      )}
+                        {examWindow && (
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            disabled={startingId !== null}
+                            onClick={() => startExam(scene)}
+                            title={`考核窗口：${examWindow.name}`}
+                          >
+                            考核
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );

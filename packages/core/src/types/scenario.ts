@@ -26,6 +26,39 @@ export interface SuccessCriteria {
   passScore: number;
 }
 
+/** 场景类型：drill=实战训练（无剧本自由对练）；practical=实用场景（单点考核，有剧本） */
+export type SceneType = 'drill' | 'practical';
+
+/** 剧本维度 */
+export interface ScenarioScript {
+  /** 执行顺序（剧本流程/步骤） */
+  executionOrder?: string;
+  /** 目的 */
+  purpose?: string;
+  /** 话题 */
+  topics?: string[];
+  /** 客户的主要问题 */
+  customerQuestions?: string[];
+  /** 主要考核点 */
+  assessmentPoints?: string[];
+}
+
+/** 参与者维度 */
+export interface ScenarioParticipant {
+  /** 参与者名称/角色 */
+  name: string;
+  /** 主要特征 */
+  traits?: string;
+  /** 说话特点 */
+  speakingStyle?: string;
+  /** 话语范围 */
+  speechScope?: string;
+  /** 言语要求 */
+  languageRequirements?: string;
+  /** 参与目的 */
+  goal?: string;
+}
+
 export interface Scenario {
   id: string;
   tenantId: string;
@@ -46,6 +79,14 @@ export interface Scenario {
   methodology?: string;
   /** 场景来源（如「官方」「企业定制」） */
   source?: string;
+  /** 是否带剧本（实用场景=有剧本；实战训练自由对练=无剧本） */
+  hasScript?: boolean;
+  /** 场景类型（缺省视为 practical，兼容存量数据） */
+  sceneType?: SceneType;
+  /** 剧本（实用场景） */
+  script?: ScenarioScript;
+  /** 参与者设定 */
+  participants?: ScenarioParticipant[];
   /** 累计练习次数（展示口径，由后台维护或种子数据预置） */
   practiceCount?: number;
 }

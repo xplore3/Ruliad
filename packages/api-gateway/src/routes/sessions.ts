@@ -293,7 +293,14 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
           background: personaConfig.background,
           avatar: personaConfig.avatar,
         },
-        scenario: { name: scenario.name, durationMinutes: scenario.durationMinutes },
+        scenario: {
+          name: scenario.name,
+          durationMinutes: scenario.durationMinutes,
+          hasScript: scenario.hasScript,
+          sceneType: scenario.sceneType,
+          script: scenario.script,
+          participants: scenario.participants,
+        },
         remainingSeconds: remainingSeconds(session, scenario),
       });
     }
@@ -319,7 +326,15 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
           }
         : null,
       scenario: scenario
-        ? { name: scenario.name, durationMinutes: scenario.durationMinutes, coverageTopics: scenario.coverageTopics }
+        ? {
+            name: scenario.name,
+            durationMinutes: scenario.durationMinutes,
+            coverageTopics: scenario.coverageTopics,
+            hasScript: scenario.hasScript,
+            sceneType: scenario.sceneType,
+            script: scenario.script,
+            participants: scenario.participants,
+          }
         : null,
       remainingSeconds: scenario ? remainingSeconds(session, scenario) : null,
     };
