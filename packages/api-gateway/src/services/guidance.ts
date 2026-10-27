@@ -1,10 +1,10 @@
 import type { LLMGateway } from '@grasp-mvp/core';
-import { SALES_FAQ_ITEMS, type SalesFaqItem } from '../seed-sales-faq.data.js';
+import { DEMO_FAQ_ITEMS, type DemoFaqItem } from '../demo-faq.data.js';
 
 /**
  * 地推引流课新手指引：资格判断 + 双 AI 示范对话剧本生成。
- * 示范剧本按标准地推流程确定性生成（问题与标准答案从场景库抽取），不依赖 LLM；
- * 资格判断与示范选择的 LLM 调用失败/解析失败均有确定性兜底，保证 mock 环境可跑通。
+ * 示范剧本按标准地推流程确定性生成（客户问题与标准答案从地推开场景问答题库 demo-faq.data.ts 抽取），
+ * 不依赖 LLM；资格判断与示范选择的 LLM 调用失败/解析失败均有确定性兜底，保证 mock 环境可跑通。
  */
 
 /** 资格提问两问（与前端播放顺序一致） */
@@ -82,31 +82,13 @@ export async function judgeExperience(
   }
 }
 
-/** 场景库出题池：地推 / 通用场景的问题，剔除含舞台提示的问题与围棋专属话术（本课是英语地推） */
-const FAQ_POOL = SALES_FAQ_ITEMS.filter(
-  (item) =>
-    (item.category.includes('地推') || item.category === '通用场景') &&
-    !item.question.includes('（') &&
-    !/棋/.test(item.question + item.faq)
-);
-
-/** 清洗场景库标准答案中的占位符与舞台提示，使其可直接口播 */
-function sanitizeFaq(text: string, age: number): string {
-  return text
-    .replace(/（[^）]*）/g, '')
-    .replace(/x{3,}/g, '非常不错')
-    .replace(/xx岁/g, `${age}岁`)
-    .replace(/xx分钟/g, '10分钟')
-    .replace(/xx课程/g, '英语课程')
-    .replace(/xx妈妈|xx爸爸/g, '家长朋友')
-    .replace(/xx老师/g, '我们的老师')
-    .replace(/xx的教师团队/g, '专业过硬的教师团队')
-    .replace(/xx/g, '英语')
-    .trim();
+/** 清洗标准答案中的占位标记：xx岁 → 剧本中孩子的年龄；哥/姐 → 当前剧本的称呼（大哥/姐） */
+function sanitizeFaq(text: string, age: number, address: string): string {
+  return text.replace(/xx岁/g, `${age}岁`).replace(/哥\/姐/g, address).trim();
 }
 
-function pickTwoFaqs(): [SalesFaqItem, SalesFaqItem] {
-  const pool = [...FAQ_POOL];
+function pickTwoFaqs(): [DemoFaqItem, DemoFaqItem] {
+  const pool = [...DEMO_FAQ_ITEMS];
   const first = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
   const second = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
   return [first, second];
@@ -116,10 +98,10 @@ const SALES_SURNAMES = ['王', '李', '张', '刘', '陈'];
 
 /**
  * 生成标准地推示范剧本（确定性模板，不走 LLM，保证流程逐字符合培训规范）：
- * 激情开场（大哥/姐 二选一且全剧统一）→ 客户驻足提问（场景库问题+标准答案）→ 问年龄/黄金年龄
+ * 激情开场（大哥/姐 二选一且全剧统一）→ 客户驻足提问（题库问题+标准答案）→ 问年龄/黄金年龄
  * → 指着邀请函介绍体验课与地址 → 蹲下与孩子玩游戏 → 让孩子请家长订邀请函（小声→大声）
- * → 垫本子 → 客户再问（场景库问题+标准答案）→ 递笔成交 → 孩子道谢 → 微信还是现金 → 致谢定时间道别。
- * version 仅作接口兼容，随机性来自称呼/年龄/姓氏/场景库抽题。
+ * → 垫本子 → 客户再问（题库问题+标准答案）→ 递笔成交 → 孩子道谢 → 微信还是现金 → 致谢定时间道别。
+ * version 仅作接口兼容，随机性来自称呼/年龄/姓氏/题库抽题。
  */
 export function generateDemoScript(_version: number): DemoLine[] {
   // 开场称呼：大哥 或 姐 二选一，全剧统一；对应孩子口中的 爸爸/妈妈
@@ -128,10 +110,10 @@ export function generateDemoScript(_version: number): DemoLine[] {
   const age = 4 + Math.floor(Math.random() * 7); // 4~10 岁
   const surname = SALES_SURNAMES[Math.floor(Math.random() * SALES_SURNAMES.length)];
   const [faq1, faq2] = pickTwoFaqs();
-  const answer1 = sanitizeFaq(faq1.faq, age);
-  const answer2 = sanitizeFaq(faq2.faq, age);
+  const answer1 = sanitizeFaq(faq1.faq, age, address);
+  const answer2 = sanitizeFaq(faq2.faq, age, address);
 
-  // 销售全程高唤醒（arousal≈0.9）+ 3 倍激情（excitement=3，语速/音调抬升×3）；小朋友小声/大声用 arousal 区分
+  // 销售全程高唤醒（arousal≈0.9）+ 9 倍激情（excitement=9，语速/音调抬升顶到上限）；小朋友小声/大声用 arousal 区分
   const lines: DemoLine[] = [
     {
       role: 'sales',
@@ -191,8 +173,8 @@ export function generateDemoScript(_version: number): DemoLine[] {
     },
     { role: 'narrator', text: '销售与客户道别，地推演示结束。' },
   ];
-  // 销售台词统一 3 倍激情
-  return lines.map((l) => (l.role === 'sales' ? { ...l, excitement: 3 } : l));
+  // 销售台词激情拉满：arousal=1 × excitement=9 → 激情模式目标值：语速 1.15x（略快）、音调 1.1x（接近正常）、音量 65
+  return lines.map((l) => (l.role === 'sales' ? { ...l, arousal: 1, excitement: 9 } : l));
 }
 
 /** 再听一版关键词 */

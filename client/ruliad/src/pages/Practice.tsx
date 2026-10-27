@@ -610,11 +610,8 @@ export default function Practice() {
       if (lines.length === 0) throw new Error('empty demo');
       setDemoLines(lines);
       setDemoStage('playing');
-      // 逐句合成并顺序播放：前一句播完再播下一句
-      for (let i = 0; i < lines.length; i++) {
-        if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
-        setDemoIndex(i);
-        const line = lines[i];
+      // 预合成管线：播放当前句时提前合成后面 3 句，句间不再等 TTS 网络往返（每句现场合成要 1~3 秒）
+      const synthLine = (line: DemoLine) => {
         const voiceRole =
           line.role === 'sales'
             ? 'sales'
@@ -623,10 +620,26 @@ export default function Practice() {
               : line.role === 'child'
                 ? 'child'
                 : 'narrator';
+        return ttsClip(sessionId, line.text, voiceRole, line.arousal, line.excitement).catch(() => null);
+      };
+      const inflight = new Map<number, Promise<{ audioBase64: string } | null>>();
+      const prefetch = (i: number) => {
+        if (i < lines.length && !inflight.has(i)) inflight.set(i, synthLine(lines[i]));
+      };
+      prefetch(0);
+      prefetch(1);
+      prefetch(2);
+      // 逐句播放：前一句播完再播下一句
+      for (let i = 0; i < lines.length; i++) {
+        if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
+        setDemoIndex(i);
+        const pending = inflight.get(i) ?? synthLine(lines[i]);
+        inflight.delete(i);
+        prefetch(i + 3);
         try {
-          const clip = await ttsClip(sessionId, line.text, voiceRole, line.arousal, line.excitement);
+          const clip = await pending;
           if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
-          await playClip(clip.audioBase64);
+          if (clip) await playClip(clip.audioBase64);
         } catch {
           /* 单句音频失败：文字已展示，继续下一句 */
         }
