@@ -81,14 +81,14 @@ export class MockSpeechProvider implements ASRProvider, TTSProvider {
   }
 
   async synthesize(text: string, opts?: TTSOptions): Promise<TTSResult> {
-    arousalToTTSParams(opts?.arousal);
+    arousalToTTSParams(opts?.arousal, opts?.excitement);
     const wav = makeSineWav(text, opts?.arousal);
-    console.log(`[MockTTS][trace] synthesize: text="${text.slice(0, 30)}..." arousal=${opts?.arousal} → wavBytes=${wav.length}`);
+    console.log(`[MockTTS][trace] synthesize: text="${text.slice(0, 30)}..." arousal=${opts?.arousal} excitement=${opts?.excitement ?? 1} → wavBytes=${wav.length}`);
     return { audio: wav, format: 'wav' };
   }
 
   async *synthesizeStream(text: string, opts?: TTSOptions): AsyncIterable<TTSChunk> {
-    arousalToTTSParams(opts?.arousal);
+    arousalToTTSParams(opts?.arousal, opts?.excitement);
     const wav = makeSineWav(text, opts?.arousal);
     // 模拟分块：将 WAV 拆为头部 + 前半数据 + 后半数据
     const half = Math.floor(wav.length / 2);

@@ -33,6 +33,8 @@ export interface TTSOptions {
   voice?: string;
   /** 情绪唤醒度 0~1（persona 当前 arousal）：高唤醒 → 语速快、音调高 */
   arousal?: number;
+  /** 激情倍率（默认 1）：等比放大 arousal 的语速/音调抬升，示范销售用 3 */
+  excitement?: number;
 }
 
 export interface TTSResult {

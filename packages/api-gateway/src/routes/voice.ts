@@ -132,19 +132,20 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
     };
   });
 
-  /** TTS 说话角色：persona=按人设音色（默认，兼容现状）；coach/sales/narrator=指引模式固定音色 */
-  type VoiceRole = 'persona' | 'coach' | 'sales' | 'narrator';
-  // 指引模式三个角色的固定音色（CosyVoice v2，与 persona 常用默认 longxiaochun_v2 区分开）；
-  // mock speech 忽略音色参数，aliyun 未知音色会报错——这里选的是 CosyVoice v2 官方音色
+  /** TTS 说话角色：persona=按人设音色（默认，兼容现状）；coach/sales/narrator/child=指引模式固定音色 */
+  type VoiceRole = 'persona' | 'coach' | 'sales' | 'narrator' | 'child';
+  // 指引模式各角色的固定音色（CosyVoice v2，与 persona 常用默认 longxiaochun_v2 区分开）；
+  // mock speech 忽略音色参数，aliyun 未知音色会报错——这里选的是 CosyVoice v2 官方音色（child 为儿童音色）
   const ROLE_VOICES: Record<Exclude<VoiceRole, 'persona'>, string> = {
     coach: 'longshu_v2',
     sales: 'longwan_v2',
     narrator: 'longhua_v2',
+    child: 'longtong_v2',
   };
 
   // 开场白/文字模式回复的服务端 TTS：按 persona 音色合成任意文本（与 voice-turn 回复同一声音）；
-  // voiceRole 为 coach/sales/narrator 时用指引模式固定音色（示范对话各角色区分）
-  app.post<{ Params: { id: string }; Body: { text?: string; arousal?: number; voiceRole?: VoiceRole } }>(
+  // voiceRole 为 coach/sales/narrator/child 时用指引模式固定音色（示范对话各角色区分）
+  app.post<{ Params: { id: string }; Body: { text?: string; arousal?: number; excitement?: number; voiceRole?: VoiceRole } }>(
     '/sessions/:id/tts',
     async (request, reply) => {
       const session = await store.getSession(request.params.id);
@@ -153,8 +154,8 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
       if (!text) return reply.code(400).send({ error: '缺少 text' });
       if (text.length > 500) return reply.code(400).send({ error: 'text 过长' });
       const voiceRole = request.body?.voiceRole ?? 'persona';
-      if (!['persona', 'coach', 'sales', 'narrator'].includes(voiceRole)) {
-        return reply.code(400).send({ error: 'voiceRole 只能是 persona / coach / sales / narrator' });
+      if (!['persona', 'coach', 'sales', 'narrator', 'child'].includes(voiceRole)) {
+        return reply.code(400).send({ error: 'voiceRole 只能是 persona / coach / sales / narrator / child' });
       }
       const scenario = await store.getScenario(session.scenarioId);
       if (!scenario) return reply.code(500).send({ error: '场景缺失' });
@@ -162,7 +163,11 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
         voiceRole === 'persona'
           ? await personaVoice(store, scenario.personaConfigId, request.log)
           : ROLE_VOICES[voiceRole];
-      const tts = await speech.tts.synthesize(text, { voice, arousal: request.body?.arousal });
+      const tts = await speech.tts.synthesize(text, {
+        voice,
+        arousal: request.body?.arousal,
+        excitement: request.body?.excitement,
+      });
       return { audioBase64: tts.audio.toString('base64'), audioFormat: tts.format };
     }
   );
