@@ -77,9 +77,12 @@ export async function authRoutes(app: FastifyInstance, ctx: RouteContext): Promi
       return reply.code(400).send({ error: '手机号格式不正确' });
     }
 
+    // 开发回显模式（SMS_DEV_ECHO=1）：跳过频率/单日限制与真实短信发送，任何手机号直接回显验证码
+    const devEcho = process.env.SMS_DEV_ECHO === '1';
+
     // 频率限制：60 秒内只能发 1 次
     const existing = codeStore.get(phone);
-    if (existing && Date.now() - existing.sentAt < RATE_LIMIT_MS) {
+    if (!devEcho && existing && Date.now() - existing.sentAt < RATE_LIMIT_MS) {
       const waitSec = Math.ceil((RATE_LIMIT_MS - (Date.now() - existing.sentAt)) / 1000);
       return reply.code(429).send({ error: `发送太频繁，请 ${waitSec} 秒后再试` });
     }
@@ -87,7 +90,7 @@ export async function authRoutes(app: FastifyInstance, ctx: RouteContext): Promi
     // 单日次数限制
     const daily = dailyCount.get(phone);
     const today = todayKey();
-    if (daily && daily.date === today && daily.count >= DAILY_LIMIT) {
+    if (!devEcho && daily && daily.date === today && daily.count >= DAILY_LIMIT) {
       return reply.code(429).send({ error: '今日验证码获取次数已达上限（5次），请明天再试' });
     }
 
@@ -108,7 +111,7 @@ export async function authRoutes(app: FastifyInstance, ctx: RouteContext): Promi
     app.log.info(`[验证码] ${phone} => ${code}`);
 
     // 开发回显模式：SMS_DEV_ECHO=1 时跳过真实短信发送，直接回显验证码（前端自动填充登录）
-    if (process.env.SMS_DEV_ECHO === '1') {
+    if (devEcho) {
       app.log.info(`[SMS] SMS_DEV_ECHO=1，跳过真实发送，回显验证码`);
       return reply.code(200).send({
         success: true,
