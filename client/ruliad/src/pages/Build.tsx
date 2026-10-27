@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   fetchScenarios,
   createScenario,
@@ -8,10 +8,14 @@ import {
   updatePersonaConfig,
   fetchSkillPoints,
   trialChat,
+  extractScenarioFromText,
+  extractScenarioFromAudio,
   getStoredUser,
   apiError,
 } from '../api';
+import type { ScenarioExtractResult } from '../api';
 import type { Scenario, SkillPoint } from '../types';
+import { PcmRecorder, pcmToWav } from '../voice';
 
 type EditorStep = 'base' | 'goal' | 'role' | 'params' | 'eval';
 
@@ -61,6 +65,44 @@ const AVATARS = [
 const DEFAULT_WEIGHTS: Record<string, number> = Object.fromEntries(
   DIMENSIONS.map((d) => [d.key, d.defaultWeight])
 );
+
+const FIELD_LABELS: Record<string, string> = {
+  name: '场景标题',
+  category: '场景类别',
+  description: '场景描述',
+  difficulty: '难度',
+  duration: '预计时长',
+  goal: '我方目标',
+  successCriteria: '及格分',
+  doNot: '禁止事项',
+  roleName: '角色姓名',
+  roleTitle: '角色职位',
+  roleIndustry: '角色行业',
+  personalities: '性格标签',
+  decisionStyle: '决策风格',
+  objections: '典型异议',
+  hiddenInfo: '禁止透露',
+  speechRate: '语速',
+  challenge: '挑战强度',
+  interruptLevel: '打断频率',
+  skillPointNames: '考核技能点',
+  dimensionWeights: '六维权重',
+};
+
+const clampInt = (v: unknown, min: number, max: number): number | null => {
+  const n = typeof v === 'string' ? Number(v) : v;
+  if (typeof n !== 'number' || !Number.isFinite(n)) return null;
+  return Math.min(max, Math.max(min, Math.round(n)));
+};
+
+const asText = (v: unknown): string | null => {
+  if (typeof v === 'string') return v.trim() ? v : null;
+  if (Array.isArray(v)) {
+    const s = v.filter((x): x is string => typeof x === 'string').join('；');
+    return s || null;
+  }
+  return null;
+};
 
 interface BuildForm {
   name: string;
@@ -141,6 +183,7 @@ export default function Build() {
 
   const [activeTab, setActiveTab] = useState<'list' | 'editor'>('list');
   const [activeStep, setActiveStep] = useState<EditorStep>('base');
+  const [editorMode, setEditorMode] = useState<'voice' | 'form'>('voice');
   const [form, setForm] = useState<BuildForm>(EMPTY_FORM);
   const [mine, setMine] = useState<Scenario[]>([]);
   const [listLoading, setListLoading] = useState(true);
@@ -155,6 +198,18 @@ export default function Build() {
     input: '',
     sending: false,
   });
+  const [ai, setAi] = useState<{
+    recording: boolean;
+    extracting: boolean;
+    level: number;
+    seconds: number;
+    input: string;
+    transcript: string | null;
+    result: ScenarioExtractResult | null;
+  }>({ recording: false, extracting: false, level: 0, seconds: 0, input: '', transcript: null, result: null });
+  const aiRecorderRef = useRef<PcmRecorder | null>(null);
+  const aiChunksRef = useRef<ArrayBuffer[]>([]);
+  const aiTimerRef = useRef<number | null>(null);
 
   const loadMine = useCallback(async () => {
     setListLoading(true);
@@ -174,6 +229,14 @@ export default function Build() {
       .then((data) => setSkillPoints(data.skillPoints))
       .catch(() => setSkillPoints([]));
   }, [loadMine]);
+
+  useEffect(
+    () => () => {
+      aiRecorderRef.current?.stop();
+      if (aiTimerRef.current) window.clearInterval(aiTimerRef.current);
+    },
+    []
+  );
 
   const updateForm = (updates: Partial<BuildForm>) => {
     setForm((prev) => ({ ...prev, ...updates }));
@@ -198,6 +261,186 @@ export default function Build() {
     return names
       .map((n) => skillPoints.find((sp) => sp.name === n)?.id)
       .filter((id): id is string => !!id);
+  };
+
+  /** 把 LLM 提取的 fields 清洗/归一化为表单补丁，同时生成预览行 */
+  const sanitizeExtracted = (fields: Record<string, unknown>): { patch: Partial<BuildForm>; rows: [string, string][] } => {
+    const patch: Partial<BuildForm> = {};
+    const rows: [string, string][] = [];
+    const push = (key: string, display: string) => rows.push([FIELD_LABELS[key] ?? key, display]);
+
+    const name = asText(fields.name);
+    if (name) { patch.name = name.slice(0, 30); push('name', patch.name); }
+    const category = asText(fields.category);
+    if (category && CATEGORIES.some((c) => c.key === category)) { patch.category = category; push('category', category); }
+    const description = asText(fields.description);
+    if (description) { patch.description = description.slice(0, 200); push('description', patch.description); }
+    const difficulty = clampInt(fields.difficulty, 1, 3);
+    if (difficulty !== null) { patch.difficulty = difficulty; push('difficulty', DIFF_LABELS[difficulty]); }
+    const duration = clampInt(fields.duration, 1, 60);
+    if (duration !== null) { patch.duration = duration; push('duration', `${duration} 分钟`); }
+    const goal = asText(fields.goal);
+    if (goal) { patch.goal = goal; push('goal', goal); }
+    const passScore = clampInt(fields.successCriteria, 1, 100);
+    if (passScore !== null) { patch.successCriteria = String(passScore); push('successCriteria', `${passScore} 分`); }
+    const doNot = asText(fields.doNot);
+    if (doNot) { patch.doNot = doNot; push('doNot', doNot); }
+    const roleName = asText(fields.roleName);
+    if (roleName) { patch.roleName = roleName; push('roleName', roleName); }
+    const roleTitle = asText(fields.roleTitle);
+    if (roleTitle) { patch.roleTitle = roleTitle; push('roleTitle', roleTitle); }
+    const roleIndustry = asText(fields.roleIndustry);
+    if (roleIndustry) { patch.roleIndustry = roleIndustry; push('roleIndustry', roleIndustry); }
+    if (Array.isArray(fields.personalities)) {
+      const tags = fields.personalities.filter(
+        (t): t is string => typeof t === 'string' && (PERSONALITY_TAGS as string[]).includes(t)
+      );
+      if (tags.length) { patch.personalities = tags; push('personalities', tags.join('、')); }
+    }
+    const decisionStyle = asText(fields.decisionStyle);
+    if (decisionStyle && (DECISION_STYLES as string[]).includes(decisionStyle)) {
+      patch.decisionStyle = decisionStyle; push('decisionStyle', decisionStyle);
+    }
+    const objections = asText(fields.objections);
+    if (objections) { patch.objections = objections; push('objections', objections); }
+    const hiddenInfo = asText(fields.hiddenInfo);
+    if (hiddenInfo) { patch.hiddenInfo = hiddenInfo; push('hiddenInfo', hiddenInfo); }
+    const speechRate = clampInt(fields.speechRate, 1, 3);
+    if (speechRate !== null) {
+      patch.speechRate = speechRate;
+      push('speechRate', ({ 1: '慢', 2: '标准', 3: '快' } as Record<number, string>)[speechRate]);
+    }
+    const challenge = clampInt(fields.challenge, 1, 5);
+    if (challenge !== null) { patch.challenge = challenge; push('challenge', `${challenge} / 5`); }
+    const interrupt = asText(fields.interruptLevel);
+    if (interrupt && ['off', 'weak', 'strong'].includes(interrupt)) {
+      patch.interruptLevel = interrupt as BuildForm['interruptLevel'];
+      push('interruptLevel', INTERRUPT_OPTIONS.find((o) => o.key === interrupt)?.label ?? interrupt);
+    }
+    if (Array.isArray(fields.skillPointNames)) {
+      const names = fields.skillPointNames.filter((n): n is string => typeof n === 'string');
+      const ids = skillIdsFromNames(names);
+      if (ids.length) {
+        patch.skillPointIds = ids;
+        push('skillPointNames', names.filter((n) => skillPoints.some((sp) => sp.name === n)).join('、'));
+      }
+    }
+    if (fields.dimensionWeights && typeof fields.dimensionWeights === 'object') {
+      const raw = fields.dimensionWeights as Record<string, unknown>;
+      const weights = { ...form.dimensionWeights };
+      let touched = false;
+      for (const d of DIMENSIONS) {
+        const n = clampInt(raw[d.key], 0, 100);
+        if (n !== null) { weights[d.key] = n; touched = true; }
+      }
+      if (touched) {
+        const sum = Object.values(weights).reduce((a, b) => a + b, 0);
+        if (sum > 0 && sum !== 100) {
+          let acc = 0;
+          DIMENSIONS.forEach((d, i) => {
+            if (i < DIMENSIONS.length - 1) {
+              weights[d.key] = Math.round((weights[d.key] / sum) * 100);
+              acc += weights[d.key];
+            } else {
+              weights[d.key] = Math.max(0, 100 - acc);
+            }
+          });
+        }
+        patch.dimensionWeights = weights;
+        push('dimensionWeights', DIMENSIONS.map((d) => `${d.name} ${weights[d.key]}%`).join(' / '));
+      }
+    }
+    return { patch, rows };
+  };
+
+  const aiPreview = ai.result?.fields ? sanitizeExtracted(ai.result.fields) : null;
+
+  /** 当前表单快照（技能点转换为名称），供增量修改时传给后端；全新场景（无标题无ID）不传 */
+  const formSnapshot = (): Record<string, unknown> | undefined => {
+    if (!editingScenarioId && !form.name.trim()) return undefined;
+    return {
+      ...form,
+      skillPointIds: undefined,
+      skillPointNames: form.skillPointIds
+        .map((id) => skillPoints.find((sp) => sp.id === id)?.name)
+        .filter(Boolean),
+    };
+  };
+
+  const startAiRecording = async () => {
+    if (ai.recording || ai.extracting) return;
+    try {
+      const rec = new PcmRecorder();
+      aiChunksRef.current = [];
+      rec.onChunk = (buf) => aiChunksRef.current.push(buf);
+      rec.onLevel = (rms) =>
+        setAi((prev) => (prev.recording ? { ...prev, level: Math.min(1, rms * 4) } : prev));
+      await rec.start();
+      aiRecorderRef.current = rec;
+      aiTimerRef.current = window.setInterval(
+        () => setAi((prev) => (prev.recording ? { ...prev, seconds: prev.seconds + 1 } : prev)),
+        1000
+      );
+      setAi((prev) => ({ ...prev, recording: true, seconds: 0, level: 0, transcript: null, result: null }));
+    } catch {
+      setNotice('无法访问麦克风，请检查浏览器权限');
+    }
+  };
+
+  const stopAiRecording = async () => {
+    if (!ai.recording) return;
+    aiRecorderRef.current?.stop();
+    aiRecorderRef.current = null;
+    if (aiTimerRef.current) {
+      window.clearInterval(aiTimerRef.current);
+      aiTimerRef.current = null;
+    }
+    const chunks = aiChunksRef.current;
+    aiChunksRef.current = [];
+    setAi((prev) => ({ ...prev, recording: false, level: 0 }));
+    if (chunks.length === 0) {
+      setNotice('没有录到声音，请重试');
+      return;
+    }
+    setAi((prev) => ({ ...prev, extracting: true }));
+    try {
+      const res = await extractScenarioFromAudio(pcmToWav(chunks), formSnapshot());
+      setAi((prev) => ({
+        ...prev,
+        extracting: false,
+        transcript: res.transcript ?? null,
+        result: res,
+        input: res.transcript ?? prev.input,
+      }));
+    } catch (err) {
+      setAi((prev) => ({ ...prev, extracting: false }));
+      setNotice(apiError(err, '语音识别失败'));
+    }
+  };
+
+  const handleAiExtract = async () => {
+    const text = ai.input.trim();
+    if (!text || ai.extracting) return;
+    setAi((prev) => ({ ...prev, extracting: true }));
+    try {
+      const res = await extractScenarioFromText(text, formSnapshot());
+      setAi((prev) => ({ ...prev, extracting: false, result: res }));
+    } catch (err) {
+      setAi((prev) => ({ ...prev, extracting: false }));
+      setNotice(apiError(err, '提取失败'));
+    }
+  };
+
+  const handleAiApply = () => {
+    if (!ai.result?.fields) return;
+    const { patch, rows } = sanitizeExtracted(ai.result.fields);
+    if (rows.length === 0) {
+      setNotice('没有可应用的字段');
+      return;
+    }
+    updateForm(patch);
+    setAi((prev) => ({ ...prev, result: null }));
+    setNotice(`已应用 ${rows.length} 个字段到表单，请检查后保存`);
   };
 
   const resetTrial = () => setTrial({ open: false, messages: [], input: '', sending: false });
@@ -227,6 +470,7 @@ export default function Build() {
     });
     resetTrial();
     setActiveStep('base');
+    setEditorMode('form');
     setActiveTab('editor');
   };
 
@@ -403,21 +647,11 @@ export default function Build() {
   return (
     <div>
       {/* Tab 切换 */}
-      <div className="flex gap-0.5 mb-6 bg-white rounded-full p-1 border border-line max-w-sm">
-        <button
-          onClick={() => setActiveTab('list')}
-          className={`flex-1 py-2 rounded-full text-xs font-medium transition-all ${
-            activeTab === 'list' ? 'bg-coral text-white shadow-sm' : 'text-text-secondary'
-          }`}
-        >
+      <div className="seg seg-lg" style={{ marginBottom: 24 }}>
+        <button onClick={() => setActiveTab('list')} className={activeTab === 'list' ? 'on' : ''}>
           我的场景
         </button>
-        <button
-          onClick={() => setActiveTab('editor')}
-          className={`flex-1 py-2 rounded-full text-xs font-medium transition-all ${
-            activeTab === 'editor' ? 'bg-coral text-white shadow-sm' : 'text-text-secondary'
-          }`}
-        >
+        <button onClick={() => setActiveTab('editor')} className={activeTab === 'editor' ? 'on' : ''}>
           场景编辑器
         </button>
       </div>
@@ -434,7 +668,7 @@ export default function Build() {
         <section className="section">
           <div className="sec-head">
             <h2><span>🛠️</span> 我的场景</h2>
-            <button onClick={() => { handleReset(); setActiveTab('editor'); }} className="btn btn-primary">
+            <button onClick={() => { handleReset(); setEditorMode('voice'); setActiveTab('editor'); }} className="btn btn-primary">
               ＋ 新建场景
             </button>
           </div>
@@ -512,12 +746,23 @@ export default function Build() {
       {activeTab === 'editor' && (
         <section className="section" style={{ paddingTop: 8 }}>
           <div className="sec-head">
-            <h2><span>✏️</span> 场景编辑器</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+              <h2><span>✏️</span> 场景编辑器</h2>
+              <div className="seg">
+                <button onClick={() => setEditorMode('voice')} className={editorMode === 'voice' ? 'on' : ''}>
+                  🎙️ 语音自动处理
+                </button>
+                <button onClick={() => setEditorMode('form')} className={editorMode === 'form' ? 'on' : ''}>
+                  📝 多维度文本输入
+                </button>
+              </div>
+            </div>
             <span className="chip chip-gray">{editingScenarioId ? '正在编辑已有场景' : '新场景草稿'}</span>
           </div>
 
-          <div className="editor">
-            {/* 左侧锚点导航（仅 PC） */}
+          <div className={editorMode === 'form' ? 'editor' : undefined}>
+            {/* 左侧锚点导航（仅 PC，多维度文本输入模式） */}
+            {editorMode === 'form' && (
             <aside className="ednav">
               <div className="card inner-card">
                 {STEPS.map((step, idx) => (
@@ -534,9 +779,84 @@ export default function Build() {
                 <div className="ver">{editingScenarioId ? '保存将更新该场景' : '保存后出现在「我的场景」'}</div>
               </div>
             </aside>
+            )}
 
-            {/* 右侧表单 */}
+            {/* 右侧内容 */}
             <div>
+              {/* 语音自动处理 */}
+              {editorMode === 'voice' && (
+              <div className="card formsec">
+                <div className="fs-head">
+                  <h3>🎙️ 语音创建 / 编辑</h3>
+                  <span className="sub">说出想要的场景或要修改的地方，自动识别并填入下方表单</span>
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+                  <button
+                    className="btn btn-primary"
+                    disabled={ai.extracting}
+                    onClick={ai.recording ? stopAiRecording : startAiRecording}
+                  >
+                    {ai.recording ? `⏹ 停止并识别（${ai.seconds}s）` : ai.extracting ? '识别中…' : '🎙️ 开始语音输入'}
+                  </button>
+                  {ai.recording && (
+                    <div style={{ flex: 1, minWidth: 120, height: 6, borderRadius: 3, background: '#F3F4F6', overflow: 'hidden' }}>
+                      <div style={{ width: `${Math.round(ai.level * 100)}%`, height: '100%', background: '#F97362', transition: 'width 100ms' }} />
+                    </div>
+                  )}
+                </div>
+                <div className="field">
+                  <textarea
+                    value={ai.input}
+                    onChange={(e) => setAi((prev) => ({ ...prev, input: e.target.value }))}
+                    className="input"
+                    rows={2}
+                    placeholder="也可以在这里打字，例如：把难度改成挑战，客户换成爱压价的采购经理…"
+                    maxLength={500}
+                  />
+                  <div className="hint">语音转写结果会显示在这里，可修改后再提取；编辑已有场景时会基于当前表单做增量修改。</div>
+                </div>
+                {ai.input.trim() && (
+                  <button
+                    className="btn btn-ghost"
+                    disabled={ai.extracting || ai.recording}
+                    onClick={handleAiExtract}
+                  >
+                    {ai.extracting ? '识别中…' : '⌨️ 提取文字内容'}
+                  </button>
+                )}
+                {ai.result && (
+                  <div style={{ marginTop: 12 }}>
+                    <div className="hint" style={{ marginBottom: 8 }}>{ai.result.reply}</div>
+                    {aiPreview && aiPreview.rows.length > 0 ? (
+                      <>
+                        <div className="weights" style={{ marginBottom: 8 }}>
+                          {aiPreview.rows.map(([label, value]) => (
+                            <div key={label} className="witem">
+                              <div className="wl"><span>{label}</span></div>
+                              <div className="wd">{value}</div>
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button className="btn btn-primary" onClick={handleAiApply}>应用到表单</button>
+                          <button
+                            className="btn btn-ghost"
+                            onClick={() => setAi((prev) => ({ ...prev, result: null }))}
+                          >
+                            丢弃
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="hint">没有识别到可提取的字段，请换个说法重试。</div>
+                    )}
+                  </div>
+                )}
+              </div>
+              )}
+
+              {/* 多维度文本输入 */}
+              {editorMode === 'form' && (<>
               {/* ① 场景基础 */}
               <div className="card formsec" id="bsec-base">
                 <div className="fs-head"><h3>① 场景基础</h3><span className="sub">这个场景是做什么的</span></div>
@@ -685,6 +1005,7 @@ export default function Build() {
                   权重合计需 = 100%（当前 {totalWeight}%{totalWeight === 100 ? ' ✅' : '，请调整'}）
                 </div>
               </div>
+              </>)}
 
               {/* 底部操作条 */}
               <div className="card editor-actions">

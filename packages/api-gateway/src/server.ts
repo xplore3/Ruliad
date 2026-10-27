@@ -23,6 +23,7 @@ import { voiceTicketRoutes } from './routes/voice-ticket.js';
 import { reportsRoutes } from './routes/reports.js';
 import { appealsRoutes } from './routes/appeals.js';
 import { catalogRoutes } from './routes/catalog.js';
+import { scenarioExtractRoutes } from './routes/scenario-extract.js';
 import { growthRoutes } from './routes/growth.js';
 import { tenantsRoutes } from './routes/tenants.js';
 import { examsRoutes } from './routes/exams.js';
@@ -200,6 +201,7 @@ async function main() {
   await app.register((a) => reportsRoutes(a, ctx), { prefix: '/api/v1' });
   await app.register((a) => appealsRoutes(a, ctx), { prefix: '/api/v1' });
   await app.register((a) => catalogRoutes(a, ctx), { prefix: '/api/v1' });
+  await app.register((a) => scenarioExtractRoutes(a, ctx), { prefix: '/api/v1' });
   await app.register((a) => growthRoutes(a, ctx), { prefix: '/api/v1' });
   await app.register((a) => tenantsRoutes(a, ctx), { prefix: '/api/v1' });
   await app.register((a) => examsRoutes(a, ctx), { prefix: '/api/v1' });

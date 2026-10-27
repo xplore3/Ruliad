@@ -104,6 +104,38 @@ export class PcmRecorder {
   }
 }
 
+// ---------- PCM → WAV ----------
+
+/** 把 PcmRecorder 收集的 PCM16 LE 16kHz mono 块拼成带 44 字节头的 WAV Blob */
+export function pcmToWav(chunks: ArrayBuffer[]): Blob {
+  const total = chunks.reduce((n, c) => n + c.byteLength, 0);
+  const buffer = new ArrayBuffer(44 + total);
+  const view = new DataView(buffer);
+  const writeStr = (offset: number, s: string) => {
+    for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i));
+  };
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + total, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true); // PCM fmt 块大小
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // mono
+  view.setUint32(24, TARGET_SAMPLE_RATE, true);
+  view.setUint32(28, TARGET_SAMPLE_RATE * 2, true); // byteRate = 16k * 16bit * 1ch
+  view.setUint16(32, 2, true); // blockAlign
+  view.setUint16(34, 16, true); // bitsPerSample
+  writeStr(36, 'data');
+  view.setUint32(40, total, true);
+  const out = new Uint8Array(buffer, 44);
+  let offset = 0;
+  for (const c of chunks) {
+    out.set(new Uint8Array(c), offset);
+    offset += c.byteLength;
+  }
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+
 // ---------- TTS 播放队列 ----------
 
 export class TtsPlayer {

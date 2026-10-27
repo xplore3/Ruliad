@@ -285,6 +285,30 @@ export async function trialChat(personaConfigId: string, messages: { role: 'user
   return data as { reply: string };
 }
 
+// ====== 场景 AI 辅助提取 ======
+
+export interface ScenarioExtractResult {
+  transcript?: string;
+  reply: string;
+  fields: Record<string, unknown>;
+}
+
+/** 文字描述 → 场景维度提取；current 为当前表单快照时做增量修改 */
+export async function extractScenarioFromText(text: string, current?: Record<string, unknown>) {
+  const { data } = await api.post('/scenarios/extract', { text, current });
+  return data as ScenarioExtractResult;
+}
+
+/** 语音（wav）→ ASR → 场景维度提取；current 为当前表单快照时做增量修改 */
+export async function extractScenarioFromAudio(wav: Blob, current?: Record<string, unknown>) {
+  const fd = new FormData();
+  // current 必须先于文件字段 append，后端 request.file() 才能读到
+  if (current) fd.append('current', JSON.stringify(current));
+  fd.append('file', wav, 'voice.wav');
+  const { data } = await api.post('/scenarios/extract', fd);
+  return data as ScenarioExtractResult;
+}
+
 // ====== 用户偏好 ======
 
 export type Preferences = Record<string, unknown>;

@@ -57,18 +57,7 @@ export default function Login() {
       setCountdown(60);
       if (res._devCode) {
         setCode(res._devCode);
-        setDevHint('开发模式验证码已自动填入');
-        // 开发模式：自动填入后直接登录
-        if (agreed) {
-          setLoading(true);
-          try {
-            await doCodeLogin(phone, res._devCode);
-          } catch (err) {
-            setError(apiError(err, '登录失败，请检查验证码'));
-          } finally {
-            setLoading(false);
-          }
-        }
+        setDevHint('开发模式验证码已自动填入，点击登录');
       }
     } catch (err) {
       setError(apiError(err, '验证码发送失败，请稍后重试'));
