@@ -62,18 +62,21 @@ export class PcmRecorder {
   }
 
   private handleSamples(samples: Float32Array) {
-    if (!this.ctx) return;
-    const ratio = this.ctx.sampleRate / TARGET_SAMPLE_RATE;
+    const ctx = this.ctx;
+    if (!ctx || !this.running) return;
+    const ratio = ctx.sampleRate / TARGET_SAMPLE_RATE;
     // 计算能量（在原始采样率上即可）
     let sum = 0;
     for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
     this.onLevel?.(Math.sqrt(sum / samples.length));
+    // onLevel 回调可能同步触发 stop()（如 VAD 判停），此时本块直接丢弃
+    if (!this.running || this.ctx !== ctx) return;
 
     // 线性插值重采样到 16kHz
     for (let i = 0; i < samples.length; i++) {
       this.pending.push(samples[i]);
     }
-    const chunkSrcLen = Math.floor((CHUNK_MS / 1000) * this.ctx.sampleRate);
+    const chunkSrcLen = Math.floor((CHUNK_MS / 1000) * ctx.sampleRate);
     while (this.pending.length >= chunkSrcLen) {
       const block = this.pending.splice(0, chunkSrcLen);
       const outLen = Math.floor(block.length / ratio);
@@ -92,6 +95,8 @@ export class PcmRecorder {
 
   stop() {
     this.running = false;
+    // 先摘掉消息回调，停止后在途的 worklet 消息不再进入 handleSamples
+    if (this.node) this.node.port.onmessage = null;
     this.node?.disconnect();
     this.source?.disconnect();
     this.stream?.getTracks().forEach((t) => t.stop());
