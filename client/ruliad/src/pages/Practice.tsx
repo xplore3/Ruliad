@@ -8,9 +8,14 @@ import {
   pauseSession,
   resumeSession,
   fetchOpening,
+  qualifyAnswer,
+  fetchDemo,
+  demoChoice,
+  ttsClip,
   apiError,
   getStoredUser,
   voiceWsUrl,
+  type DemoLine,
 } from '../api';
 import { PcmRecorder, TtsPlayer, VoiceSocket, type VoiceServerEvent } from '../voice';
 import type { TranscriptTurn } from '../types';
@@ -26,8 +31,8 @@ type PracticeStatus =
   | 'ended'
   | 'failed';
 
-/** 开场阶段：启动动画 → 教练开场白 → 等待就绪 → 正式对练 */
-type Phase = 'boot' | 'coach' | 'ready_wait' | 'live';
+/** 开场阶段：启动动画 → 教练开场白 → 等待就绪 →（地推新手：资格提问 → 示范对话）→ 正式对练 */
+type Phase = 'boot' | 'coach' | 'ready_wait' | 'qualify' | 'guide' | 'live';
 
 interface PersonaInfo {
   name: string;
@@ -40,6 +45,7 @@ interface PersonaInfo {
 interface ScenarioInfo {
   name: string;
   durationMinutes: number;
+  coverageTopics?: string[];
 }
 
 const MAX_HINTS = 3;
@@ -49,6 +55,19 @@ const BOOT_MS = 1800;
 /** 开场白音频被浏览器自动播放策略拦截时，推进到下一步的兜底时长 */
 const COACH_FALLBACK_MS = 8000;
 const PERSONA_FALLBACK_MS = 10000;
+
+/** 地推引流课分类关键词（与 Home.tsx 的分类规则一致） */
+const GROUND_PUSH_KEYWORDS = ['地推', '破冰', '陌生', '展会', '商场', '摊位', '驻足'];
+/** 新手指引资格提问（教练语音提问，用户语音自由回答） */
+const QUALIFY_QUESTIONS = ['你做过地推吗？', '你做过教培行业的地推吗？'];
+/** 示范播完后教练的询问 */
+const GUIDE_CHOICE_QUESTION = '想再听一个版本的示范，还是开始模拟练习？';
+/** 新手指引自动聆听 VAD 参数（参考服务端 voice.ts 的 RMS + 静音判停思路） */
+const VAD_RMS_THRESHOLD = 0.02;
+const VAD_SILENCE_MS = 1300;
+const VAD_MAX_RECORD_MS = 15000;
+/** 自动聆听识别失败的重试上限，超过后给出文字提示 */
+const GUIDANCE_MAX_RETRY = 2;
 
 function formatTime(seconds: number) {
   const m = Math.floor(seconds / 60);
@@ -85,6 +104,20 @@ export default function Practice() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [autoMic, setAutoMic] = useState(() => localStorage.getItem(AUTO_MIC_KEY) !== '0');
 
+  // ===== 新手指引（地推引流课）状态 =====
+  const [qualifyQ, setQualifyQ] = useState<1 | 2>(1);
+  const [qualifyStage, setQualifyStage] = useState<'asking' | 'recording' | 'uploading' | 'error'>('asking');
+  const [qualifyText, setQualifyText] = useState('');
+  const [qualifyHint, setQualifyHint] = useState('');
+  const [demoVersion, setDemoVersion] = useState(1);
+  const [demoLines, setDemoLines] = useState<DemoLine[]>([]);
+  /** 当前正在播放的示范台词下标（-1 = 无） */
+  const [demoIndex, setDemoIndex] = useState(-1);
+  const [demoStage, setDemoStage] = useState<'loading' | 'playing' | 'ask'>('loading');
+  const [guideRec, setGuideRec] = useState<'idle' | 'recording' | 'uploading'>('idle');
+  const [guideText, setGuideText] = useState('');
+  const [guideHint, setGuideHint] = useState('');
+
   const statusRef = useRef<PracticeStatus>('loading');
   const phaseRef = useRef<Phase>('boot');
   const timeUpRef = useRef(false);
@@ -100,6 +133,23 @@ export default function Practice() {
   const introTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** 当前语音回合的音频是否已全部到达（收到 turn_complete）；全部播完才轮到用户 */
   const turnAudioDoneRef = useRef(true);
+  /** 新手指引专用录音器（独立于语音回合的 VoiceSocket 链路） */
+  const guidanceRecRef = useRef<PcmRecorder | null>(null);
+  /** 中断在途自动聆听（stopGuidanceMedia / 组件清理时调用） */
+  const guidanceCancelRef = useRef<(() => void) | null>(null);
+  /** 自动聆听最大时长兜底定时器 */
+  const vadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 资格提问 / 示范选择的识别失败重试计数 */
+  const qualifyRetryRef = useRef(0);
+  const guideRetryRef = useRef(0);
+  /** 新手指引专用 AudioContext（在「我准备好了」点击手势内创建/resume，规避自动播放限制） */
+  const guideCtxRef = useRef<AudioContext | null>(null);
+  /** 新手指引当前播放的音频源 */
+  const guideSrcRef = useRef<AudioBufferSourceNode | null>(null);
+  /** 播放代数：打断后丢弃在途解码结果 */
+  const guidePlayGenRef = useRef(0);
+  /** 示范播放代数：重播/进入练习时使在途播放循环失效 */
+  const demoTokenRef = useRef(0);
 
   const me = getStoredUser();
 
@@ -188,8 +238,9 @@ export default function Practice() {
     };
   }, [sessionId]);
 
-  // ===== 本地倒计时（暂停时冻结） =====
+  // ===== 本地倒计时（暂停与开场/指引阶段冻结） =====
   const timerIdle =
+    phase !== 'live' ||
     status === 'loading' || status === 'failed' || status === 'ended' || status === 'paused';
   useEffect(() => {
     if (timerIdle) return;
@@ -263,6 +314,23 @@ export default function Practice() {
       recorderRef.current = null;
       player.dispose();
       playerRef.current = null;
+      // 新手指引在途的录音/播放一并清理
+      demoTokenRef.current += 1;
+      guidePlayGenRef.current += 1;
+      guidanceCancelRef.current?.();
+      guidanceCancelRef.current = null;
+      if (vadTimerRef.current) {
+        clearTimeout(vadTimerRef.current);
+        vadTimerRef.current = null;
+      }
+      guidanceRecRef.current?.stop();
+      guidanceRecRef.current = null;
+      if (guideSrcRef.current) {
+        try { guideSrcRef.current.stop(); } catch { /* 已停止 */ }
+        guideSrcRef.current = null;
+      }
+      void guideCtxRef.current?.close();
+      guideCtxRef.current = null;
       setWsReady(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -312,9 +380,19 @@ export default function Practice() {
     return () => window.removeEventListener('pointerdown', resumeAudio);
   }, [phase]);
 
-  // ===== 点击「我准备好了」→ 正式开练 =====
-  const handleReady = () => {
-    setErrorMsg('');
+  // 指引阶段用户任意点击：恢复 guidance AudioContext（双保险，正常已在「我准备好了」手势内激活）
+  useEffect(() => {
+    if (phase !== 'qualify' && phase !== 'guide') return;
+    const resumeAudio = () => {
+      if (guideCtxRef.current?.state === 'suspended') void guideCtxRef.current.resume();
+    };
+    window.addEventListener('pointerdown', resumeAudio);
+    return () => window.removeEventListener('pointerdown', resumeAudio);
+  }, [phase]);
+
+  // ===== 进入正式对练（原「我准备好了」的开场逻辑） =====
+  const startLive = () => {
+    stopGuidanceMedia();
     setPhaseBoth('live');
     if (isVoice && personaAudioRef.current && playerRef.current) {
       introClipRef.current = 'persona';
@@ -331,6 +409,336 @@ export default function Practice() {
       }, PERSONA_FALLBACK_MS);
     } else {
       setStatusBoth(timeUpRef.current ? 'time_up' : 'user_turn');
+    }
+  };
+
+  // ===== 点击「我准备好了」：地推引流课新手先走资格提问，否则直接开练 =====
+  const handleReady = () => {
+    setErrorMsg('');
+    if (guidanceEligible) {
+      // 用户手势上下文内创建/恢复 guidance AudioContext，后续 TTS 播放不受自动播放限制
+      ensureGuideCtx();
+      void beginQualify();
+      return;
+    }
+    startLive();
+  };
+
+  // ===== 新手指引：通用小工具 =====
+
+  /** guidance 专用 AudioContext：必须在用户手势里创建/恢复一次，之后异步播放不受自动播放限制 */
+  const ensureGuideCtx = (): AudioContext => {
+    if (!guideCtxRef.current || guideCtxRef.current.state === 'closed') {
+      guideCtxRef.current = new AudioContext();
+    }
+    if (guideCtxRef.current.state === 'suspended') void guideCtxRef.current.resume();
+    return guideCtxRef.current;
+  };
+
+  /** 用 guidance AudioContext 解码并播放一段 base64 wav，等待播完；失败也 resolve，保证流程可继续 */
+  const playClip = (base64: string) =>
+    new Promise<void>((resolve) => {
+      let settled = false;
+      let src: AudioBufferSourceNode | null = null;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        if (src) {
+          try { src.stop(); } catch { /* 已停止 */ }
+          if (guideSrcRef.current === src) guideSrcRef.current = null;
+          src = null;
+        }
+        resolve();
+      };
+      const gen = guidePlayGenRef.current;
+      try {
+        const ctx = ensureGuideCtx();
+        const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+        // 解码兜底（正常解码是毫秒级）
+        timer = setTimeout(finish, 15000);
+        void ctx
+          .decodeAudioData(bytes.buffer as ArrayBuffer)
+          .then((buf) => {
+            if (settled) return;
+            if (timer) clearTimeout(timer);
+            // 解码期间被重播/进 live 打断：丢弃不播
+            if (gen !== guidePlayGenRef.current) return finish();
+            src = ctx.createBufferSource();
+            src.buffer = buf;
+            src.connect(ctx.destination);
+            guideSrcRef.current = src;
+            src.onended = finish;
+            // 播放兜底：onended 未触发时按音频时长 +2s 强制结束
+            timer = setTimeout(finish, (buf.duration + 2) * 1000);
+            src.start();
+          })
+          .catch(finish);
+      } catch {
+        finish();
+      }
+    });
+
+  /** 停止指引阶段在途的播放与录音，并使示范播放循环/自动聆听失效 */
+  const stopGuidanceMedia = () => {
+    demoTokenRef.current += 1;
+    guidePlayGenRef.current += 1;
+    if (guideSrcRef.current) {
+      try { guideSrcRef.current.stop(); } catch { /* 已停止 */ }
+      guideSrcRef.current = null;
+    }
+    // 中断在途自动聆听（内部会停止录音器、释放麦克风并清 VAD 定时器）
+    guidanceCancelRef.current?.();
+    guidanceCancelRef.current = null;
+    if (vadTimerRef.current) {
+      clearTimeout(vadTimerRef.current);
+      vadTimerRef.current = null;
+    }
+    guidanceRecRef.current?.stop();
+    guidanceRecRef.current = null;
+    setGuideRec('idle');
+  };
+
+  /** 拼接已采集的 PCM 分块为一个 ArrayBuffer */
+  const mergePcmChunks = (parts: ArrayBuffer[]): ArrayBuffer => {
+    const total = parts.reduce((n, b) => n + b.byteLength, 0);
+    const merged = new Uint8Array(total);
+    let offset = 0;
+    for (const p of parts) {
+      merged.set(new Uint8Array(p), offset);
+      offset += p.byteLength;
+    }
+    return merged.buffer;
+  };
+
+  /**
+   * 自动聆听：RMS 音量检测说话开始，连续静音约 1.3s 判停，最大 15s 兜底。
+   * resolve：micError=true 表示麦克风不可用；audio=null 表示被外部中断（阶段切换/进 live）。
+   */
+  const autoListen = () =>
+    new Promise<{ audio: ArrayBuffer | null; micError: boolean }>((resolve) => {
+      let settled = false;
+      const finish = (audio: ArrayBuffer | null, micError = false) => {
+        if (settled) return;
+        settled = true;
+        guidanceCancelRef.current = null;
+        if (vadTimerRef.current) {
+          clearTimeout(vadTimerRef.current);
+          vadTimerRef.current = null;
+        }
+        guidanceRecRef.current?.stop();
+        guidanceRecRef.current = null;
+        resolve({ audio, micError });
+      };
+      guidanceCancelRef.current = () => finish(null);
+
+      const rec = new PcmRecorder();
+      const chunks: ArrayBuffer[] = [];
+      rec.onChunk = (buf) => chunks.push(buf);
+      let spoke = false;
+      let lastVoiceAt = 0;
+      rec.onLevel = (rms) => {
+        if (settled) return;
+        const now = Date.now();
+        if (rms > VAD_RMS_THRESHOLD) {
+          spoke = true;
+          lastVoiceAt = now;
+          return;
+        }
+        // 检测到开始说话后，连续静音视为说完
+        if (spoke && lastVoiceAt && now - lastVoiceAt >= VAD_SILENCE_MS) {
+          finish(mergePcmChunks(chunks));
+        }
+      };
+      guidanceRecRef.current = rec;
+      rec
+        .start()
+        .then(() => {
+          if (settled) return;
+          // 最大录音时长兜底：有说过话就提交，全程未说话提交空音频（后端按未识别处理）
+          vadTimerRef.current = setTimeout(
+            () => finish(spoke ? mergePcmChunks(chunks) : new ArrayBuffer(0)),
+            VAD_MAX_RECORD_MS
+          );
+        })
+        .catch(() => finish(null, true));
+    });
+
+  // ===== 新手指引：资格提问 =====
+  const beginQualify = async () => {
+    setPhaseBoth('qualify');
+    await askQualifyQuestion(1);
+  };
+
+  const askQualifyQuestion = async (q: 1 | 2) => {
+    if (!sessionId) return;
+    const question = QUALIFY_QUESTIONS[q - 1];
+    setQualifyQ(q);
+    setQualifyText('');
+    setQualifyHint('');
+    qualifyRetryRef.current = 0;
+    setQualifyStage('asking');
+    try {
+      const clip = await ttsClip(sessionId, question, 'coach');
+      await playClip(clip.audioBase64);
+    } catch {
+      /* 提问音频失败不影响回答 */
+    }
+    if (phaseRef.current !== 'qualify') return;
+    // 问题播完自动开麦聆听
+    await autoAnswerQualify(q);
+  };
+
+  /** 资格提问的全自动语音回答：自动录音 → VAD 判停 → 上传识别 → 自动进入下一环节 */
+  const autoAnswerQualify = async (q: 1 | 2) => {
+    if (!sessionId || phaseRef.current !== 'qualify') return;
+    setQualifyStage('recording');
+    const { audio, micError } = await autoListen();
+    if (phaseRef.current !== 'qualify' || (!audio && !micError)) return;
+    if (micError) {
+      setQualifyStage('error');
+      setQualifyHint('麦克风不可用，请检查浏览器授权后刷新重试');
+      return;
+    }
+    setQualifyStage('uploading');
+    setErrorMsg('');
+    try {
+      const res = await qualifyAnswer(sessionId, q, audio!);
+      if (phaseRef.current !== 'qualify') return;
+      if (!res.text) throw new Error('empty asr');
+      setQualifyText(`我：${res.text}`);
+      setQualifyHint('');
+      if (q === 1) {
+        await askQualifyQuestion(2);
+      } else if (res.experienced) {
+        try {
+          const clip = await ttsClip(sessionId, '好的，那我们直接开始练习吧', 'coach');
+          await playClip(clip.audioBase64);
+        } catch {
+          /* 提示音频失败不影响进入练习 */
+        }
+        startLive();
+      } else {
+        await beginGuide(1);
+      }
+    } catch (err) {
+      if (phaseRef.current !== 'qualify') return;
+      qualifyRetryRef.current += 1;
+      if (qualifyRetryRef.current <= GUIDANCE_MAX_RETRY) {
+        setQualifyHint(
+          (err instanceof Error && err.message === 'empty asr') ||
+            (err as { response?: { status?: number } })?.response?.status === 422
+            ? '没听清，请再说一次'
+            : apiError(err, '回答上传失败') + '，请再说一次'
+        );
+        // 自动重新开始录音
+        await autoAnswerQualify(q);
+      } else {
+        setQualifyStage('error');
+        setQualifyHint('多次未能识别语音，请检查麦克风后刷新重试，或点击下方按钮直接进入示范教学');
+      }
+    }
+  };
+
+  // ===== 新手指引：示范对话 =====
+  const beginGuide = async (version: number) => {
+    if (!sessionId) return;
+    stopGuidanceMedia();
+    const token = demoTokenRef.current;
+    setPhaseBoth('guide');
+    setDemoVersion(version);
+    setDemoStage('loading');
+    setDemoLines([]);
+    setDemoIndex(-1);
+    setGuideText('');
+    setGuideHint('');
+    setErrorMsg('');
+    try {
+      const { lines } = await fetchDemo(sessionId, version);
+      if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
+      if (lines.length === 0) throw new Error('empty demo');
+      setDemoLines(lines);
+      setDemoStage('playing');
+      // 逐句合成并顺序播放：前一句播完再播下一句
+      for (let i = 0; i < lines.length; i++) {
+        if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
+        setDemoIndex(i);
+        const line = lines[i];
+        const voiceRole = line.role === 'sales' ? 'sales' : line.role === 'customer' ? 'persona' : 'narrator';
+        try {
+          const clip = await ttsClip(sessionId, line.text, voiceRole);
+          if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
+          await playClip(clip.audioBase64);
+        } catch {
+          /* 单句音频失败：文字已展示，继续下一句 */
+        }
+      }
+      if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
+      setDemoIndex(-1);
+      await askGuideChoice();
+    } catch (err) {
+      if (demoTokenRef.current !== token) return;
+      setErrorMsg(apiError(err, '示范对话加载失败，可直接开始练习'));
+      setDemoStage('ask');
+    }
+  };
+
+  /** 示范播完：教练语音询问下一步（纯语音，不显示问题文字），随后自动聆听 */
+  const askGuideChoice = async () => {
+    if (!sessionId) return;
+    setDemoStage('ask');
+    setGuideText('');
+    setGuideHint('');
+    guideRetryRef.current = 0;
+    try {
+      const clip = await ttsClip(sessionId, GUIDE_CHOICE_QUESTION, 'coach');
+      await playClip(clip.audioBase64);
+    } catch {
+      /* 询问音频失败：仍可语音/按钮选择 */
+    }
+    await autoAnswerGuideChoice();
+  };
+
+  /** 示范选择的全自动语音回答：自动录音 → VAD 判停 → 上传识别 → 自动执行选择 */
+  const autoAnswerGuideChoice = async () => {
+    if (!sessionId || phaseRef.current !== 'guide') return;
+    setGuideRec('recording');
+    const { audio, micError } = await autoListen();
+    if (phaseRef.current !== 'guide' || (!audio && !micError)) return;
+    setGuideRec('idle');
+    if (micError) {
+      setGuideHint('麦克风不可用，请检查浏览器授权；也可点击下方按钮选择');
+      return;
+    }
+    setGuideRec('uploading');
+    setErrorMsg('');
+    try {
+      const res = await demoChoice(sessionId, audio!);
+      if (!res.text) throw new Error('empty asr');
+      setGuideText(`我：${res.text}`);
+      setGuideHint('');
+      if (res.choice === 'replay') {
+        await beginGuide(demoVersion + 1);
+      } else {
+        startLive();
+      }
+    } catch (err) {
+      if (phaseRef.current !== 'guide') return;
+      setGuideRec('idle');
+      guideRetryRef.current += 1;
+      if (guideRetryRef.current <= GUIDANCE_MAX_RETRY) {
+        setGuideHint(
+          (err instanceof Error && err.message === 'empty asr') ||
+            (err as { response?: { status?: number } })?.response?.status === 422
+            ? '没听清，请再说一次'
+            : apiError(err, '识别失败') + '，请再说一次'
+        );
+        // 自动重新开始录音
+        await autoAnswerGuideChoice();
+      } else {
+        setGuideHint('多次未能识别语音，请直接点击下方按钮选择');
+      }
     }
   };
 
@@ -596,7 +1004,17 @@ export default function Practice() {
   ) : (
     personaName.slice(0, 1)
   );
-  const inIntro = phase === 'coach' || phase === 'ready_wait';
+  const inIntro = phase === 'coach' || phase === 'ready_wait' || phase === 'qualify' || phase === 'guide';
+  /** 示范对话当前说话的角色（用于双角色可视化高亮） */
+  const demoCurrentRole =
+    demoIndex >= 0 && demoIndex < demoLines.length ? demoLines[demoIndex].role : null;
+  /** 仅语音模式的地推引流课场景启用新手指引 */
+  const guidanceEligible =
+    isVoice &&
+    !!scenario &&
+    GROUND_PUSH_KEYWORDS.some((k) =>
+      `${scenario.name} ${(scenario.coverageTopics ?? []).join(' ')}`.includes(k)
+    );
 
   return (
     <div className="min-h-screen bg-light-bg flex flex-col text-text-primary">
@@ -674,6 +1092,16 @@ export default function Practice() {
               {phase === 'ready_wait' && (
                 <div className="statusbar statusbar-coral">
                   <span className="pulse-dot" />准备好了吗？点击「我准备好了」开始对练
+                </div>
+              )}
+              {phase === 'qualify' && (
+                <div className="statusbar statusbar-blue">
+                  🎓 新手指引 · 教练提问（第 {qualifyQ} / 2 题），请用语音回答，倒计时已冻结
+                </div>
+              )}
+              {phase === 'guide' && (
+                <div className="statusbar statusbar-blue">
+                  📖 新手指引 · 示范对话{demoStage === 'ask' ? '已播完' : '播放中'}，倒计时已冻结
                 </div>
               )}
               {inLive && status === 'loading' && (
@@ -758,6 +1186,126 @@ export default function Practice() {
                   <div className="flex flex-col items-center gap-5 px-6 max-w-[560px]">
                     <div className="coach-opening">{coachText || '本场练习已就绪。'}</div>
                     <button className="ready-btn" onClick={handleReady}>▶ 我准备好了</button>
+                  </div>
+                )}
+                {phase === 'qualify' && (
+                  <div className="flex flex-col items-center gap-5 px-6 max-w-[560px]">
+                    <div className="text-[13px] font-semibold opacity-75">资格提问 · 第 {qualifyQ} / 2 题</div>
+                    {qualifyStage === 'asking' && (
+                      <>
+                        <div className="flex items-end gap-[5px] h-9">
+                          {[0, 1, 2, 3, 4].map((i) => (
+                            <span key={i} className="w-[5px] rounded-full bg-white/85 animate-pulse" style={{ height: `${14 + (i % 3) * 9}px`, animationDelay: `${i * 0.15}s` }} />
+                          ))}
+                        </div>
+                        <div className="text-[13.5px] font-medium opacity-85">🎙 教练提问中…</div>
+                      </>
+                    )}
+                    {qualifyStage === 'recording' && (
+                      <>
+                        <div className="flex items-end gap-[5px] h-9">
+                          {[0, 1, 2, 3, 4].map((i) => (
+                            <span key={i} className="w-[5px] rounded-full bg-coral animate-pulse" style={{ height: `${14 + (i % 3) * 9}px`, animationDelay: `${i * 0.15}s` }} />
+                          ))}
+                        </div>
+                        <div className="text-[13.5px] font-medium opacity-85">🎙 正在聆听，请直接回答… 说完会自动提交</div>
+                      </>
+                    )}
+                    {qualifyStage === 'uploading' && (
+                      <>
+                        <div className="think5"><i /><i /><i /><i /><i /></div>
+                        <div className="text-[13px] font-medium opacity-75">正在识别你的回答…</div>
+                      </>
+                    )}
+                    {qualifyStage === 'error' && (
+                      <button className="ready-btn" onClick={() => void beginGuide(1)}>▶ 继续（进入示范教学）</button>
+                    )}
+                    {qualifyHint && <div className="text-[13px] font-semibold text-coral">{qualifyHint}</div>}
+                    {qualifyText && <div className="text-[12.5px] font-medium opacity-60">{qualifyText}</div>}
+                  </div>
+                )}
+                {phase === 'guide' && (
+                  <div className="flex flex-col items-center gap-4 px-6 py-14 w-full max-w-[620px]">
+                    {demoStage === 'loading' && (
+                      <>
+                        <div className="think5"><i /><i /><i /><i /><i /></div>
+                        <div className="text-[13.5px] font-medium opacity-85">正在生成示范对话…</div>
+                      </>
+                    )}
+                    {demoStage === 'playing' && (
+                      <div className="flex flex-col items-center gap-6">
+                        {/* 双 AI 角色可视化：当前说话方高亮 + 声波动画 */}
+                        <div className="flex items-center gap-12">
+                          {([
+                            { role: 'sales' as const, label: 'AI 销售', badge: '销', bg: 'bg-coral' },
+                            { role: 'customer' as const, label: 'AI 客户', badge: '客', bg: 'bg-[#4B7BEC]' },
+                          ]).map(({ role, label, badge, bg }) => {
+                            const active = demoCurrentRole === role;
+                            return (
+                              <div key={role} className="flex flex-col items-center gap-2">
+                                <div className={`w-16 h-16 rounded-full flex items-center justify-center text-[22px] font-bold text-white transition-all ${bg} ${active ? 'scale-110 shadow-[0_0_24px_rgba(255,255,255,.25)]' : 'opacity-40'}`}>
+                                  {badge}
+                                </div>
+                                <div className="text-[12.5px] font-semibold opacity-85">{label}</div>
+                                <div className="flex items-end gap-[4px] h-6">
+                                  {active && [0, 1, 2, 3, 4].map((i) => (
+                                    <span key={i} className="w-[4px] rounded-full bg-white/85 animate-pulse" style={{ height: `${8 + (i % 3) * 6}px`, animationDelay: `${i * 0.15}s` }} />
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        {demoCurrentRole === 'narrator' && (
+                          <div className="text-[13px] italic text-white/60">🗣 旁白解说中…</div>
+                        )}
+                        {demoLines.length > 0 && (
+                          <div className="text-[12px] font-medium opacity-60 tabular-nums">{demoIndex + 1} / {demoLines.length}</div>
+                        )}
+                      </div>
+                    )}
+                    {demoStage === 'ask' && (
+                      <div className="flex flex-col items-center gap-3">
+                        {guideRec === 'idle' && !guideText && (
+                          <>
+                            <div className="flex items-end gap-[5px] h-9">
+                              {[0, 1, 2, 3, 4].map((i) => (
+                                <span key={i} className="w-[5px] rounded-full bg-white/85 animate-pulse" style={{ height: `${14 + (i % 3) * 9}px`, animationDelay: `${i * 0.15}s` }} />
+                              ))}
+                            </div>
+                            <div className="text-[13.5px] font-medium opacity-85">🎙 教练提问中…</div>
+                          </>
+                        )}
+                        {guideRec === 'recording' && (
+                          <>
+                            <div className="flex items-end gap-[5px] h-9">
+                              {[0, 1, 2, 3, 4].map((i) => (
+                                <span key={i} className="w-[5px] rounded-full bg-coral animate-pulse" style={{ height: `${14 + (i % 3) * 9}px`, animationDelay: `${i * 0.15}s` }} />
+                              ))}
+                            </div>
+                            <div className="text-[13.5px] font-medium opacity-85">🎙 正在聆听，请直接回答… 说完会自动提交</div>
+                          </>
+                        )}
+                        {guideRec === 'uploading' && (
+                          <>
+                            <div className="think5"><i /><i /><i /><i /><i /></div>
+                            <div className="text-[13px] font-medium opacity-75">正在识别你的选择…</div>
+                          </>
+                        )}
+                        {guideText && <div className="text-[12.5px] font-medium opacity-60">{guideText}</div>}
+                        {guideHint && <div className="text-[13px] font-semibold text-coral">{guideHint}</div>}
+                        <div className="flex gap-3">
+                          <button
+                            className="btn btn-sm"
+                            style={{ background: 'rgba(255,255,255,.14)', color: '#fff' }}
+                            onClick={() => void beginGuide(demoVersion + 1)}
+                          >
+                            🔁 再听一版
+                          </button>
+                          <button className="btn btn-primary btn-sm" onClick={startLive}>▶ 开始练习</button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
                 {inLive && status === 'loading' && (

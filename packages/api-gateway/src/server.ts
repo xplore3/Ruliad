@@ -17,6 +17,7 @@ import { usersRoutes } from './routes/users.js';
 import { tasksRoutes } from './routes/tasks.js';
 import { sessionsRoutes } from './routes/sessions.js';
 import { voiceRoutes } from './routes/voice.js';
+import { guidanceRoutes } from './routes/guidance.js';
 import { videoRoutes } from './routes/video.js';
 import { voiceTicketRoutes } from './routes/voice-ticket.js';
 import { reportsRoutes } from './routes/reports.js';
@@ -193,6 +194,7 @@ async function main() {
   await app.register((a) => tasksRoutes(a, ctx), { prefix: '/api/v1' });
   await app.register((a) => sessionsRoutes(a, ctx), { prefix: '/api/v1' });
   await app.register((a) => voiceRoutes(a, ctx), { prefix: '/api/v1' });
+  await app.register((a) => guidanceRoutes(a, ctx), { prefix: '/api/v1' });
   await app.register((a) => voiceTicketRoutes(a, ctx), { prefix: '/api/v1' });
   await app.register((a) => videoRoutes(a, ctx), { prefix: '/api/v1' });
   await app.register((a) => reportsRoutes(a, ctx), { prefix: '/api/v1' });
