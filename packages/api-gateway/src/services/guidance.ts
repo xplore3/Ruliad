@@ -1,22 +1,22 @@
-import type { LLMGateway, Scenario } from '@grasp-mvp/core';
+import type { LLMGateway } from '@grasp-mvp/core';
+import { SALES_FAQ_ITEMS, type SalesFaqItem } from '../seed-sales-faq.data.js';
 
 /**
  * 地推引流课新手指引：资格判断 + 双 AI 示范对话剧本生成。
- * 所有 LLM 调用失败/解析失败均有确定性兜底，保证 mock 环境可跑通。
+ * 示范剧本按标准地推流程确定性生成（问题与标准答案从场景库抽取），不依赖 LLM；
+ * 资格判断与示范选择的 LLM 调用失败/解析失败均有确定性兜底，保证 mock 环境可跑通。
  */
 
 /** 资格提问两问（与前端播放顺序一致） */
 export const QUALIFY_QUESTIONS = ['你做过地推吗？', '你做过教培行业的地推吗？'] as const;
 
-/** 示范剧本一行：销售 / 客户 / 旁白 */
+/** 示范剧本一行：销售 / 客户 / 小朋友 / 旁白；arousal 控制 TTS 情绪，excitement 为激情倍率（销售=3） */
 export interface DemoLine {
-  role: 'sales' | 'customer' | 'narrator';
+  role: 'sales' | 'customer' | 'child' | 'narrator';
   text: string;
+  arousal?: number;
+  excitement?: number;
 }
-
-/** 销售固定第一句开场白（逐字，不允许 LLM 改动） */
-export const FIXED_OPENING =
-  '大哥/姐 您好，像您这么有气质的家长，肯定不会拒绝孩子一次成长的机会。我们是天童英语培训机构的，我们想邀请您，带孩子来参加我们的英语试听活动。';
 
 export type DemoChoice = 'replay' | 'practice';
 
@@ -82,104 +82,117 @@ export async function judgeExperience(
   }
 }
 
-/** 客户反应类型池：每次生成随机抽 1-2 种注入 prompt */
-const CUSTOMER_REACTIONS = [
-  '感兴趣：放慢脚步，接住邀请函，愿意多听几句',
-  '摆手拒绝：客气地说不需要，转身要走',
-  '赶时间：边看手机边说赶时间，匆匆想离开',
-  '质疑机构：问"你们是什么机构，靠谱吗"',
-  '询问价格：直接问试听课要不要钱、后续怎么收费',
-  '孩子已在学：说孩子已经在别的地方学英语了',
-  '警惕推销：怀疑是骗子，质问要联系方式干什么',
-  '敷衍应付：嘴上应付"好好好"，脚步不停',
-];
+/** 场景库出题池：地推 / 通用场景的问题，剔除含舞台提示的问题与围棋专属话术（本课是英语地推） */
+const FAQ_POOL = SALES_FAQ_ITEMS.filter(
+  (item) =>
+    (item.category.includes('地推') || item.category === '通用场景') &&
+    !item.question.includes('（') &&
+    !/棋/.test(item.question + item.faq)
+);
 
-/** 兜底剧本（LLM 失败 / mock 环境使用）：固定开场白 + 客户停下接邀请函主线 */
-export function fallbackDemoScript(): DemoLine[] {
-  return [
-    { role: 'sales', text: FIXED_OPENING },
-    { role: 'narrator', text: '客户放慢脚步，接住邀请函，表现出了兴趣。' },
-    { role: 'customer', text: '英语试听？我家孩子确实该补补英语了，你们这活动在哪儿啊？' },
-    { role: 'sales', text: '就在咱们附近的天童英语校区，这周末就有一场，全程免费，孩子还能领一份小礼物。' },
-    { role: 'customer', text: '免费是吧，那大概多长时间？我怕孩子坐不住。' },
-    { role: 'sales', text: '四十分钟左右，老师都是专门带少儿的，课堂全是游戏互动，孩子都喜欢得很。您留个联系方式，我给孩子留个名额？' },
-    { role: 'narrator', text: '客户停下脚步听完介绍，主动留下了联系方式，预约了周末试听。' },
-    { role: 'customer', text: '行，那我登记一下，周末带孩子去看看。' },
-  ];
+/** 清洗场景库标准答案中的占位符与舞台提示，使其可直接口播 */
+function sanitizeFaq(text: string, age: number): string {
+  return text
+    .replace(/（[^）]*）/g, '')
+    .replace(/x{3,}/g, '非常不错')
+    .replace(/xx岁/g, `${age}岁`)
+    .replace(/xx分钟/g, '10分钟')
+    .replace(/xx课程/g, '英语课程')
+    .replace(/xx妈妈|xx爸爸/g, '家长朋友')
+    .replace(/xx老师/g, '我们的老师')
+    .replace(/xx的教师团队/g, '专业过硬的教师团队')
+    .replace(/xx/g, '英语')
+    .trim();
 }
 
-function pickReactions(count: number): string[] {
-  const pool = [...CUSTOMER_REACTIONS];
-  const picked: string[] = [];
-  for (let i = 0; i < count && pool.length > 0; i++) {
-    picked.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
-  }
-  return picked;
+function pickTwoFaqs(): [SalesFaqItem, SalesFaqItem] {
+  const pool = [...FAQ_POOL];
+  const first = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
+  const second = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
+  return [first, second];
 }
 
-/** 校验 LLM 输出的剧本：JSON 数组、role 合法、4-12 行、首行必须是固定开场白、至少各一行客户与旁白 */
-function validateDemoScript(raw: unknown): DemoLine[] | null {
-  if (!Array.isArray(raw)) return null;
-  if (raw.length < 4 || raw.length > 12) return null;
-  const lines: DemoLine[] = [];
-  for (const item of raw) {
-    if (!item || typeof item !== 'object') return null;
-    const { role, text } = item as { role?: unknown; text?: unknown };
-    if (role !== 'sales' && role !== 'customer' && role !== 'narrator') return null;
-    if (typeof text !== 'string' || !text.trim() || text.length > 200) return null;
-    lines.push({ role, text: text.trim() });
-  }
-  if (lines[0].role !== 'sales' || lines[0].text !== FIXED_OPENING) return null;
-  if (!lines.some((l) => l.role === 'customer')) return null;
-  if (!lines.some((l) => l.role === 'narrator')) return null;
-  return lines;
-}
+const SALES_SURNAMES = ['王', '李', '张', '刘', '陈'];
 
 /**
- * 生成双 AI 示范对话剧本。任何失败（LLM 异常、输出不合法、mock 环境）都返回内置兜底剧本。
- * version 仅用于让 prompt 体现"换个版本"，随机性主要来自客户反应类型池抽样。
+ * 生成标准地推示范剧本（确定性模板，不走 LLM，保证流程逐字符合培训规范）：
+ * 激情开场（大哥/姐 二选一且全剧统一）→ 客户驻足提问（场景库问题+标准答案）→ 问年龄/黄金年龄
+ * → 指着邀请函介绍体验课与地址 → 蹲下与孩子玩游戏 → 让孩子请家长订邀请函（小声→大声）
+ * → 垫本子 → 客户再问（场景库问题+标准答案）→ 递笔成交 → 孩子道谢 → 微信还是现金 → 致谢定时间道别。
+ * version 仅作接口兼容，随机性来自称呼/年龄/姓氏/场景库抽题。
  */
-export async function generateDemoScript(
-  gateway: LLMGateway,
-  scenario: Scenario,
-  version: number
-): Promise<DemoLine[]> {
-  const reactions = pickReactions(1 + Math.floor(Math.random() * 2));
-  try {
-    const result = await gateway.forTask('judge').chat(
-      [
-        {
-          role: 'user',
-          content: [
-            '你是销售培训编剧。请编写一段"地推引流"示范对话剧本，用于给没有地推经验的新手销售员做示范。',
-            '场景是培训机构的销售在商场/街头向路人家长推销英语试听活动。',
-            `场景名称：${scenario.name}`,
-            scenario.personaTitle ? `客户设定：${scenario.personaTitle}` : '',
-            scenario.coverageTopics?.length ? `话术要点：${scenario.coverageTopics.join('、')}` : '',
-            `这是第 ${version} 个版本，请与常见版本有所变化。`,
-            '',
-            '硬性要求：',
-            `1. 第一句必须是销售说的这句话，逐字照抄，一字不改：「${FIXED_OPENING}」`,
-            `2. 客户的反应要体现以下类型（自然融入，不要点名类型）：${reactions.join('；')}。`,
-            '3. 旁白（narrator）用于解说客户的动作和反应，例如"客户放慢脚步，接住邀请函，表现出了兴趣"。',
-            '4. 销售要演示标准打法：开场破冰 → 介绍活动 → 化解异议 → 邀约留资。',
-            '5. 总长度 4 到 12 行，每行不超过 60 字，口语化。',
-            '',
-            '只输出 JSON 数组，不要任何其他文字：',
-            '[{"role":"sales","text":"..."},{"role":"customer","text":"..."},{"role":"narrator","text":"..."}]',
-          ]
-            .filter(Boolean)
-            .join('\n'),
-        },
-      ],
-      { jsonMode: true, temperature: 0.9 }
-    );
-    const lines = validateDemoScript(JSON.parse(extractJson(result.content)));
-    if (lines) return lines;
-  } catch {
-    /* 落入兜底 */
-  }
-  return fallbackDemoScript();
+export function generateDemoScript(_version: number): DemoLine[] {
+  // 开场称呼：大哥 或 姐 二选一，全剧统一；对应孩子口中的 爸爸/妈妈
+  const address = Math.random() < 0.5 ? '大哥' : '姐';
+  const parent = address === '大哥' ? '爸爸' : '妈妈';
+  const age = 4 + Math.floor(Math.random() * 7); // 4~10 岁
+  const surname = SALES_SURNAMES[Math.floor(Math.random() * SALES_SURNAMES.length)];
+  const [faq1, faq2] = pickTwoFaqs();
+  const answer1 = sanitizeFaq(faq1.faq, age);
+  const answer2 = sanitizeFaq(faq2.faq, age);
+
+  // 销售全程高唤醒（arousal≈0.9）+ 3 倍激情（excitement=3，语速/音调抬升×3）；小朋友小声/大声用 arousal 区分
+  const lines: DemoLine[] = [
+    {
+      role: 'sales',
+      arousal: 0.95,
+      text: `${address}，您好！像您这么有气质的家长，肯定不会拒绝孩子一次成长的机会！我们是天童英语培训机构的，我们想邀请您，带孩子来参加我们的英语试听活动！`,
+    },
+    { role: 'narrator', text: '客户听到介绍，放慢了脚步，停下来接过邀请函，表现出了兴趣。' },
+    { role: 'customer', text: faq1.question },
+    { role: 'sales', arousal: 0.9, text: answer1 },
+    { role: 'sales', arousal: 0.9, text: `对了${address}，您家孩子今年几岁啦？` },
+    { role: 'customer', text: `我家孩子今年${age}岁了。` },
+    { role: 'sales', arousal: 0.95, text: `太好了！${age}岁就是孩子学习英语的黄金年龄！` },
+    { role: 'narrator', text: '客户已经接过了邀请函，销售指着邀请函继续介绍。' },
+    {
+      role: 'sales',
+      arousal: 0.9,
+      text: '孩子过来以后，我们会像这副图画一样，给孩子安排一节英语的体验课，然后让孩子进行口语实践。到时候您觉得好，以后可以让孩子在我们这里学；如果您觉得不合适，也没有关系，到时候您听完以后自己做决定。',
+    },
+    {
+      role: 'sales',
+      arousal: 0.9,
+      text: `您看，这是我们的地址，就在万达广场三楼。这是我的电话，您叫我小${surname}就行。这是我们的邀请函，您带孩子过来，需要您给孩子订一张邀请函，就5块钱，一个家庭都可以过来。来，在这边给孩子填写一下姓名和电话，到时候我们给孩子安排活动。`,
+    },
+    { role: 'narrator', text: '此时销售蹲下来，表示对孩子的亲切，并且和孩子玩一个英语小游戏，激发孩子的兴趣。' },
+    { role: 'sales', arousal: 0.9, text: '小朋友，刚才我们玩的游戏好玩吗？' },
+    { role: 'child', arousal: 0.6, text: '好玩！' },
+    {
+      role: 'sales',
+      arousal: 0.9,
+      text: `那${parent}给你花5块钱，给你订一张邀请函，到时候带你过来，我们玩更好玩的游戏，好不好啊？`,
+    },
+    { role: 'child', arousal: 0.2, text: '好！' },
+    { role: 'sales', arousal: 1, text: '真棒！小朋友大声一点，好不好啊？' },
+    { role: 'child', arousal: 0.85, text: '好！' },
+    { role: 'sales', arousal: 0.9, text: `那小朋友，你把笔递给${parent}，让${parent}给你订一张邀请函。` },
+    { role: 'narrator', text: `小朋友把笔递给了${parent}。销售站了起来，把本子递过去，垫在邀请函下面。` },
+    { role: 'sales', arousal: 0.9, text: `${address}，您垫着写，这样舒服一点。` },
+    { role: 'customer', text: faq2.question },
+    { role: 'sales', arousal: 0.9, text: `${answer2}${address}，给孩子订上！` },
+    { role: 'narrator', text: '说这句话的同时，要配合把笔从上往下落、并递给客户的肢体语言。' },
+    { role: 'narrator', text: '客户在邀请函上填下了姓名和电话，销售撕下回执单。此时销售应该对孩子说话。' },
+    {
+      role: 'sales',
+      arousal: 0.9,
+      text: `小朋友，${parent}给你花5块钱订了一张邀请函，你跟${parent}说一声谢谢，好不好啊？`,
+    },
+    { role: 'child', arousal: 0.6, text: `谢谢${parent}！` },
+    { role: 'sales', arousal: 0.9, text: `${address}，您是微信还是现金？` },
+    {
+      role: 'narrator',
+      text: '客户完成缴费以后，不要忘记说"谢谢你的信任和支持"，并且现场定下试听时间。到这里为止，跟客户道别，地推的演示就结束了。',
+    },
+    {
+      role: 'sales',
+      arousal: 0.9,
+      text: '谢谢您的信任和支持！那咱们就把试听时间定在本周六上午十点，到时候您带孩子直接过来就行！',
+    },
+    { role: 'narrator', text: '销售与客户道别，地推演示结束。' },
+  ];
+  // 销售台词统一 3 倍激情
+  return lines.map((l) => (l.role === 'sales' ? { ...l, excitement: 3 } : l));
 }
 
 /** 再听一版关键词 */

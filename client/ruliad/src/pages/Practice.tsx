@@ -31,8 +31,8 @@ type PracticeStatus =
   | 'ended'
   | 'failed';
 
-/** 开场阶段：启动动画 → 教练开场白 → 等待就绪 →（地推新手：资格提问 → 示范对话）→ 正式对练 */
-type Phase = 'boot' | 'coach' | 'ready_wait' | 'qualify' | 'guide' | 'live';
+/** 开场阶段：启动加载 → 等待就绪 →（地推新手：资格提问 → 示范对话）→ 正式对练 */
+type Phase = 'boot' | 'ready_wait' | 'qualify' | 'guide' | 'live';
 
 interface PersonaInfo {
   name: string;
@@ -50,16 +50,12 @@ interface ScenarioInfo {
 
 const MAX_HINTS = 3;
 const AUTO_MIC_KEY = 'grasp-auto-mic';
-/** 启动动画时长 */
-const BOOT_MS = 1800;
-/** 开场白音频被浏览器自动播放策略拦截时，推进到下一步的兜底时长 */
-const COACH_FALLBACK_MS = 8000;
 const PERSONA_FALLBACK_MS = 10000;
 
 /** 地推引流课分类关键词（与 Home.tsx 的分类规则一致） */
 const GROUND_PUSH_KEYWORDS = ['地推', '破冰', '陌生', '展会', '商场', '摊位', '驻足'];
 /** 新手指引资格提问（教练语音提问，用户语音自由回答） */
-const QUALIFY_QUESTIONS = ['你做过地推吗？', '你做过教培行业的地推吗？'];
+const QUALIFY_QUESTIONS = ['你做过地推吗？', '你做过教育行业的地推吗？'];
 /** 示范播完后教练的询问 */
 const GUIDE_CHOICE_QUESTION = '想再听一个版本的示范，还是开始模拟练习？';
 /** 新手指引自动聆听 VAD 参数（参考服务端 voice.ts 的 RMS + 静音判停思路） */
@@ -100,7 +96,6 @@ export default function Practice() {
   const [partialText, setPartialText] = useState('');
   const [replyText, setReplyText] = useState('');
   const [wsReady, setWsReady] = useState(false);
-  const [coachText, setCoachText] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [autoMic, setAutoMic] = useState(() => localStorage.getItem(AUTO_MIC_KEY) !== '0');
 
@@ -127,8 +122,8 @@ export default function Practice() {
   const intentionalCloseRef = useRef(false);
   const levelAtRef = useRef(0);
   const msgEndRef = useRef<HTMLDivElement | null>(null);
-  /** 开场阶段正在播放的片段：coach = 教练开场白，persona = 对方开场白 */
-  const introClipRef = useRef<'coach' | 'persona' | null>(null);
+  /** 开场阶段正在播放的片段：persona = 对方开场白 */
+  const introClipRef = useRef<'persona' | null>(null);
   const personaAudioRef = useRef<string | undefined>(undefined);
   const introTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** 当前语音回合的音频是否已全部到达（收到 turn_complete）；全部播完才轮到用户 */
@@ -176,15 +171,6 @@ export default function Practice() {
     }
   };
 
-  /** 教练开场白插入消息列表顶部（仅前端展示，不落 transcript） */
-  const injectCoachMessage = (text: string) => {
-    setMessages((prev) =>
-      prev.some((m) => m.seq === 0 && m.speaker === 'coach')
-        ? prev
-        : [{ seq: 0, speaker: 'coach', text, at: new Date().toISOString() }, ...prev]
-    );
-  };
-
   // ===== 会话恢复 =====
   useEffect(() => {
     if (!sessionId || sessionId === 'new') return;
@@ -195,7 +181,8 @@ export default function Practice() {
         setPersona(p);
         setScenario(s);
         setSessionMode(session.mode);
-        setMessages(session.transcript ?? []);
+        // 初始开场白（seq:1 的客户第一句话）不进对话记录，从用户的实际对练开始展示
+        setMessages((session.transcript ?? []).filter((t) => !(t.seq === 1 && t.speaker === 'persona')));
         setHintsRemaining(Math.max(0, MAX_HINTS - (session.hintsUsed ?? 0)));
         applyTurnMeta(remainingSeconds, remainingSeconds === 0);
         const lastEmotion = session.emotionTrace?.[session.emotionTrace.length - 1];
@@ -220,11 +207,10 @@ export default function Practice() {
             setStatusBoth('user_turn');
           } else if (session.coachOpening) {
             // 开场白已生成过（刷新于开场阶段）：直接到「是否准备好」
-            setCoachText(session.coachOpening);
-            injectCoachMessage(session.coachOpening);
             setPhaseBoth('ready_wait');
           } else {
-            setPhaseBoth('boot');
+            // 新会话：直接到「是否准备好」，开场数据后台加载
+            void beginCoach();
           }
         }
       })
@@ -266,12 +252,6 @@ export default function Practice() {
 
     const player = new TtsPlayer();
     player.onIdle = () => {
-      if (introClipRef.current === 'coach') {
-        introClipRef.current = null;
-        if (introTimerRef.current) clearTimeout(introTimerRef.current);
-        setPhaseBoth('ready_wait');
-        return;
-      }
       if (introClipRef.current === 'persona') introClipRef.current = null;
       // 回合音频未全部到达（turn_complete 未收到）时，解码/播放间隙的空闲不算数
       if (statusRef.current === 'speaking' && turnAudioDoneRef.current) afterAiDone();
@@ -336,45 +316,21 @@ export default function Practice() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isVoice, sessionId, loaded]);
 
-  // ===== 启动动画 → 教练开场白 =====
-  useEffect(() => {
-    if (phase !== 'boot') return;
-    const t = setTimeout(() => void beginCoach(), BOOT_MS);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase]);
-
+  // ===== 开场数据后台加载，页面直接停在「我准备好了」 =====
   const beginCoach = async () => {
-    if (!sessionId || phaseRef.current !== 'boot') return;
-    setPhaseBoth('coach');
+    if (!sessionId) return;
+    setPhaseBoth('ready_wait');
     try {
       const res = await fetchOpening(sessionId, isVoice);
-      setCoachText(res.coachText);
       personaAudioRef.current = res.personaAudio;
-      injectCoachMessage(res.coachText);
-      if (isVoice && res.coachAudio && playerRef.current) {
-        introClipRef.current = 'coach';
-        playerRef.current.enqueue(res.coachAudio);
-        // 自动播放策略拦截音频时的兜底推进
-        introTimerRef.current = setTimeout(() => {
-          if (introClipRef.current === 'coach') {
-            introClipRef.current = null;
-            playerRef.current?.stopAll();
-            setPhaseBoth('ready_wait');
-          }
-        }, COACH_FALLBACK_MS);
-      } else {
-        setPhaseBoth('ready_wait');
-      }
     } catch (err) {
       setErrorMsg(apiError(err, '教练开场白加载失败'));
-      setPhaseBoth('ready_wait');
     }
   };
 
-  // 开场阶段用户任意点击：恢复可能被自动播放策略挂起的音频上下文
+  // 加载阶段用户任意点击：恢复可能被自动播放策略挂起的音频上下文
   useEffect(() => {
-    if (phase !== 'boot' && phase !== 'coach') return;
+    if (phase !== 'boot') return;
     const resumeAudio = () => playerRef.current?.resume();
     window.addEventListener('pointerdown', resumeAudio);
     return () => window.removeEventListener('pointerdown', resumeAudio);
@@ -612,12 +568,6 @@ export default function Practice() {
       if (q === 1) {
         await askQualifyQuestion(2);
       } else if (res.experienced) {
-        try {
-          const clip = await ttsClip(sessionId, '好的，那我们直接开始练习吧', 'coach');
-          await playClip(clip.audioBase64);
-        } catch {
-          /* 提示音频失败不影响进入练习 */
-        }
         startLive();
       } else {
         await beginGuide(1);
@@ -665,9 +615,16 @@ export default function Practice() {
         if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
         setDemoIndex(i);
         const line = lines[i];
-        const voiceRole = line.role === 'sales' ? 'sales' : line.role === 'customer' ? 'persona' : 'narrator';
+        const voiceRole =
+          line.role === 'sales'
+            ? 'sales'
+            : line.role === 'customer'
+              ? 'persona'
+              : line.role === 'child'
+                ? 'child'
+                : 'narrator';
         try {
-          const clip = await ttsClip(sessionId, line.text, voiceRole);
+          const clip = await ttsClip(sessionId, line.text, voiceRole, line.arousal, line.excitement);
           if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
           await playClip(clip.audioBase64);
         } catch {
@@ -684,19 +641,13 @@ export default function Practice() {
     }
   };
 
-  /** 示范播完：教练语音询问下一步（纯语音，不显示问题文字），随后自动聆听 */
+  /** 示范播完：教练询问下一步，随后自动聆听 */
   const askGuideChoice = async () => {
     if (!sessionId) return;
     setDemoStage('ask');
     setGuideText('');
     setGuideHint('');
     guideRetryRef.current = 0;
-    try {
-      const clip = await ttsClip(sessionId, GUIDE_CHOICE_QUESTION, 'coach');
-      await playClip(clip.audioBase64);
-    } catch {
-      /* 询问音频失败：仍可语音/按钮选择 */
-    }
     await autoAnswerGuideChoice();
   };
 
@@ -979,9 +930,6 @@ export default function Practice() {
 
   const personaName = persona?.name ?? '对方';
   const personaAvatar = persona?.avatar;
-  const personaTags = [persona?.occupation, persona?.age ? `${persona.age} 岁` : null].filter(
-    (t): t is string => !!t
-  );
   const inLive = phase === 'live';
   const inputDisabled = !inLive || status !== 'user_turn' || timeUp;
   const canStop =
@@ -1004,7 +952,7 @@ export default function Practice() {
   ) : (
     personaName.slice(0, 1)
   );
-  const inIntro = phase === 'coach' || phase === 'ready_wait' || phase === 'qualify' || phase === 'guide';
+  const inIntro = phase === 'ready_wait' || phase === 'qualify' || phase === 'guide';
   /** 示范对话当前说话的角色（用于双角色可视化高亮） */
   const demoCurrentRole =
     demoIndex >= 0 && demoIndex < demoLines.length ? demoLines[demoIndex].role : null;
@@ -1060,14 +1008,9 @@ export default function Practice() {
                 <div className="avatar av1">{personaAvatarEl}</div>
                 <div>
                   <div className="nm">{personaName}</div>
-                  <div className="rl">{persona?.occupation ?? '客户'} · AI 扮演</div>
+                  <div className="rl">家长 · AI 扮演</div>
                 </div>
               </div>
-              {personaTags.length > 0 && (
-                <div className="p-tags">
-                  {personaTags.map((t) => <span key={t}>{t}</span>)}
-                </div>
-              )}
               <div className="p-item">
                 <div className="avatar av4">教</div>
                 <div><div className="nm">AI 教练</div><div className="rl">实时提示与点评</div></div>
@@ -1085,9 +1028,6 @@ export default function Practice() {
             <div className="statuses">
               {phase === 'boot' && (
                 <div className="statusbar statusbar-gray">正在初始化练习<span className="dots"><i /><i /><i /></span></div>
-              )}
-              {phase === 'coach' && (
-                <div className="statusbar statusbar-blue">🎓 AI 教练正在介绍本场练习<span className="dots"><i /><i /><i /></span></div>
               )}
               {phase === 'ready_wait' && (
                 <div className="statusbar statusbar-coral">
@@ -1172,35 +1112,14 @@ export default function Practice() {
                     <div className="text-[13.5px] font-medium opacity-85">会话准备中…</div>
                   </div>
                 )}
-                {phase === 'coach' && (
-                  <div className="flex flex-col items-center gap-4 px-6 max-w-[560px]">
-                    <div className="flex items-end gap-[5px] h-9">
-                      {[0, 1, 2, 3, 4].map((i) => (
-                        <span key={i} className="w-[5px] rounded-full bg-white/85 animate-pulse" style={{ height: `${14 + (i % 3) * 9}px`, animationDelay: `${i * 0.15}s` }} />
-                      ))}
-                    </div>
-                    <div className="coach-opening">{coachText || '教练正在准备开场白…'}</div>
-                  </div>
-                )}
                 {phase === 'ready_wait' && (
                   <div className="flex flex-col items-center gap-5 px-6 max-w-[560px]">
-                    <div className="coach-opening">{coachText || '本场练习已就绪。'}</div>
                     <button className="ready-btn" onClick={handleReady}>▶ 我准备好了</button>
                   </div>
                 )}
                 {phase === 'qualify' && (
                   <div className="flex flex-col items-center gap-5 px-6 max-w-[560px]">
                     <div className="text-[13px] font-semibold opacity-75">资格提问 · 第 {qualifyQ} / 2 题</div>
-                    {qualifyStage === 'asking' && (
-                      <>
-                        <div className="flex items-end gap-[5px] h-9">
-                          {[0, 1, 2, 3, 4].map((i) => (
-                            <span key={i} className="w-[5px] rounded-full bg-white/85 animate-pulse" style={{ height: `${14 + (i % 3) * 9}px`, animationDelay: `${i * 0.15}s` }} />
-                          ))}
-                        </div>
-                        <div className="text-[13.5px] font-medium opacity-85">🎙 教练提问中…</div>
-                      </>
-                    )}
                     {qualifyStage === 'recording' && (
                       <>
                         <div className="flex items-end gap-[5px] h-9">
@@ -1234,11 +1153,12 @@ export default function Practice() {
                     )}
                     {demoStage === 'playing' && (
                       <div className="flex flex-col items-center gap-6">
-                        {/* 双 AI 角色可视化：当前说话方高亮 + 声波动画 */}
-                        <div className="flex items-center gap-12">
+                        {/* 三角色可视化：当前说话方高亮 + 声波动画 */}
+                        <div className="flex items-center gap-8">
                           {([
                             { role: 'sales' as const, label: 'AI 销售', badge: '销', bg: 'bg-coral' },
                             { role: 'customer' as const, label: 'AI 客户', badge: '客', bg: 'bg-[#4B7BEC]' },
+                            { role: 'child' as const, label: 'AI 小朋友', badge: '童', bg: 'bg-[#22A06B]' },
                           ]).map(({ role, label, badge, bg }) => {
                             const active = demoCurrentRole === role;
                             return (
@@ -1266,16 +1186,6 @@ export default function Practice() {
                     )}
                     {demoStage === 'ask' && (
                       <div className="flex flex-col items-center gap-3">
-                        {guideRec === 'idle' && !guideText && (
-                          <>
-                            <div className="flex items-end gap-[5px] h-9">
-                              {[0, 1, 2, 3, 4].map((i) => (
-                                <span key={i} className="w-[5px] rounded-full bg-white/85 animate-pulse" style={{ height: `${14 + (i % 3) * 9}px`, animationDelay: `${i * 0.15}s` }} />
-                              ))}
-                            </div>
-                            <div className="text-[13.5px] font-medium opacity-85">🎙 教练提问中…</div>
-                          </>
-                        )}
                         {guideRec === 'recording' && (
                           <>
                             <div className="flex items-end gap-[5px] h-9">

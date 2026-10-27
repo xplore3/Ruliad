@@ -209,7 +209,7 @@ export class AliyunSpeechProvider implements ASRProvider, TTSProvider {
    * 音频经二进制通道分帧返回，task-finished 后拼成完整音频。
    */
   async synthesize(text: string, opts?: TTSOptions): Promise<TTSResult> {
-    const params = arousalToTTSParams(opts?.arousal);
+    const params = arousalToTTSParams(opts?.arousal, opts?.excitement);
     const format = 'wav'; // cosyvoice-v2 支持 wav/mp3；取 wav 与 mock 输出一致
     const taskId = randomUUID().replace(/-/g, '');
 
@@ -290,7 +290,7 @@ export class AliyunSpeechProvider implements ASRProvider, TTSProvider {
    * 差异在于二进制音频帧到达即 yield，降低首音频延迟。
    */
   async *synthesizeStream(text: string, opts?: TTSOptions): AsyncIterable<TTSChunk> {
-    const params = arousalToTTSParams(opts?.arousal);
+    const params = arousalToTTSParams(opts?.arousal, opts?.excitement);
     const format = 'wav';
     const taskId = randomUUID().replace(/-/g, '');
 

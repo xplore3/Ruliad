@@ -325,11 +325,15 @@ export async function savePreferences(preferences: Preferences) {
 
 // ====== 新手指引（地推引流课） API ======
 
-export type GuidanceVoiceRole = 'persona' | 'coach' | 'sales' | 'narrator';
+export type GuidanceVoiceRole = 'persona' | 'coach' | 'sales' | 'narrator' | 'child';
 
 export interface DemoLine {
-  role: 'sales' | 'customer' | 'narrator';
+  role: 'sales' | 'customer' | 'child' | 'narrator';
   text: string;
+  /** TTS 情绪唤醒度（小朋友小声/大声靠它区分） */
+  arousal?: number;
+  /** 激情倍率（销售=3）：等比放大语速/音调抬升 */
+  excitement?: number;
 }
 
 /** 资格提问回答：raw PCM 上传，返回识别文本；q=2 时 experienced 给出结论 */
@@ -354,9 +358,9 @@ export async function demoChoice(sessionId: string, audio: ArrayBuffer) {
   return data as { text: string; choice: 'replay' | 'practice' };
 }
 
-/** 任意文本合成语音；voiceRole 选择音色（默认 persona） */
-export async function ttsClip(sessionId: string, text: string, voiceRole: GuidanceVoiceRole = 'persona') {
-  const { data } = await api.post(`/sessions/${sessionId}/tts`, { text, voiceRole });
+/** 任意文本合成语音；voiceRole 选择音色（默认 persona），arousal 控制情绪唤醒度，excitement 为激情倍率 */
+export async function ttsClip(sessionId: string, text: string, voiceRole: GuidanceVoiceRole = 'persona', arousal?: number, excitement?: number) {
+  const { data } = await api.post(`/sessions/${sessionId}/tts`, { text, voiceRole, arousal, excitement });
   return data as { audioBase64: string; audioFormat: string };
 }
 

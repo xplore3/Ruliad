@@ -78,18 +78,16 @@ export async function guidanceRoutes(app: FastifyInstance, ctx: RouteContext): P
     }
   );
 
-  // 生成示范对话剧本（version 仅作"换个版本"提示注入 prompt）；不落 transcript
+  // 生成示范对话剧本（确定性模板生成，version 仅作接口兼容）；不落 transcript
   app.post<{ Params: { id: string }; Body: { version?: number } }>(
     '/sessions/:id/demo',
     async (request, reply) => {
       const session = await store.getSession(request.params.id);
       if (!session) return reply.code(404).send({ error: '会话不存在' });
       if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
-      const scenario = await store.getScenario(session.scenarioId);
-      if (!scenario) return reply.code(500).send({ error: '场景缺失' });
 
       const version = Math.max(1, Math.floor(Number(request.body?.version ?? 1)) || 1);
-      const lines = await generateDemoScript(gateway, scenario, version);
+      const lines = generateDemoScript(version);
       return { lines };
     }
   );
