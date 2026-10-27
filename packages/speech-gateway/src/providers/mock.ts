@@ -71,6 +71,7 @@ export class MockSpeechProvider implements ASRProvider, TTSProvider {
         finished = true;
         console.log(`[MockASR][trace] finish() called (writes=${writeCount}) → onFinal: "${MOCK_TRANSCRIPT}"`);
         handlers.onFinal(MOCK_TRANSCRIPT);
+        handlers.onFinished?.();
       },
       close() {
         console.log(`[MockASR][trace] close() called (wasFinished=${finished} writes=${writeCount})`);

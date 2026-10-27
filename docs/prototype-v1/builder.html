@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>构建 · Grasp 销售 AI 陪练</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+  /* 我的场景网格（复用首页卡片视觉） */
+  .mine-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
+  .mine-card{transition:.18s}
+  .mine-card:hover{transform:translateY(-3px)}
+  .cover{position:relative;display:block}
+  .cover .coverimg{height:150px}
+  .cover.t1{background:linear-gradient(160deg,#FFE9E4,#FFF6F3)}
+  .cover.t2{background:linear-gradient(160deg,#E7EEFE,#F5F8FF)}
+  .cover.t3{background:linear-gradient(160deg,#FBEFD9,#FEFAF1)}
+  .cover.t4{background:linear-gradient(160deg,#DFF4EC,#F3FBF8)}
+  .cover .cat{position:absolute;top:10px;left:10px}
+  .cover .derived{position:absolute;top:10px;right:10px}
+  .cover .diff{position:absolute;bottom:10px;right:10px;font-size:11px;color:var(--text-2);background:rgba(255,255,255,.85);
+    padding:2px 9px;border-radius:999px}
+  .sbody{padding:12px 14px 14px}
+  .sbody h3{margin-bottom:4px}
+  .sbody .desc{font-size:12.5px;color:var(--text-2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .sbody .who{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12.5px;color:var(--text-2)}
+  .card-actions{display:flex;gap:6px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+  .act-btn{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:4px;
+    padding:6px 0;border-radius:9px;font-size:12.5px;font-weight:600;color:var(--text-2);
+    background:var(--bg);transition:.15s}
+  .act-btn:hover{background:var(--coral-soft);color:var(--coral)}
+  .act-btn.danger:hover{background:#FDECEA;color:#D43D2A}
+
+  /* 编辑器：PC 左锚点导航 + 右表单 */
+  .editor{display:grid;grid-template-columns:220px 1fr;gap:22px;align-items:start}
+  .ednav{position:sticky;top:calc(var(--nav-h) + 20px)}
+  .ednav .inner-card{padding:14px 10px}
+  .ednav a{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;
+    font-size:14px;color:var(--text-2);font-weight:500}
+  .ednav a .no{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;
+    border-radius:50%;background:var(--bg);font-size:11.5px;font-weight:700;color:var(--text-2);flex:none}
+  .ednav a:hover{background:var(--bg)}
+  .ednav a.active{background:var(--coral-soft);color:var(--coral);font-weight:700}
+  .ednav a.active .no{background:var(--coral);color:#fff}
+  .ednav .ver{margin:10px 14px 4px;font-size:11.5px;color:var(--text-2)}
+
+  /* 表单分节卡片 */
+  .formsec{padding:22px 24px;margin-bottom:18px}
+  .formsec .fs-head{display:flex;align-items:baseline;gap:10px;margin-bottom:18px}
+  .formsec .fs-head h3{font-size:16px}
+  .formsec .fs-head .sub{font-size:12px;color:var(--text-2)}
+  .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+
+  /* 可点选 chips（类别四选一 / 性格标签） */
+  .pick{display:flex;flex-wrap:wrap;gap:10px}
+  .pick .chip{padding:8px 16px;font-size:13.5px;cursor:pointer;border:1.5px solid var(--line);
+    background:#fff;color:var(--text-2);transition:.15s}
+  .pick .chip:hover{border-color:var(--coral);color:var(--coral)}
+  .pick .chip.on{background:var(--coral);border-color:var(--coral);color:#fff}
+  .pick .chip.on-soft{background:var(--coral-soft);border-color:var(--coral);color:var(--coral)}
+
+  /* 滑杆刻度 */
+  .range-vals{display:flex;justify-content:space-between;font-size:11.5px;color:var(--text-2);margin-top:6px}
+
+  /* 评估六维权重 */
+  .weights{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .witem{background:var(--bg);border-radius:12px;padding:12px 14px}
+  .witem .wl{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .witem .wl span{font-size:13px;font-weight:600}
+  .witem input{width:64px;padding:6px 8px;border:1.5px solid var(--line);border-radius:8px;
+    background:#fff;text-align:center;font-weight:700;outline:none}
+  .witem input:focus{border-color:var(--coral);box-shadow:0 0 0 3px var(--coral-soft)}
+  .witem .wd{font-size:11.5px;color:var(--text-2);margin-top:8px}
+
+  /* 底部操作条 */
+  .editor-actions{position:sticky;bottom:16px;display:flex;align-items:center;gap:12px;
+    padding:14px 18px;margin-top:4px}
+  .editor-actions .note{margin-left:auto;font-size:12px;color:var(--text-2)}
+
+  @media (min-width:769px) and (max-width:1200px){
+    .mine-grid{grid-template-columns:repeat(2,1fr)}
+    .weights{grid-template-columns:repeat(2,1fr)}
+  }
+  @media (max-width:768px){
+    .mine-grid{grid-template-columns:1fr;gap:12px}
+    .cover .coverimg{height:180px}
+    .editor{display:block}
+    .ednav{display:none}
+    .formsec{padding:16px}
+    .row3,.row2{grid-template-columns:1fr}
+    .weights{grid-template-columns:repeat(2,1fr)}
+    .editor-actions{flex-wrap:wrap;bottom:calc(var(--tab-h) + env(safe-area-inset-bottom) + 10px)}
+    .editor-actions .btn{flex:1}
+    .editor-actions .note{margin-left:0;width:100%;text-align:center}
+  }
+</style>
+</head>
+<body>
+
+<!-- PC 顶部菜单 -->
+<nav class="topnav">
+  <div class="inner">
+    <a class="logo" href="index.html"><span class="dot"></span>Grasp</a>
+    <div class="menu">
+      <a href="index.html">首页</a>
+      <a class="active" href="builder.html">构建</a>
+      <a href="dashboard.html">看板</a>
+      <a href="records.html">我的</a>
+    </div>
+    <div class="me">
+      <span class="chip coral">🔥 连续练习 6 天</span>
+      <div class="avatar av5" style="width:36px;height:36px;font-size:14px">我</div>
+    </div>
+  </div>
+</nav>
+
+<!-- 手机标题栏 -->
+<div class="mtopbar">构建<span class="right">＋ 新建</span></div>
+
+<main class="wrap">
+
+  <!-- ===== 我的场景 ===== -->
+  <section class="section">
+    <div class="sec-head">
+      <h2>🛠️ 我的场景</h2>
+      <a class="btn primary" href="#editor">＋ 新建场景</a>
+    </div>
+    <div class="mine-grid">
+
+      <div class="card mine-card">
+        <div class="cover t1">
+          <span class="chip coral cat">电话销售</span>
+          <span class="chip gray derived">我的派生场景</span>
+          <img class="coverimg" src="assets/avatars/man-3.jpg" alt="王建国">
+          <span class="diff">进阶 · 约 8 分钟</span>
+        </div>
+        <div class="sbody">
+          <h3>向谨慎的采购总监报价</h3>
+          <p class="desc">基于官方模板调整：王总对价格极度敏感，习惯用竞品压价，需讲清差异化价值。</p>
+          <div class="who"><span class="chip gray">v3 · 3 天前更新</span><span class="chip green">已练 12 次</span></div>
+          <div class="card-actions">
+            <button class="act-btn">✏️ 编辑</button>
+            <button class="act-btn">⧉ 复制</button>
+            <button class="act-btn danger">🗑 删除</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card mine-card">
+        <div class="cover t2">
+          <span class="chip blue cat">客户主动咨询</span>
+          <span class="chip gray derived">我的派生场景</span>
+          <img class="coverimg" src="assets/avatars/woman-1.jpg" alt="林晓雯">
+          <span class="diff">初级 · 约 5 分钟</span>
+        </div>
+        <div class="sbody">
+          <h3>教培课程咨询（少儿英语版）</h3>
+          <p class="desc">把官方咨询场景改成本行业话术：家长来电问价，需求模糊，需确认决策人。</p>
+          <div class="who"><span class="chip gray">v1 · 上周创建</span><span class="chip green">已练 4 次</span></div>
+          <div class="card-actions">
+            <button class="act-btn">✏️ 编辑</button>
+            <button class="act-btn">⧉ 复制</button>
+            <button class="act-btn danger">🗑 删除</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card mine-card">
+        <div class="cover t3">
+          <span class="chip amber cat">成交谈判</span>
+          <span class="chip gray derived">我的派生场景</span>
+          <img class="coverimg" src="assets/avatars/man-2.jpg" alt="赵铭">
+          <span class="diff">挑战 · 约 12 分钟</span>
+        </div>
+        <div class="sbody">
+          <h3>账期谈判（大客户加强版）</h3>
+          <p class="desc">提高了角色强势程度：赵总要求 90 天账期 + 独家折扣，练习让步策略与底线管理。</p>
+          <div class="who"><span class="chip gray">v2 · 2 周前更新</span><span class="chip green">已练 7 次</span></div>
+          <div class="card-actions">
+            <button class="act-btn">✏️ 编辑</button>
+            <button class="act-btn">⧉ 复制</button>
+            <button class="act-btn danger">🗑 删除</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card mine-card">
+        <div class="cover t4">
+          <span class="chip green cat">地推破冰</span>
+          <span class="chip gray derived">我的派生场景</span>
+          <img class="coverimg" src="assets/avatars/woman-2.jpg" alt="陈丽">
+          <span class="diff">初级 · 约 4 分钟</span>
+        </div>
+        <div class="sbody">
+          <h3>社区门店 30 秒破冰</h3>
+          <p class="desc">把商场场景改成社区门店语境：陈姐赶时间、戒备心强，目标是加到微信。</p>
+          <div class="who"><span class="chip gray">v1 · 3 周前创建</span><span class="chip gray">未练习</span></div>
+          <div class="card-actions">
+            <button class="act-btn">✏️ 编辑</button>
+            <button class="act-btn">⧉ 复制</button>
+            <button class="act-btn danger">🗑 删除</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <div class="divider"></div>
+
+  <!-- ===== 场景编辑器 ===== -->
+  <section class="section" id="editor" style="padding-top:8px">
+    <div class="sec-head">
+      <h2>✏️ 场景编辑器<span class="small muted" style="font-weight:400">（演示：编辑「向谨慎的采购总监报价」）</span></h2>
+      <span class="chip gray">草稿自动保存 · 14:32</span>
+    </div>
+
+    <div class="editor">
+
+      <!-- 左侧锚点导航（仅 PC） -->
+      <aside class="ednav">
+        <div class="card inner-card">
+          <a class="active" href="#sec-base"><span class="no">1</span>场景基础</a>
+          <a href="#sec-goal"><span class="no">2</span>练习目标</a>
+          <a href="#sec-role"><span class="no">3</span>角色画像</a>
+          <a href="#sec-dialog"><span class="no">4</span>对话参数</a>
+          <a href="#sec-eval"><span class="no">5</span>评估配置</a>
+          <div class="ver">当前版本 v3 · 派生自官方模板「采购报价」</div>
+        </div>
+      </aside>
+
+      <!-- 右侧表单 -->
+      <div class="formcol">
+
+        <!-- ① 场景基础 -->
+        <div class="card formsec" id="sec-base">
+          <div class="fs-head"><h3>① 场景基础</h3><span class="sub">这个场景是做什么的</span></div>
+          <div class="field">
+            <label>场景标题</label>
+            <input class="input" value="向谨慎的采购总监报价">
+          </div>
+          <div class="field">
+            <label>场景类别</label>
+            <div class="pick">
+              <span class="chip on">📞 电话销售</span>
+              <span class="chip">💬 客户主动咨询</span>
+              <span class="chip">🤝 成交谈判</span>
+              <span class="chip">🚶 地推破冰</span>
+            </div>
+          </div>
+          <div class="field">
+            <label>场景描述</label>
+            <textarea class="input" rows="3">王总对价格极度敏感，习惯用竞品压价，需要在 5 分钟内讲清差异化价值，不被对方的节奏带走。</textarea>
+          </div>
+          <div class="row2">
+            <div class="field">
+              <label>难度</label>
+              <select class="input">
+                <option>初级</option>
+                <option selected>进阶</option>
+                <option>挑战</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>预计时长</label>
+              <input class="input" value="约 8 分钟">
+            </div>
+          </div>
+        </div>
+
+        <!-- ② 练习目标 -->
+        <div class="card formsec" id="sec-goal">
+          <div class="fs-head"><h3>② 练习目标</h3><span class="sub">练完要达成什么</span></div>
+          <div class="field">
+            <label>我方目标</label>
+            <textarea class="input" rows="2">不降价讲清差异化价值，争取二次面谈</textarea>
+            <div class="hint">AI 会围绕这个目标给角色施压，评估也以此为准绳。</div>
+          </div>
+          <div class="field">
+            <label>成功标准</label>
+            <input class="input" value="对方同意下周带技术团队来司考察">
+          </div>
+          <div class="field">
+            <label>禁止事项</label>
+            <input class="input" value="不得承诺超出 5% 的折扣；不得诋毁竞品">
+          </div>
+        </div>
+
+        <!-- ③ 角色画像 -->
+        <div class="card formsec" id="sec-role">
+          <div class="fs-head"><h3>③ 角色画像</h3><span class="sub">你在和谁对话</span></div>
+          <div class="row3">
+            <div class="field">
+              <label>姓名</label>
+              <input class="input" value="王建国">
+            </div>
+            <div class="field">
+              <label>职位</label>
+              <input class="input" value="采购总监">
+            </div>
+            <div class="field">
+              <label>行业</label>
+              <input class="input" value="装备制造">
+            </div>
+          </div>
+          <div class="field">
+            <label>性格标签（可多选）</label>
+            <div class="pick">
+              <span class="chip on-soft">谨慎</span>
+              <span class="chip on-soft">重数据</span>
+              <span class="chip on-soft">爱压价</span>
+              <span class="chip">爽快</span>
+              <span class="chip">强势</span>
+              <span class="chip">善拖延</span>
+              <span class="chip">话多</span>
+              <span class="chip">戒备</span>
+            </div>
+          </div>
+          <div class="field">
+            <label>决策风格</label>
+            <select class="input">
+              <option>凭感觉快速拍板</option>
+              <option selected>理性比较，需要数据佐证</option>
+              <option>向上汇报，本人不拍板</option>
+              <option>多方询价，拖到最后</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>典型异议</label>
+            <textarea class="input" rows="2">竞品更便宜；预算有限</textarea>
+            <div class="hint">角色会在对话中自然抛出这些异议，一行一个或用分号分隔。</div>
+          </div>
+          <div class="field">
+            <label>禁止透露内容</label>
+            <input class="input" value="公司已内定竞品入围，只是在比价压价">
+            <div class="hint">角色不会主动说出的信息，除非被你追问出来。</div>
+          </div>
+        </div>
+
+        <!-- ④ 对话参数 -->
+        <div class="card formsec" id="sec-dialog">
+          <div class="fs-head"><h3>④ 对话参数</h3><span class="sub">角色说话的脾气</span></div>
+          <div class="field">
+            <label>语速</label>
+            <input type="range" min="1" max="3" step="1" value="2">
+            <div class="range-vals"><span>慢</span><span>标准</span><span>快</span></div>
+            <div class="hint">标准 ≈ 150 WPM</div>
+          </div>
+          <div class="field">
+            <label>挑战强度</label>
+            <input type="range" min="1" max="5" step="1" value="3">
+            <div class="range-vals"><span>温和</span><span>有来有回</span><span>步步紧逼</span></div>
+            <div class="hint">强度越高，角色追问越狠、让步越少。</div>
+          </div>
+          <div class="field">
+            <label>打断频率</label>
+            <select class="input">
+              <option>从不打断</option>
+              <option selected>偶尔打断（接近真实客户）</option>
+              <option>频繁打断（高压特训）</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- ⑤ 评估配置 -->
+        <div class="card formsec" id="sec-eval">
+          <div class="fs-head"><h3>⑤ 评估配置</h3><span class="sub">六维权重</span></div>
+          <div class="weights">
+            <div class="witem">
+              <div class="wl"><span>需求挖掘</span><input value="20" type="number"></div>
+              <div class="wd">是否问出真实需求与决策链</div>
+            </div>
+            <div class="witem">
+              <div class="wl"><span>价值表达</span><input value="20" type="number"></div>
+              <div class="wd">讲清差异化，而非罗列功能</div>
+            </div>
+            <div class="witem">
+              <div class="wl"><span>异议处理</span><input value="20" type="number"></div>
+              <div class="wd">面对压价的回应质量</div>
+            </div>
+            <div class="witem">
+              <div class="wl"><span>流程推进</span><input value="15" type="number"></div>
+              <div class="wd">是否拿到下一步承诺</div>
+            </div>
+            <div class="witem">
+              <div class="wl"><span>沟通节奏</span><input value="15" type="number"></div>
+              <div class="wd">倾听、停顿、不打断对方</div>
+            </div>
+            <div class="witem">
+              <div class="wl"><span>专业合规</span><input value="10" type="number"></div>
+              <div class="wd">话术准确，不踩禁止事项</div>
+            </div>
+          </div>
+          <div class="hint" style="margin-top:12px">权重合计需 = 100%（当前 100% ✅）</div>
+        </div>
+
+        <!-- 底部操作条 -->
+        <div class="card editor-actions">
+          <button class="btn ghost">🎧 试聊三轮预览</button>
+          <button class="btn primary">保存为新版本</button>
+          <span class="note">历史练习仍绑定旧版本 v3</span>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- 手机底部 Tab -->
+<nav class="tabbar"><div class="row">
+  <a href="index.html"><span class="ic">🏠</span>首页</a>
+  <a class="active" href="builder.html"><span class="ic">🛠️</span>构建</a>
+  <a href="dashboard.html"><span class="ic">📊</span>看板</a>
+  <a href="records.html"><span class="ic">👤</span>我的</a>
+</div></nav>
+
+</body>
+</html>

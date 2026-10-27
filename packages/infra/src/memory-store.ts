@@ -151,6 +151,9 @@ private events: DomainEvent[] = [];
   async saveScenario(scenario: Scenario) {
     this.scenarios.set(scenario.id, scenario);
   }
+  async deleteScenario(id: string) {
+    this.scenarios.delete(id);
+  }
   async getLearningPath(id: string) {
     return this.learningPaths.get(id);
   }

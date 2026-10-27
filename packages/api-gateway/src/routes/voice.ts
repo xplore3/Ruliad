@@ -46,7 +46,7 @@ function formatFromMime(mime: string | undefined): string {
 }
 
 /** 取人设配置的 TTS 音色（voiceProfile.voice）；未配置返回 undefined，由 provider 用全局默认 SPEECH_TTS_VOICE */
-async function personaVoice(
+export async function personaVoice(
   store: RouteContext['store'],
   personaConfigId: string,
   log?: { info(obj: object, msg: string): void }
@@ -177,6 +177,11 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
       let speaking = false; // ASR 流已建立、尚未出最终结果
       let processing = false; // asr_final 已出、runTurn/回复处理中
       let ttsPlaying = false;
+      /** 本轮已累积的识别文本（paraformer 句末会多次回调 onFinal，文本为累计全量） */
+      let latestText = '';
+      /** 客户端已点「结束本轮」：等 ASR 收尾后统一落回合，说话中不做自动断句 */
+      let clientFinish = false;
+      let finishing = false;
 
       const send = (msg: Record<string, unknown>) => {
         if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(msg));
@@ -189,6 +194,9 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
         speaking = false;
         processing = false;
         ttsPlaying = false;
+        latestText = '';
+        clientFinish = false;
+        finishing = false;
         if (asrStream) {
           asrStream.close();
           asrStream = null;
@@ -213,6 +221,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
           const session = await store.getSession(sessionId);
           if (!session) return fail('会话不存在');
           if (session.status !== 'active') return fail('会话已结束');
+          if (session.pausedAt) return fail('会话已暂停，请先继续');
           const scenario = await store.getScenario(session.scenarioId);
           if (!scenario) return fail('场景缺失');
 
@@ -264,6 +273,14 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
         }
       };
 
+      /** 客户端结束本轮：汇总识别文本，发 asr_final 并落回合（幂等） */
+      const doFinish = (myRound: number) => {
+        if (myRound !== round || finishing) return;
+        finishing = true;
+        send({ type: 'asr_final', text: latestText });
+        void handleFinal(myRound, latestText);
+      };
+
       const startASR = () => {
         if (cancelRound()) send({ type: 'tts_cancelled' });
         const myRound = round;
@@ -272,10 +289,17 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
           onPartial: (text) => {
             if (myRound === round) send({ type: 'asr_partial', text });
           },
+          // paraformer 句末会多次回调（累计文本）：用户一直说话时不自动断句、不收尾，
+          // 只刷新字幕；只有客户端点了「结束本轮」（clientFinish）才真正落回合
           onFinal: (text) => {
             if (myRound !== round) return;
-            send({ type: 'asr_final', text });
-            void handleFinal(myRound, text);
+            latestText = text;
+            send({ type: 'asr_partial', text });
+            if (clientFinish) doFinish(myRound);
+          },
+          onFinished: () => {
+            if (myRound !== round) return;
+            if (clientFinish) doFinish(myRound);
           },
           onError: (err) => {
             if (myRound !== round) return;
@@ -306,7 +330,13 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
             if (!processing) startASR();
             break;
           case 'finish':
-            asrStream?.finish();
+            // 用户一直说话时不自动断句：仅在客户端明确结束本轮时收尾
+            clientFinish = true;
+            if (asrStream) {
+              asrStream.finish();
+            } else {
+              doFinish(round);
+            }
             break;
           case 'interrupt':
             if (cancelRound()) send({ type: 'tts_cancelled' });
@@ -643,6 +673,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
           const session = await store.getSession(sessionId);
           if (!session) return fail('会话不存在');
           if (session.status !== 'active') return fail('会话已结束');
+          if (session.pausedAt) return fail('会话已暂停，请先继续');
           const scenario = await store.getScenario(session.scenarioId);
           if (!scenario) return fail('场景缺失');
 

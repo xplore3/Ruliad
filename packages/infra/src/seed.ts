@@ -641,6 +641,8 @@ export function buildSeedData(): SeedData {
         coverageTopics: ['开场自我介绍与时间承诺', '循证证据引用', '适应症合规表述', '异议首反应', '下一步约定'],
         personaTitle: '冷淡型客户，时间只给 8 分钟',
         methodology: '张伟三步破冰法 · L2',
+        source: '官方',
+        practiceCount: 128,
       },
       {
         id: 'scenario-price-objection',
@@ -654,6 +656,8 @@ export function buildSeedData(): SeedData {
         coverageTopics: ['价值重述', '价格异议首反应', '合规让利边界'],
         personaTitle: '预算收紧，压价强硬',
         methodology: '价值重述应对价格异议 · L1',
+        source: '官方',
+        practiceCount: 86,
       },
       {
         id: 'scenario-push-forward',
@@ -667,6 +671,8 @@ export function buildSeedData(): SeedData {
         coverageTopics: ['顾虑归属确认', '小承诺推进', '时间节点约定'],
         personaTitle: '态度温和但迟迟不表态',
         methodology: '再考虑一下的推进法 · L2',
+        source: '官方',
+        practiceCount: 54,
       },
       {
         id: 'scenario-compliance',
@@ -680,6 +686,8 @@ export function buildSeedData(): SeedData {
         coverageTopics: ['适应症边界', '证据等级说明', '禁忌提示'],
         personaTitle: '循证严格，追问数据出处',
         methodology: '适应症合规表达 · L3',
+        source: '官方',
+        practiceCount: 32,
       },
     ],
     learningPaths: [

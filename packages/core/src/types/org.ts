@@ -30,6 +30,8 @@ export interface User {
   username: string;
   /** 密码哈希（scrypt，salt:hash）。仅存储，API 输出必须剔除 */
   passwordHash: string;
+  /** 用户偏好设置（设置页持久化的键值 JSON，缺省 {}） */
+  preferences?: Record<string, unknown>;
 }
 
 export interface MethodologyConfig {

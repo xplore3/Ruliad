@@ -9,7 +9,7 @@ const TAB_ITEMS = [
   { path: '/profile', label: '我的', icon: ProfileTabIcon },
 ];
 
-const FULLSCREEN_PATHS = ['/practice', '/call', '/review', '/login', '/admin'];
+const FULLSCREEN_PATHS = ['/practice', '/call', '/review', '/login'];
 
 export default function Layout() {
   const location = useLocation();
@@ -25,16 +25,24 @@ export default function Layout() {
   }, [isFullscreen]);
 
   return (
-    <div className="min-h-screen" style={{ background: '#F7F7F8' }}>
-      {/* Top bar (hidden on fullscreen pages) */}
+    <div className="layout-wrapper">
+      {/* PC Top Navigation - matches prototype .topnav */}
       {!isFullscreen && <TopBar />}
 
-      {/* Main content */}
-      <main style={{ maxWidth: 1200, margin: '0 auto', padding: isFullscreen ? '0 24px' : '64px 24px 24px' }}>
+      {/* Mobile Top Bar - matches prototype .mtopbar */}
+      {!isFullscreen && (
+        <div className="mtopbar">
+          {getPageTitle(location.pathname)}
+          <span className="right">连续 6 天</span>
+        </div>
+      )}
+
+      {/* Main content - matches prototype .wrap */}
+      <main className="wrap" style={{ paddingTop: isFullscreen ? 0 : undefined }}>
         <Outlet />
       </main>
 
-      {/* Bottom Tab bar (mobile, hidden on fullscreen & PC) */}
+      {/* Bottom Tab bar - matches prototype .tabbar */}
       {!isFullscreen && (
         <nav className="tabbar">
           <div className="row">
@@ -55,60 +63,62 @@ export default function Layout() {
   );
 }
 
-// ===== Top Bar (matches prototype index.html .topnav) =====
+// ===== Top Bar (matches prototype .topnav) =====
 function TopBar() {
   return (
-    <nav style={{
-      position: 'sticky', top: 0, zIndex: 50, height: 60,
-      background: 'rgba(255,255,255,.92)', backdropFilter: 'blur(10px)',
-      borderBottom: '1px solid #EBEBEF',
-    }}>
-      <div style={{
-        maxWidth: 1200, margin: '0 auto', height: '100%', padding: '0 24px',
-        display: 'flex', alignItems: 'center', gap: 28,
-      }}>
+    <nav className="topnav">
+      <div className="inner">
         {/* Logo */}
-        <NavLink to="/home" className="flex items-center gap-2">
-          <span className="w-7 h-7 rounded-full bg-coral flex items-center justify-center">
-            <span className="w-3 h-3 rounded-full bg-white/90" />
-          </span>
-          <span className="text-text-primary font-bold text-lg tracking-wide">Grasp</span>
+        <NavLink to="/home" className="logo">
+          <span className="dot" />
+          Grasp
         </NavLink>
 
-        {/* Menu (visible on desktop) */}
-        <div className="flex gap-5 text-sm" style={{ flex: 1 }}>
+        {/* Menu */}
+        <div className="menu">
           {TAB_ITEMS.map((tab) => (
-            <NavLink
-              key={tab.path}
-              to={tab.path}
-              className={({ isActive }) =>
-                `px-2 py-1 transition-colors ${isActive ? 'text-text-primary font-semibold' : 'text-text-secondary hover:text-text-primary'}`
-              }
-            >
-              {tab.label}
-            </NavLink>
+              <NavLink
+                key={tab.path}
+                to={tab.path}
+                className={({ isActive }) => (isActive ? 'active' : '')}
+              >
+                {tab.label}
+              </NavLink>
           ))}
         </div>
 
-        {/* Streak badge */}
-        <div className="flex items-center gap-2">
-          <span className="chip chip-gray">
-            <span className="cdot" style={{ background: '#FF6B5B' }} />
+        {/* Streak + Avatar */}
+        <div className="me">
+          <span className="chip gray">
+            <i className="cdot" style={{ background: 'var(--coral)' }} />
             连续练习 6 天
           </span>
-          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-coral to-coral-dark flex items-center justify-center text-white text-sm font-bold">
+          <NavLink to="/profile" className="avatar av5" style={{ width: 36, height: 36, fontSize: 14 }}>
             我
-          </div>
+          </NavLink>
         </div>
       </div>
     </nav>
   );
 }
 
-// ===== Tab Icons (inline SVG single-color, switches to coral on active) =====
+// ===== Helpers =====
+function getPageTitle(pathname: string): string {
+  if (pathname.startsWith('/home')) return 'Grasp';
+  if (pathname.startsWith('/build')) return '构建';
+  if (pathname.startsWith('/dashboard')) return '能力看板';
+  if (pathname.startsWith('/profile')) return '我的';
+  if (pathname.startsWith('/practice')) return '练习中';
+  if (pathname.startsWith('/call')) return '语音通话';
+  if (pathname.startsWith('/review')) return '练习报告';
+  if (pathname.startsWith('/settings')) return '设置';
+  return 'Grasp';
+}
+
+// ===== Tab Icons (inline SVG, switches to coral on active) =====
 function HomeTabIcon({ active }: { active: boolean }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke={active ? '#FF6B5B' : 'currentColor'} strokeWidth={active ? 2.2 : 1.8} strokeLinecap="round" strokeLinejoin="round">
+    <svg className="ic" viewBox="0 0 24 24" fill="none" stroke={active ? '#FF6B5B' : 'currentColor'} strokeWidth={active ? 2.2 : 1.8} strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 3.2 3.5 10.4c-.3.3-.5.7-.5 1.1V20c0 .6.4 1 1 1h4.2c.6 0 1-.4 1-1v-4.6h5.6V20c0 .6.4 1 1 1H20c.6 0 1-.4 1-1v-8.5c0-.4-.2-.8-.5-1.1L12 3.2z" />
     </svg>
   );
@@ -116,7 +126,7 @@ function HomeTabIcon({ active }: { active: boolean }) {
 
 function BuildTabIcon({ active }: { active: boolean }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke={active ? '#FF6B5B' : 'currentColor'} strokeWidth={active ? 2.2 : 1.8} strokeLinecap="round" strokeLinejoin="round">
+    <svg className="ic" viewBox="0 0 24 24" fill="none" stroke={active ? '#FF6B5B' : 'currentColor'} strokeWidth={active ? 2.2 : 1.8} strokeLinecap="round" strokeLinejoin="round">
       <path d="M6 2a1 1 0 0 1 1 1v5.2a2.6 2.6 0 0 1 0 5V21a1 1 0 0 1-2 0v-7.8a2.6 2.6 0 0 1 0-5V3a1 1 0 0 1 1-1zm6 0a1 1 0 0 1 1 1v1.2a2.6 2.6 0 0 1 0 5V21a1 1 0 0 1-2 0V9.2a2.6 2.6 0 0 1 0-5V3a1 1 0 0 1 1-1zm6 0a1 1 0 0 1 1 1v9.2a2.6 2.6 0 0 1 0 5V21a1 1 0 0 1-2 0v-3.8a2.6 2.6 0 0 1 0-5V3a1 1 0 0 1 1-1z" />
     </svg>
   );
@@ -124,7 +134,7 @@ function BuildTabIcon({ active }: { active: boolean }) {
 
 function DashboardTabIcon({ active }: { active: boolean }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke={active ? '#FF6B5B' : 'currentColor'} strokeWidth={active ? 2.2 : 1.8} strokeLinecap="round" strokeLinejoin="round">
+    <svg className="ic" viewBox="0 0 24 24" fill="none" stroke={active ? '#FF6B5B' : 'currentColor'} strokeWidth={active ? 2.2 : 1.8} strokeLinecap="round" strokeLinejoin="round">
       <path d="M4 21c-.6 0-1-.4-1-1v-8c0-.6.4-1 1-1h2c.6 0 1 .4 1 1v8c0 .6-.4 1-1 1H4zm7 0c-.6 0-1-.4-1-1V4c0-.6.4-1 1-1h2c.6 0 1 .4 1 1v16c0 .6-.4 1-1 1h-2zm7 0c-.6 0-1-.4-1-1v-5c0-.6.4-1 1-1h2c.6 0 1 .4 1 1v5c0 .6-.4 1-1 1h-2z" />
     </svg>
   );
@@ -132,7 +142,7 @@ function DashboardTabIcon({ active }: { active: boolean }) {
 
 function ProfileTabIcon({ active }: { active: boolean }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke={active ? '#FF6B5B' : 'currentColor'} strokeWidth={active ? 2.2 : 1.8} strokeLinecap="round" strokeLinejoin="round">
+    <svg className="ic" viewBox="0 0 24 24" fill="none" stroke={active ? '#FF6B5B' : 'currentColor'} strokeWidth={active ? 2.2 : 1.8} strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9zm0 1.8c-4.5 0-8.2 2.3-8.2 5.2 0 .6.4 1 1 1h14.4c.6 0 1-.4 1-1 0-2.9-3.7-5.2-8.2-5.2z" />
     </svg>
   );

@@ -1,34 +1,144 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchGrowth } from '../api';
-import type { GrowthData } from '../types';
+import { apiError, fetchGrowth, fetchMySessions, fetchScenarios } from '../api';
+import type { MySessionRecord } from '../api';
+import type { GrowthData, Scenario, UserSkillState } from '../types';
 
-// 徽章数据
-const BADGES = [
-  { icon: '🎯', name: '首次练习', unlocked: true },
-  { icon: '🔥', name: '连续 7 天', unlocked: true },
-  { icon: '📞', name: '通话 10 场', unlocked: true },
-  { icon: '🌙', name: '深夜练习', unlocked: true },
-  { icon: '🛡️', name: '异议突破 80 分', unlocked: false },
-  { icon: '👑', name: '满分王者', unlocked: false },
-  { icon: '🎓', name: '构建大师', unlocked: false },
-  { icon: '🏆', name: '排行榜前三', unlocked: false },
-];
+// ===== 工具函数 =====
+
+function dayKey(d: Date) {
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+function startOfWeek(d: Date) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+  return x;
+}
+
+/** 技能得分：优先取 history 最新分数，否则按 currentLevel/maxLevel 折算 */
+function skillScore(skill: UserSkillState): number {
+  if (skill.history.length > 0) {
+    const sorted = [...skill.history].sort((a, b) => a.at.localeCompare(b.at));
+    return Math.round(sorted[sorted.length - 1].score);
+  }
+  const max = skill.maxLevel || 5;
+  return Math.round((skill.currentLevel / max) * 100);
+}
+
+function sortedHistory(skill: UserSkillState) {
+  return [...skill.history].sort((a, b) => a.at.localeCompare(b.at));
+}
+
+function trendStatus(hist: { score: number }[]): string {
+  if (hist.length < 2) return '数据不足';
+  const diff = hist[hist.length - 1].score - hist[hist.length - 2].score;
+  if (diff > 0) return '稳步上升';
+  if (diff < 0) return '有所下滑';
+  return '持平';
+}
+
+/** 连续天数（以今天或昨天结尾）与最长连续纪录 */
+function streaks(dateKeys: Set<string>): { current: number; longest: number } {
+  let current = 0;
+  const t = new Date();
+  t.setHours(0, 0, 0, 0);
+  if (!dateKeys.has(dayKey(t))) t.setDate(t.getDate() - 1);
+  while (dateKeys.has(dayKey(t))) {
+    current++;
+    t.setDate(t.getDate() - 1);
+  }
+  const sorted = [...dateKeys]
+    .map((k) => {
+      const [y, m, d] = k.split('-').map(Number);
+      return new Date(y, m, d).getTime();
+    })
+    .sort((a, b) => a - b);
+  let longest = 0;
+  let run = 0;
+  let prev = -1;
+  for (const ts of sorted) {
+    run = prev >= 0 && ts - prev === 86400000 ? run + 1 : 1;
+    longest = Math.max(longest, run);
+    prev = ts;
+  }
+  return { current, longest };
+}
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const [data, setData] = useState<GrowthData | null>(null);
+  const [mySessions, setMySessions] = useState<MySessionRecord[]>([]);
+  const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [period, setPeriod] = useState<'7' | '30' | '90'>('30');
 
   useEffect(() => {
-    fetchGrowth()
-      .then(setData)
-      .catch(console.error)
+    Promise.all([
+      fetchGrowth(),
+      fetchMySessions().catch(() => ({ records: [] as MySessionRecord[] })),
+      fetchScenarios().catch(() => ({ scenarios: [] as Scenario[] })),
+    ])
+      .then(([growth, mine, sc]) => {
+        setData(growth);
+        setMySessions(mine.records);
+        setScenarios(sc.scenarios);
+      })
+      .catch((e) => setError(apiError(e, '看板数据加载失败')))
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading || !data) {
+  const derived = useMemo(() => {
+    if (!data) return null;
+    const now = new Date();
+    const days = Number(period);
+    const cutoff = new Date(now.getTime() - days * 86400000);
+    const prevCutoff = new Date(now.getTime() - days * 2 * 86400000);
+
+    const inPeriod = data.sessions.filter((s) => new Date(s.at) >= cutoff);
+    const prevPeriod = data.sessions.filter((s) => {
+      const t = new Date(s.at);
+      return t >= prevCutoff && t < cutoff;
+    });
+    const avg = inPeriod.length > 0
+      ? Math.round(inPeriod.reduce((sum, s) => sum + s.totalScore, 0) / inPeriod.length)
+      : null;
+    const prevAvg = prevPeriod.length > 0
+      ? Math.round(prevPeriod.reduce((sum, s) => sum + s.totalScore, 0) / prevPeriod.length)
+      : null;
+    const avgDiff = avg != null && prevAvg != null ? avg - prevAvg : null;
+
+    const weekStart = startOfWeek(now);
+    const weekCount = data.sessions.filter((s) => new Date(s.at) >= weekStart).length;
+
+    const totalSec = mySessions.reduce((sum, r) => sum + (r.durationSec ?? 0), 0);
+    const dateKeys = new Set(data.sessions.map((s) => dayKey(new Date(s.at))));
+    const { current, longest } = streaks(dateKeys);
+
+    const totalSessions = data.sessions.length;
+    const hasNight = data.sessions.some((s) => {
+      const h = new Date(s.at).getHours();
+      return h >= 23 || h < 5;
+    });
+    const bestScore = data.sessions.reduce((m, s) => Math.max(m, s.totalScore), 0);
+
+    const badges = [
+      { icon: '🎯', name: '首次练习', unlocked: totalSessions >= 1 },
+      { icon: '🔥', name: '连续 3 天', unlocked: longest >= 3 },
+      { icon: '📅', name: '连续 7 天', unlocked: longest >= 7 },
+      { icon: '📞', name: '累计 10 场', unlocked: totalSessions >= 10 },
+      { icon: '🏅', name: '累计 30 场', unlocked: totalSessions >= 30 },
+      { icon: '🌙', name: '深夜练习', unlocked: hasNight },
+      { icon: '🛡️', name: '单场上 80 分', unlocked: bestScore >= 80 },
+      { icon: '👑', name: '满分王者', unlocked: bestScore >= 100 },
+    ];
+
+    return { avg, avgDiff, weekCount, totalSec, current, longest, badges, totalSessions };
+  }, [data, mySessions, period]);
+
+  if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="w-8 h-8 border-3 border-coral/30 border-t-coral rounded-full animate-spin" />
@@ -36,25 +146,39 @@ export default function Dashboard() {
     );
   }
 
-  // 计算概览数据
-  const totalSessions = data.sessions.length;
-  const avgScore = totalSessions > 0
-    ? Math.round(data.sessions.reduce((sum, s) => sum + s.totalScore, 0) / totalSessions)
-    : 0;
-  const totalHours = 6.5;
-  const streakDays = 6;
+  if (error || !data || !derived) {
+    return (
+      <div className="card" style={{ padding: '32px 24px', textAlign: 'center' }}>
+        <p style={{ marginBottom: '16px' }}>{error ?? '看板数据加载失败'}</p>
+        <button className="btn btn-primary" onClick={() => window.location.reload()}>重新加载</button>
+      </div>
+    );
+  }
+
+  // 按分数升序取最弱两项用于专项训练
+  const weakest = [...data.skills]
+    .sort((a, b) => skillScore(a) - skillScore(b))
+    .slice(0, 2);
+
+  const scenariosFor = (skill: UserSkillState) =>
+    scenarios.filter((s) => s.skillPointNames?.includes(skill.name)).slice(0, 2);
+
+  const hours = derived.totalSec / 3600;
+  const durationValue = hours >= 1 ? (Math.round(hours * 10) / 10).toString() : String(Math.round(derived.totalSec / 60));
+  const durationUnit = hours >= 1 ? '小时' : '分钟';
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-ink">能力看板</h1>
-        <div className="flex items-center gap-1 bg-white rounded-xl p-0.5 border border-gray-100">
+      {/* 页头：保留 7/30/90 切换 */}
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="bar-title">能力看板</h2>
+        <div className="flex items-center gap-1 bg-white rounded-xl p-0.5 border border-line">
           {(['7', '30', '90'] as const).map((p) => (
             <button
               key={p}
               onClick={() => setPeriod(p)}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                period === p ? 'bg-coral text-white shadow-sm' : 'text-ink-secondary hover:bg-gray-50'
+                period === p ? 'bg-coral text-white shadow-sm' : 'text-text-secondary hover:bg-warm-bg'
               }`}
             >
               {p}天
@@ -63,156 +187,140 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* 概览卡片 */}
-      <div className="grid grid-cols-4 gap-4 mb-6 max-md:grid-cols-2">
-        <StatCard
-          label="能力总分"
-          value={String(avgScore)}
-          unit="分"
-          color="coral"
-          sub={`↑ 较上${period}天 +5`}
-          subColor="text-success"
-        />
-        <StatCard
-          label="本周练习"
-          value={String(Math.min(totalSessions, 9))}
-          unit="次"
-          color="blue"
-          sub="目标 10 次"
-          subColor="text-ink-secondary"
-        />
-        <StatCard
-          label="累计时长"
-          value={String(totalHours)}
-          unit="小时"
-          color="green"
-          sub={`共 ${totalSessions} 场`}
-          subColor="text-ink-secondary"
-        />
-        <StatCard
-          label="连续练习"
-          value={String(streakDays)}
-          unit="天"
-          color="amber"
-          sub="最长纪录 12 天"
-          subColor="text-ink-secondary"
-        />
-      </div>
-
-      {/* 多维能力分析 */}
-      <SectionTitle icon="🕸" title="多维能力分析" subtitle={`近 ${period} 天 · 全部模式`} />
-      <div className="bg-white rounded-2xl shadow-sm p-6 mb-6">
-        <div className="grid grid-cols-[320px_1fr] gap-6 items-center max-lg:grid-cols-1">
-          {/* 雷达图 */}
-          <RadarChart skills={data.skills} />
-          {/* 维度列表 */}
-          <div className="space-y-2">
-            {data.skills.slice(0, 6).map((skill, idx) => {
-              const isWeak = skill.currentLevel <= 1;
-              const trends = ['上升', '小幅提升', '下滑', '持平偏上', '稳步上升', '优势维度'];
-              return (
-                <div key={skill.skillPointId} className="flex items-center gap-3 py-2 border-b border-dashed border-gray-100 last:border-0">
-                  <span className="w-16 text-sm font-semibold text-ink">{skill.name}</span>
-                  <span className={`w-8 text-sm font-din font-bold ${isWeak ? 'text-coral' : 'text-ink'}`}>
-                    {skill.score || Math.round(skill.currentLevel * 25 + 25)}
-                  </span>
-                  {/* Mini trend sparkline */}
-                  <MiniTrend up={idx % 3 !== 1} />
-                  <span className={`text-xs ml-auto ${idx === 2 ? 'text-coral' : 'text-success'}`}>
-                    {trends[idx]}
-                  </span>
-                </div>
-              );
-            })}
+      {/* 1. 总览统计 */}
+      <div className="stats">
+        <div className="card stat">
+          <div className="lb">综合能力</div>
+          <div className="vl" style={{ color: '#FF6B5B' }}>
+            {derived.avg != null ? <>{derived.avg} <small>分</small></> : '—'}
           </div>
+          {derived.avgDiff != null ? (
+            <div className="sub" style={{ color: derived.avgDiff >= 0 ? '#2FAE7B' : '#FF6B5B' }}>
+              {derived.avgDiff >= 0 ? '↑' : '↓'} 较上周期 {derived.avgDiff >= 0 ? '+' : ''}{derived.avgDiff}
+            </div>
+          ) : (
+            <div className="sub muted">近 {period} 天</div>
+          )}
+        </div>
+        <div className="card stat">
+          <div className="lb">本周练习</div>
+          <div className="vl">{derived.weekCount} <small>次</small></div>
+          <div className="sub muted">累计 {derived.totalSessions} 场</div>
+        </div>
+        <div className="card stat">
+          <div className="lb">累计时长</div>
+          <div className="vl">{durationValue} <small>{durationUnit}</small></div>
+          <div className="sub muted">共 {mySessions.length} 场</div>
+        </div>
+        <div className="card stat">
+          <div className="lb">连续练习</div>
+          <div className="vl">{derived.current} <small>天</small>{derived.current > 0 ? ' 🔥' : ''}</div>
+          <div className="sub muted">最长纪录 {derived.longest} 天</div>
         </div>
       </div>
 
-      {/* 专项能力训练 */}
-      <SectionTitle icon="🎯" title="专项能力训练" subtitle="针对最弱维度推荐场景" />
-      <div className="bg-white rounded-2xl shadow-sm p-6 mb-6">
-        {data.skills.filter((s) => s.currentLevel <= 1).slice(0, 2).map((skill) => {
-          const score = skill.score || Math.round(skill.currentLevel * 25 + 25);
-          return (
-            <div key={skill.skillPointId} className="mb-6 last:mb-0 pb-6 last:pb-0 border-b border-gray-50 last:border-0">
-              <div className="flex items-center justify-between mb-1">
-                <div className="flex items-center gap-3">
-                  <span className="font-semibold text-ink">{skill.name}</span>
-                  <span className="px-2 py-0.5 bg-coral/10 text-coral text-xs rounded-full">{score} 分 · 待提升</span>
-                </div>
-              </div>
-              <p className="text-sm text-ink-secondary mb-4">
-                {skill.name === '异议处理'
-                  ? '诊断：被「竞品更便宜」类对比带偏节奏，倾向先解释价格而不是先认可再重构价值。'
-                  : '诊断：能识别信号，但常错过最佳时机。'}
-              </p>
-              <div className="flex gap-3 flex-wrap">
-                <MiniScenarioCard
-                  category="客户主动咨询"
-                  categoryColor="cat-ground"
-                  name="客户拿着竞品方案来比价"
-                  onClick={() => navigate('/practice/new')}
-                />
-                <MiniScenarioCard
-                  category="电话销售"
-                  categoryColor="coral"
-                  name="向谨慎的采购总监报价"
-                  onClick={() => navigate('/practice/new')}
-                />
-              </div>
+      {/* 2. 多维能力分析 */}
+      <div className="sec-head">
+        <h2><span>🕸</span> 多维能力分析</h2>
+        <span className="more">近 {period} 天 · 全部模式</span>
+      </div>
+      <div className="card radar-grid sec">
+        {data.skills.length === 0 ? (
+          <p className="small muted" style={{ padding: '24px 0' }}>还没有能力数据，完成一次练习后这里会展示你的能力雷达</p>
+        ) : (
+          <>
+            <RadarChart skills={data.skills} />
+            <div>
+              {data.skills.slice(0, 6).map((skill) => {
+                const score = skillScore(skill);
+                const isWeak = score < 60;
+                const hist = sortedHistory(skill);
+                return (
+                  <div key={skill.skillPointId} className="dim-row">
+                    <span className="nm" style={isWeak ? { color: '#FF6B5B' } : undefined}>{skill.name}</span>
+                    <span className="sc" style={isWeak ? { color: '#FF6B5B' } : undefined}>{score}</span>
+                    <MiniTrend scores={hist.slice(-6).map((h) => h.score)} />
+                    <span className="st" style={isWeak ? { color: '#FF6B5B' } : undefined}>{trendStatus(hist)}</span>
+                  </div>
+                );
+              })}
             </div>
-          );
-        })}
+          </>
+        )}
       </div>
 
-      {/* 练习热力 */}
-      <SectionTitle icon="🗓" title="练习热力" subtitle="近 12 周" />
-      <div className="bg-white rounded-2xl shadow-sm p-5 mb-6">
-        <Heatmap />
-        <div className="flex items-center gap-2 text-xs text-ink-secondary mt-3">
+      {/* 3. 专项能力训练 */}
+      <div className="sec-head">
+        <h2><span>🎯</span> 专项能力训练</h2>
+        <span className="more">针对最弱维度推荐场景</span>
+      </div>
+      <div className="card sec">
+        {weakest.length === 0 ? (
+          <p className="small muted">完成一次练习后，这里会针对你的薄弱维度推荐训练场景</p>
+        ) : (
+          weakest.map((skill) => {
+            const score = skillScore(skill);
+            const isCoral = score < 60;
+            const recs = scenariosFor(skill);
+            return (
+              <div key={skill.skillPointId} className="train-item">
+                <div className="left">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
+                    <b>{skill.name}</b>
+                    <span className={`chip ${isCoral ? 'chip-coral' : 'chip-amber'}`}>{score} 分 · {isCoral ? '待提升' : '可突破'}</span>
+                  </div>
+                </div>
+                <div className="mini-cards" style={{ flex: 2, minWidth: '280px' }}>
+                  {recs.length === 0 ? (
+                    <p className="small muted">暂无匹配该技能的训练场景</p>
+                  ) : (
+                    recs.map((sc, idx) => (
+                      <div key={sc.id} className="mini">
+                        <span className={`chip ${idx % 2 === 0 ? 'blue' : 'coral'}`} style={{ alignSelf: 'flex-start' }}>
+                          难度 {sc.difficulty}
+                        </span>
+                        <b style={{ fontSize: '13.5px' }}>{sc.name}</b>
+                        <button className="btn primary sm" style={{ alignSelf: 'flex-start', marginTop: '4px' }}
+                          onClick={() => navigate(`/scenario/${sc.id}`)}>去训练</button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* 4. 练习热力 */}
+      <div className="sec-head">
+        <h2><span>🗓</span> 练习热力</h2>
+        <span className="more">近 12 周</span>
+      </div>
+      <div className="card heat sec">
+        <Heatmap sessions={data.sessions} />
+        <div className="legend">
           少
-          <i className="w-3 h-3 rounded-sm bg-gray-100" />
-          <i className="w-3 h-3 rounded-sm" style={{ background: '#FFDDD7' }} />
-          <i className="w-3 h-3 rounded-sm" style={{ background: '#FFB3A8' }} />
-          <i className="w-3 h-3 rounded-sm" style={{ background: '#FF8A7B' }} />
-          <i className="w-3 h-3 rounded-sm bg-coral" />
+          <i style={{ background: '#F1F1F4' }} />
+          <i style={{ background: '#FFDDD7' }} />
+          <i style={{ background: '#FFB3A8' }} />
+          <i style={{ background: '#FF8A7B' }} />
+          <i style={{ background: '#FF6B5B' }} />
           多
         </div>
       </div>
 
-      {/* 成长里程碑 */}
-      <SectionTitle icon="🏅" title="成长里程碑" subtitle={`已解锁 ${BADGES.filter((b) => b.unlocked).length} / ${BADGES.length}`} />
-      <div className="bg-white rounded-2xl shadow-sm p-6 mb-6">
-        <div className="flex gap-6 flex-wrap justify-center">
-          {BADGES.map((badge) => (
-            <div key={badge.name} className={`flex flex-col items-center gap-2 w-20 ${!badge.unlocked ? 'opacity-50 grayscale' : ''}`}>
-              <div className={`w-14 h-14 rounded-full flex items-center justify-center text-2xl ${
-                badge.unlocked
-                  ? 'bg-coral-light border-2 border-coral'
-                  : 'bg-gray-50 border-2 border-gray-200'
-              }`}>
-                {badge.icon}
-              </div>
-              <span className="text-[11px] text-ink-secondary text-center">{badge.name}</span>
-            </div>
-          ))}
-        </div>
+      {/* 5. 成长里程碑 */}
+      <div className="sec-head">
+        <h2><span>🏅</span> 成长里程碑</h2>
+        <span className="more">已解锁 {derived.badges.filter((b) => b.unlocked).length} / {derived.badges.length}</span>
       </div>
-
-      {/* 场景类别表现 */}
-      <SectionTitle icon="📊" title="场景类别平均分" />
-      <div className="bg-white rounded-2xl shadow-sm p-6">
-        <div className="flex items-end gap-6 h-40 justify-center">
-          {[
-            { name: '电话销售', score: 78, color: 'bg-cat-phone' },
-            { name: '客户咨询', score: 82, color: 'bg-cat-inquiry' },
-            { name: '成交谈判', score: 65, color: 'bg-cat-deal' },
-            { name: '地推破冰', score: 74, color: 'bg-cat-ground' },
-          ].map((cat) => (
-            <div key={cat.name} className="flex flex-col items-center gap-2">
-              <span className="text-xs font-din font-bold text-ink">{cat.score}</span>
-              <div className={`w-14 rounded-xl ${cat.color} transition-all`} style={{ height: `${(cat.score / 100) * 120}px` }} />
-              <span className="text-[11px] text-ink-secondary">{cat.name}</span>
+      <div className="card sec" style={{ padding: '22px 24px' }}>
+        <div className="badges">
+          {derived.badges.map((badge) => (
+            <div key={badge.name} className={`badge ${badge.unlocked ? '' : 'lock'}`}>
+              <div className="b">{badge.icon}</div>
+              <span>{badge.name}</span>
             </div>
           ))}
         </div>
@@ -223,42 +331,6 @@ export default function Dashboard() {
 
 // ===== 子组件 =====
 
-function StatCard({ label, value, unit, color, sub, subColor }: {
-  label: string; value: string; unit: string; color: string; sub: string; subColor: string;
-}) {
-  const colorMap: Record<string, string> = {
-    coral: 'from-coral/10 to-coral/5 border-coral/20',
-    blue: 'from-cat-ground/10 to-cat-ground/5 border-cat-ground/20',
-    green: 'from-success/10 to-success/5 border-success/20',
-    amber: 'from-warning/10 to-warning/5 border-warning/20',
-  };
-  const textColorMap: Record<string, string> = {
-    coral: 'text-coral', blue: 'text-cat-ground', green: 'text-success', amber: 'text-warning',
-  };
-
-  return (
-    <div className={`bg-gradient-to-br ${colorMap[color]} border rounded-2xl p-5`}>
-      <p className="text-xs text-ink-secondary mb-2">{label}</p>
-      <div className="flex items-baseline gap-1">
-        <span className={`text-3xl font-din font-bold ${textColorMap[color]}`}>{value}</span>
-        <span className="text-sm text-ink-secondary">{unit}</span>
-      </div>
-      <p className={`text-xs mt-1 ${subColor}`}>{sub}</p>
-    </div>
-  );
-}
-
-function SectionTitle({ icon, title, subtitle }: { icon: string; title: string; subtitle?: string }) {
-  return (
-    <div className="flex items-center justify-between mb-4">
-      <h2 className="text-base font-bold text-ink flex items-center gap-2">
-        <span>{icon}</span> {title}
-      </h2>
-      {subtitle && <span className="text-xs text-ink-secondary">{subtitle}</span>}
-    </div>
-  );
-}
-
 function RadarChart({ skills }: { skills: GrowthData['skills'] }) {
   const size = 220;
   const center = size / 2;
@@ -268,16 +340,17 @@ function RadarChart({ skills }: { skills: GrowthData['skills'] }) {
 
   const points = skills.slice(0, 6);
   const angleStep = (2 * Math.PI) / points.length;
+  const ratioOf = (s: UserSkillState) => Math.max(0.05, Math.min(1, skillScore(s) / 100));
 
   return (
-    <div className="flex items-center justify-center">
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+    <div className="flex items-center justify-center max-lg:mx-auto">
+      <svg width="300" height="220" viewBox={`0 0 ${size} ${size}`}>
         {/* 网格 */}
         {[0.25, 0.5, 0.75, 1].map((ratio) => (
           <polygon
             key={ratio}
             fill="none"
-            stroke="#e5e2de"
+            stroke="#EBEBEF"
             strokeWidth="1"
             points={points.map((_, i) => {
               const angle = angleStep * i - Math.PI / 2;
@@ -293,43 +366,43 @@ function RadarChart({ skills }: { skills: GrowthData['skills'] }) {
             <line key={i} x1={center} y1={center}
               x2={center + maxRadius * Math.cos(angle)}
               y2={center + maxRadius * Math.sin(angle)}
-              stroke="#e5e2de" strokeWidth="1" />
+              stroke="#EBEBEF" strokeWidth="1" />
           );
         })}
         {/* 数据区域 */}
         <polygon
-          fill="rgba(255, 111, 97, 0.15)"
-          stroke="#FF6F61"
+          fill="rgba(255,107,91,.25)"
+          stroke="#FF6B5B"
           strokeWidth="2"
           points={points.map((s, i) => {
             const angle = angleStep * i - Math.PI / 2;
-            const r = maxRadius * (s.currentLevel / 3);
+            const r = maxRadius * ratioOf(s);
             return `${center + r * Math.cos(angle)},${center + r * Math.sin(angle)}`;
           }).join(' ')}
         />
         {/* 数据点 */}
         {points.map((s, i) => {
           const angle = angleStep * i - Math.PI / 2;
-          const r = maxRadius * (s.currentLevel / 3);
+          const r = maxRadius * ratioOf(s);
           return (
             <circle key={i}
               cx={center + r * Math.cos(angle)}
               cy={center + r * Math.sin(angle)}
-              r="4" fill="#FF6F61" />
+              r="4" fill="#FF6B5B" />
           );
         })}
         {/* 标签 */}
         {points.map((s, i) => {
           const angle = angleStep * i - Math.PI / 2;
           const labelR = maxRadius + 24;
-          const isWeak = s.currentLevel <= 1;
+          const isWeak = skillScore(s) < 60;
           return (
             <text key={i}
               x={center + labelR * Math.cos(angle)}
               y={center + labelR * Math.sin(angle)}
               textAnchor="middle" dominantBaseline="middle"
               fontSize="10"
-              fill={isWeak ? '#FF6F61' : '#8A8580'}
+              fill={isWeak ? '#FF6B5B' : '#6B7280'}
               fontWeight={isWeak ? '700' : '400'}
             >
               {s.name}
@@ -341,77 +414,61 @@ function RadarChart({ skills }: { skills: GrowthData['skills'] }) {
   );
 }
 
-function MiniTrend({ up }: { up: boolean }) {
-  const points = up
-    ? '0,18 12,14 24,15 36,9 48,10 60,5'
-    : '0,5 12,10 24,9 36,12 48,15 60,18';
+function MiniTrend({ scores }: { scores: number[] }) {
+  const w = 60;
+  const h = 24;
+  let pointsAttr: string;
+  let color = '#9CA3AF';
+  if (scores.length >= 2) {
+    const min = Math.min(...scores);
+    const max = Math.max(...scores);
+    const range = max - min || 1;
+    const step = w / (scores.length - 1);
+    pointsAttr = scores
+      .map((s, i) => `${(i * step).toFixed(1)},${(h - 3 - ((s - min) / range) * (h - 6)).toFixed(1)}`)
+      .join(' ');
+    color = scores[scores.length - 1] >= scores[0] ? '#2FAE7B' : '#FF6B5B';
+  } else {
+    pointsAttr = `0,${h / 2} ${w},${h / 2}`;
+  }
   return (
-    <svg width="60" height="24">
-      <polyline points={points} fill="none" stroke={up ? '#2FB67C' : '#FF6F61'} strokeWidth="2" />
+    <svg width={w} height={h} className="flex-none">
+      <polyline points={pointsAttr} fill="none" stroke={color} strokeWidth="2" />
     </svg>
   );
 }
 
-function MiniScenarioCard({ category, categoryColor, name, onClick }: {
-  category: string; categoryColor: string; name: string; onClick: () => void;
-}) {
+function Heatmap({ sessions }: { sessions: GrowthData['sessions'] }) {
+  const cells = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const s of sessions) {
+      const k = dayKey(new Date(s.at));
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const arr: { level: number; label: string }[] = [];
+    for (let i = 83; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const n = counts.get(dayKey(d)) ?? 0;
+      const level = n >= 4 ? 4 : n;
+      arr.push({
+        level,
+        label: `${d.getMonth() + 1}月${d.getDate()}日 · ${n} 场`,
+      });
+    }
+    return arr;
+  }, [sessions]);
+
   return (
-    <div className="flex-1 min-w-[200px] border border-gray-100 rounded-xl p-3 flex flex-col gap-1">
-      <span className={`px-2 py-0.5 bg-${categoryColor}/10 text-${categoryColor} text-xs rounded-full w-fit font-medium`}>{category}</span>
-      <span className="font-medium text-sm text-ink mt-1">{name}</span>
-      <button
-        onClick={onClick}
-        className="mt-2 px-3 py-1 bg-coral text-white text-xs rounded-lg font-medium w-fit hover:bg-coral-hover transition-colors"
-      >
-        去训练
-      </button>
-    </div>
-  );
-}
-
-function Heatmap() {
-  // 生成 12 周 x 7 天的热力数据
-  const data: number[] = [];
-  for (let i = 0; i < 84; i++) {
-    data.push(Math.random());
-  }
-
-  return (
-    <div className="flex gap-1 overflow-x-auto pb-2">
-      {Array.from({ length: 12 }).map((_, week) => (
-        <div key={week} className="flex flex-col gap-1">
-          {Array.from({ length: 7 }).map((_, day) => {
-            const r = data[week * 7 + day];
-            let cls = 'bg-gray-100';
-            if (r > 0.86) cls = 'bg-coral';
-            else if (r > 0.7) cls = '';
-            else if (r > 0.52) cls = '';
-            else if (r > 0.36) cls = '';
-            const colors = ['', '', '', 'bg-coral', 'bg-coral', 'bg-coral'];
-            const bgColors = [
-              'bg-gray-100',
-              '#FFDDD7',
-              '#FFB3A8',
-              '#FF8A7B',
-              '#FF6B5B',
-              '#FF6F61',
-            ];
-            let bg = bgColors[0];
-            if (r > 0.86) bg = bgColors[5];
-            else if (r > 0.7) bg = bgColors[4];
-            else if (r > 0.52) bg = bgColors[3];
-            else if (r > 0.36) bg = bgColors[2];
-
-            return (
-              <div
-                key={day}
-                className="w-3.5 h-3.5 rounded-sm"
-                style={{ background: bg }}
-                title={`周${week + 1} 周${day + 1}`}
-              />
-            );
-          })}
-        </div>
+    <div className="heat-grid">
+      {cells.map((cell, i) => (
+        <i
+          key={i}
+          className={cell.level > 0 ? `l${cell.level}` : ''}
+          title={cell.label}
+        />
       ))}
     </div>
   );

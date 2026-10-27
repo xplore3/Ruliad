@@ -101,6 +101,7 @@ export interface Store {
   getScenario(id: string): Promise<Scenario | undefined>;
   listScenarios(tenantId: string): Promise<Scenario[]>;
   saveScenario(scenario: Scenario): Promise<void>;
+  deleteScenario(id: string): Promise<void>;
   getLearningPath(id: string): Promise<LearningPath | undefined>;
   listLearningPaths(tenantId: string): Promise<LearningPath[]>;
   upsertLearningPath(path: LearningPath): Promise<void>;

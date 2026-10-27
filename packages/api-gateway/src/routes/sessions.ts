@@ -6,6 +6,7 @@ import { scoreSession } from '@grasp-mvp/scoring-engine';
 import type { RouteContext } from '../ctx.js';
 import { mkEvent } from '../events.js';
 import { loadRuntime, remainingSeconds, runTurn } from '../services/turn.js';
+import { personaVoice } from './voice.js';
 import { readFramesAsDataUrls } from '../services/video-store.js';
 
 const MAX_HINTS = 3;
@@ -329,6 +330,7 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
       const session = await store.getSession(request.params.id);
       if (!session) return reply.code(404).send({ error: '会话不存在' });
       if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
+      if (session.pausedAt) return reply.code(409).send({ error: '会话已暂停，请先继续' });
       const text = request.body?.text?.trim();
       if (!text) return reply.code(400).send({ error: 'text 必填' });
 
@@ -351,6 +353,7 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
     const session = await store.getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: '会话不存在' });
     if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
+    if (session.pausedAt) return reply.code(409).send({ error: '会话已暂停，请先继续' });
     if (session.mode !== 'practice') return reply.code(400).send({ error: '仅 practice 模式可用提示' });
     if (session.hintsUsed >= MAX_HINTS) return reply.code(409).send({ error: '提示次数已用完' });
 
@@ -387,6 +390,92 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
     );
 
     return { hintTurn, hintsRemaining: MAX_HINTS - hintsUsed };
+  });
+
+  // AI 教练开场白（进入练习页时调用）：介绍本场练习内容并询问是否准备好。
+  // coachOpening 首次生成后缓存在会话上；query voice=1 时附带教练与 persona 开场白的 TTS 音频（base64 wav）。
+  app.post<{ Params: { id: string }; Querystring: { voice?: string } }>(
+    '/sessions/:id/opening',
+    async (request, reply) => {
+      const session = await store.getSession(request.params.id);
+      if (!session) return reply.code(404).send({ error: '会话不存在' });
+      if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
+      const scenario = await store.getScenario(session.scenarioId);
+      if (!scenario) return reply.code(500).send({ error: '场景缺失' });
+      const personaConfig = await store.getPersonaConfig(scenario.personaConfigId);
+      if (!personaConfig) return reply.code(500).send({ error: '场景对应的 persona 配置缺失' });
+
+      let coachText = session.coachOpening;
+      if (!coachText) {
+        const result = await gateway.forTask('judge').chat([
+          {
+            role: 'user',
+            content: [
+              '你是销售培训 AI 教练。一场销售对练即将开始，请对学员说一段开场白（不超过 80 字）：',
+              '先打招呼，再简要介绍本场练习内容与规则（场景目标、限时、对方人设），最后问学员"准备好了吗？"。',
+              `场景：${scenario.name}`,
+              `限时：${scenario.durationMinutes} 分钟`,
+              `对方：${personaConfig.name}${personaConfig.occupation ? `，${personaConfig.occupation}` : ''}。背景：${personaConfig.background}`,
+              '只输出开场白本身，不要加任何解释或引号。',
+            ].join('\n'),
+          },
+        ]);
+        coachText = result.content.trim();
+        await store.updateSession(session.id, { coachOpening: coachText });
+      }
+
+      let coachAudio: string | undefined;
+      let personaAudio: string | undefined;
+      if (request.query.voice === '1') {
+        const voice = await personaVoice(store, scenario.personaConfigId, request.log);
+        coachAudio = (await ctx.speech.tts.synthesize(coachText, { voice })).audio.toString('base64');
+        const personaOpening = session.transcript.find((t) => t.speaker === 'persona');
+        if (personaOpening) {
+          personaAudio = (
+            await ctx.speech.tts.synthesize(personaOpening.text, {
+              arousal: personaOpening.emotion?.arousal,
+              voice,
+            })
+          ).audio.toString('base64');
+        }
+      }
+
+      return { coachText, coachAudio, personaAudio };
+    }
+  );
+
+  // 暂停会话：冻结倒计时与对话（考核模式不允许暂停）
+  app.post<{ Params: { id: string } }>('/sessions/:id/pause', async (request, reply) => {
+    const session = await store.getSession(request.params.id);
+    if (!session) return reply.code(404).send({ error: '会话不存在' });
+    if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
+    if (session.mode === 'exam') return reply.code(400).send({ error: '考核模式不支持暂停' });
+    if (session.pausedAt) return reply.code(409).send({ error: '会话已处于暂停中' });
+
+    const pausedAt = new Date().toISOString();
+    await store.updateSession(session.id, { pausedAt });
+    const scenario = await store.getScenario(session.scenarioId);
+    return {
+      pausedAt,
+      remainingSeconds: scenario
+        ? remainingSeconds({ ...session, pausedAt }, scenario)
+        : null,
+    };
+  });
+
+  // 继续会话：累计暂停时长并解冻
+  app.post<{ Params: { id: string } }>('/sessions/:id/resume', async (request, reply) => {
+    const session = await store.getSession(request.params.id);
+    if (!session) return reply.code(404).send({ error: '会话不存在' });
+    if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
+    if (!session.pausedAt) return reply.code(409).send({ error: '会话未在暂停中' });
+
+    const pausedMs =
+      (session.pausedMs ?? 0) + (Date.now() - new Date(session.pausedAt).getTime());
+    const updated: Session = { ...session, pausedMs, pausedAt: undefined };
+    await store.updateSession(session.id, { pausedMs, pausedAt: undefined });
+    const scenario = await store.getScenario(session.scenarioId);
+    return { remainingSeconds: scenario ? remainingSeconds(updated, scenario) : null };
   });
 
   // ---- 考题答题 ----
