@@ -63,7 +63,6 @@ export default function Home() {
   const [growth, setGrowth] = useState<GrowthData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [keyword, setKeyword] = useState('');
   const [activeCategory, setActiveCategory] = useState('');
   const [practicedOnly, setPracticedOnly] = useState(false);
   const [startingId, setStartingId] = useState<string | null>(null);
@@ -129,29 +128,11 @@ export default function Home() {
   const filteredScenes = scenarios.filter((s) => {
     if (!matchCategory(s, activeCategory)) return false;
     if (practicedOnly && !bestScores.has(s.id)) return false;
-    const kw = keyword.trim();
-    if (kw) {
-      const text = [scenarioText(s), ...(s.skillPointNames ?? [])].join(' ');
-      if (!text.includes(kw)) return false;
-    }
     return true;
   });
 
   return (
     <div>
-      {/* 搜索行 - matches prototype .searchrow */}
-      <div className="searchrow">
-        <div className="searchbox">
-          <span>🔍</span>
-          <input
-            placeholder="搜索场景、角色或行业，如「报价」「医美」"
-            value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
-          />
-        </div>
-        <button className="btn ghost sm" style={{ flex: 'none' }}>筛选 ⌄</button>
-      </div>
-
       {/* 类别胶囊条 - matches prototype .cats */}
       <div className="cats">
         {CATEGORIES.map((cat) => (

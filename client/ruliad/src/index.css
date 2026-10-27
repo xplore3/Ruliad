@@ -202,6 +202,19 @@ body.no-tab .tabbar { display: none; }
 .sec-head .more { font-size: 13px; color: #6B7280; }
 .divider { height: 1px; background: #EBEBEF; margin: 20px 0; }
 
+/* ===== 分段切换 Tab ===== */
+.seg { display: inline-flex; align-items: center; gap: 2px; background: #fff;
+  border: 1px solid var(--color-line); border-radius: 999px; padding: 4px;
+  box-shadow: var(--shadow-card); }
+.seg button { border: none; background: transparent; cursor: pointer; border-radius: 999px;
+  padding: 8px 18px; font-size: 12.5px; font-weight: 500; color: var(--color-text-secondary);
+  transition: color .18s ease, background .18s ease, box-shadow .18s ease; white-space: nowrap; }
+.seg button:hover:not(.on) { color: var(--color-text-primary); background: var(--color-warm-bg); }
+.seg button.on { background: var(--color-coral); color: #fff; font-weight: 600;
+  box-shadow: var(--shadow-coral); }
+.seg-lg { display: flex; width: 100%; max-width: 380px; }
+.seg-lg button { flex: 1; padding: 10px 22px; font-size: 13px; }
+
 /* ===== 表单域 ===== */
 .field { margin-bottom: 18px; }
 .field:last-child { margin-bottom: 0; }
