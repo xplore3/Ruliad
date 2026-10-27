@@ -108,6 +108,8 @@ export async function seedHistory(store: Store): Promise<void> {
   }
 
   const writeSession = async (opts: SyntheticSession): Promise<void> => {
+    // 幂等：数据库中该会话已存在（曾部分灌入或老版本种子）时跳过，避免主键冲突
+    if (await store.getSession(opts.id)) return;
     const endedMs = new Date(opts.at).getTime();
     const session: Session = {
       id: opts.id,
