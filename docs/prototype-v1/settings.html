@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>设置 · Grasp 销售 AI 陪练</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+  .layout{display:grid;grid-template-columns:220px 1fr;gap:20px;padding:24px 0 60px;align-items:start}
+  .sidenav{position:sticky;top:calc(var(--nav-h) + 20px);padding:10px}
+  .sidenav a{display:flex;align-items:center;gap:8px;padding:11px 14px;border-radius:10px;font-size:14px;color:var(--text-2)}
+  .sidenav a.active{background:var(--coral-soft);color:var(--coral);font-weight:700}
+  .sec-card{padding:8px 22px;margin-bottom:16px}
+  .sec-card h2{padding:16px 0 4px;font-size:16px}
+  .row{display:flex;align-items:center;gap:12px;min-height:52px;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+  .row:last-child{border-bottom:none}
+  .row .lb{flex:1}
+  .row .vl{color:var(--text-2);font-size:13.5px}
+  .row .arrow{color:#C4C7CF;font-size:16px}
+  .row .danger{color:var(--coral);font-weight:600}
+  .row select.input{width:auto;padding:7px 12px;border-radius:10px}
+  .about{text-align:center;padding:28px 22px}
+  .about .links{display:flex;justify-content:center;gap:18px;flex-wrap:wrap;margin-top:14px;font-size:13px}
+  .about .links a{color:var(--text-2)}
+  .about .links a:hover{color:var(--coral)}
+  @media (max-width:768px){
+    .layout{display:block;padding:14px 0 60px}
+    .sidenav{display:none}
+    .sec-card{padding:6px 16px}
+  }
+</style>
+</head>
+<body class="no-tab">
+
+<nav class="topnav">
+  <div class="inner">
+    <a class="logo" href="index.html"><span class="dot"></span>Grasp</a>
+    <div class="menu">
+      <a href="index.html">首页</a>
+      <a href="builder.html">构建</a>
+      <a href="dashboard.html">看板</a>
+      <a class="active" href="records.html">我的</a>
+    </div>
+    <div class="me"><div class="avatar av5" style="width:36px;height:36px;font-size:14px">我</div></div>
+  </div>
+</nav>
+
+<div class="mtopbar"><a class="back" href="records.html">←</a>设置</div>
+
+<main class="wrap">
+  <div class="layout">
+
+    <aside class="card sidenav">
+      <a class="active" href="#account">👤 账号与安全</a>
+      <a href="#notice">🔔 通知</a>
+      <a href="#voice">🎙 语音与练习</a>
+      <a href="#privacy">🔒 隐私</a>
+      <a href="#general">⚙️ 通用</a>
+      <a href="#about">ℹ️ 关于</a>
+    </aside>
+
+    <div>
+      <div class="card sec-card" id="account">
+        <h2>账号与安全</h2>
+        <div class="row"><span class="lb">手机号</span><span class="vl">138****8888</span><a style="color:var(--coral);font-size:13px">更换</a></div>
+        <div class="row"><span class="lb">修改密码</span><span class="arrow">›</span></div>
+        <div class="row"><span class="lb danger">退出登录</span></div>
+      </div>
+
+      <div class="card sec-card" id="notice">
+        <h2>通知</h2>
+        <div class="row"><span class="lb">练习提醒</span><span class="vl">每天 20:00</span><span class="switch on"><i></i></span></div>
+        <div class="row"><span class="lb">报告生成通知</span><span class="switch on"><i></i></span></div>
+      </div>
+
+      <div class="card sec-card" id="voice">
+        <h2>语音与练习</h2>
+        <div class="row"><span class="lb">默认练习模式</span>
+          <select class="input"><option>语音通话</option><option>轮次语音</option><option>文字对话</option></select></div>
+        <div class="row"><span class="lb">默认语速</span>
+          <select class="input"><option>标准（≈150 WPM）</option><option>慢</option><option>快</option></select></div>
+        <div class="row"><span class="lb">教练提示强度</span>
+          <select class="input"><option>适中</option><option>安静</option><option>高频</option></select></div>
+      </div>
+
+      <div class="card sec-card" id="privacy">
+        <h2>隐私</h2>
+        <div class="row"><span class="lb">录音与分析授权</span><span class="switch on"><i></i></span></div>
+        <div class="row"><span class="lb">导出我的数据</span><span class="arrow">›</span></div>
+        <div class="row"><span class="lb danger">注销账号</span></div>
+      </div>
+
+      <div class="card sec-card" id="general">
+        <h2>通用</h2>
+        <div class="row"><span class="lb">主题</span><span class="vl">跟随系统</span><span class="arrow">›</span></div>
+        <div class="row"><span class="lb">清除缓存</span><span class="vl">23 MB</span><span class="arrow">›</span></div>
+      </div>
+
+      <div class="card about" id="about">
+        <a class="logo" href="index.html" style="justify-content:center"><span class="dot"></span>Grasp</a>
+        <p class="small muted" style="margin-top:6px">Grasp v0.3.0（设计演示版）<br>像实战一样练销售</p>
+        <div class="links">
+          <a>产品介绍</a><a>用户协议</a><a>隐私政策</a><a>联系客服</a>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+</body>
+</html>

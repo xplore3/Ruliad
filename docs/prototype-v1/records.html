@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>我的 · Grasp 销售 AI 陪练</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+  /* 用户信息卡 */
+  .profile{display:flex;align-items:center;gap:18px;padding:22px 26px;margin:24px 0 8px}
+  .profile .avatar{width:64px;height:64px;font-size:24px;flex:none}
+  .profile .pinfo h1{font-size:20px;margin-bottom:2px}
+  .profile .pinfo .stats{font-size:13px;color:var(--text-2)}
+  .profile .pinfo .stats b{color:var(--coral);font-weight:700}
+  .profile .pact{margin-left:auto;display:flex;gap:10px;flex:none}
+
+  /* 记录筛选行 */
+  .filterbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:6px 0 16px}
+  .filterbar .group{display:flex;gap:8px}
+  .filterbar .group .chip{padding:7px 16px;font-size:13px;cursor:pointer;border:1.5px solid transparent;background:#fff}
+  .filterbar .group .chip.on{background:var(--coral);color:#fff}
+  .filterbar select.input{width:auto;padding:8px 34px 8px 14px;min-height:38px;font-size:13px;border-radius:999px}
+
+  /* 记录列表 */
+  .rec-list{display:flex;flex-direction:column;gap:12px}
+  .rec{display:flex;align-items:center;gap:14px;padding:16px 20px}
+  .rec .avatar{width:48px;height:48px;font-size:18px;flex:none}
+  .rec .rmain{flex:1;min-width:0}
+  .rec .rmain h3{font-size:15px;margin-bottom:3px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .rec .rmain .meta{font-size:12.5px;color:var(--text-2)}
+  .rec .rscore{text-align:right;flex:none}
+  .rec .rscore b{font-size:22px;font-weight:800}
+  .rec .rscore b.s-hi{color:var(--green)}
+  .rec .rscore b.s-mid{color:var(--amber)}
+  .rec .rscore b.s-lo{color:var(--coral)}
+  .rec .rscore .unit{font-size:11px;color:var(--text-2)}
+  .rec .rlink{margin-left:14px;flex:none;font-size:13px;color:var(--coral);font-weight:600;white-space:nowrap}
+
+  /* 空态演示 */
+  .empty{padding:44px 24px;text-align:center}
+  .empty .ic{font-size:56px;line-height:1;margin-bottom:14px}
+  .empty h3{font-size:16px;margin-bottom:6px}
+  .empty p{font-size:13px;color:var(--text-2);margin-bottom:18px}
+  .demo-tag{display:inline-block;font-size:11.5px;color:var(--text-2);background:var(--bg);
+    padding:3px 10px;border-radius:999px;margin-bottom:12px}
+
+  /* 我的入口列表 */
+  .me-list{padding:6px 0}
+  .me-list a{display:flex;align-items:center;gap:12px;padding:15px 20px;font-size:14.5px;font-weight:500}
+  .me-list a + a{border-top:1px solid var(--line)}
+  .me-list a:hover{background:var(--bg)}
+  .me-list a .ic{font-size:19px}
+  .me-list a .arrow{margin-left:auto;color:var(--text-2);font-weight:400}
+
+  @media (max-width:768px){
+    .profile{flex-wrap:wrap;gap:14px;padding:18px;margin:16px 0 6px}
+    .profile .avatar{width:56px;height:56px;font-size:21px}
+    .profile .pinfo h1{font-size:17px}
+    .profile .pact{margin-left:0;width:100%}
+    .profile .pact .btn{flex:1}
+    .filterbar{gap:10px}
+    .filterbar .group{width:100%}
+    .filterbar .group .chip{flex:1;justify-content:center}
+    .filterbar select.input{flex:1}
+    .rec{padding:14px}
+    .rec .avatar{width:42px;height:42px;font-size:16px}
+    .rec .rscore b{font-size:18px}
+    .rec .rlink{margin-left:8px}
+  }
+</style>
+</head>
+<body>
+
+<!-- PC 顶部菜单 -->
+<nav class="topnav">
+  <div class="inner">
+    <a class="logo" href="index.html"><span class="dot"></span>Grasp</a>
+    <div class="menu">
+      <a href="index.html">首页</a>
+      <a href="builder.html">构建</a>
+      <a href="dashboard.html">看板</a>
+      <a class="active" href="records.html">我的</a>
+    </div>
+    <div class="me">
+      <span class="chip coral">🔥 连续练习 6 天</span>
+      <div class="avatar av5" style="width:36px;height:36px;font-size:14px">我</div>
+    </div>
+  </div>
+</nav>
+
+<!-- 手机标题栏 -->
+<div class="mtopbar">我的</div>
+
+<main class="wrap">
+
+  <!-- 用户信息卡 -->
+  <section class="card profile">
+    <div class="avatar av5">我</div>
+    <div class="pinfo">
+      <h1>销售小陈</h1>
+      <div class="stats">已练习 <b>23</b> 场 · 综合 <b>78</b> 分</div>
+    </div>
+    <div class="pact">
+      <a class="btn ghost sm" href="settings.html">设置</a>
+      <a class="btn ghost sm" href="settings.html#about">关于</a>
+    </div>
+  </section>
+
+  <!-- 练习记录 -->
+  <section class="section">
+    <div class="sec-head"><h2>📒 练习记录</h2><span class="more">共 23 场</span></div>
+
+    <div class="filterbar">
+      <div class="group">
+        <span class="chip on">全部</span>
+        <span class="chip">本周</span>
+        <span class="chip">本月</span>
+      </div>
+      <select class="input">
+        <option>全部模式</option>
+        <option>文字</option>
+        <option>语音</option>
+        <option>通话</option>
+      </select>
+      <select class="input">
+        <option>全部类别</option>
+        <option>电话销售</option>
+        <option>客户主动咨询</option>
+        <option>成交谈判</option>
+        <option>地推破冰</option>
+      </select>
+    </div>
+
+    <div class="rec-list">
+
+      <a class="card rec" href="review.html">
+        <div class="avatar av1"><img src="assets/avatars/man-3.jpg" alt="王建国"></div>
+        <div class="rmain">
+          <h3>向谨慎的采购总监报价 <span class="chip coral">电话销售</span></h3>
+          <div class="meta">📞 通话模式 · 今天 14:32 · 用时 9 分钟</div>
+        </div>
+        <div class="rscore"><b class="s-hi">88</b><span class="unit"> 分</span></div>
+        <span class="rlink">报告 ›</span>
+      </a>
+
+      <a class="card rec" href="review.html">
+        <div class="avatar av6"><img src="assets/avatars/woman-1.jpg" alt="林晓雯"></div>
+        <div class="rmain">
+          <h3>接住主动上门的咨询 <span class="chip blue">客户主动咨询</span></h3>
+          <div class="meta">🎙️ 语音模式 · 今天 09:15 · 用时 6 分钟</div>
+        </div>
+        <div class="rscore"><b class="s-mid">82</b><span class="unit"> 分</span></div>
+        <span class="rlink">报告 ›</span>
+      </a>
+
+      <a class="card rec" href="review.html">
+        <div class="avatar av3"><img src="assets/avatars/man-2.jpg" alt="赵铭"></div>
+        <div class="rmain">
+          <h3>临门一脚：合同条款博弈 <span class="chip amber">成交谈判</span></h3>
+          <div class="meta">⌨️ 文字模式 · 昨天 21:40 · 用时 14 分钟</div>
+        </div>
+        <div class="rscore"><b class="s-lo">57</b><span class="unit"> 分</span></div>
+        <span class="rlink">报告 ›</span>
+      </a>
+
+      <a class="card rec" href="review.html">
+        <div class="avatar av4"><img src="assets/avatars/woman-2.jpg" alt="陈丽"></div>
+        <div class="rmain">
+          <h3>商场里 30 秒破冰 <span class="chip green">地推破冰</span></h3>
+          <div class="meta">🎙️ 语音模式 · 昨天 16:05 · 用时 4 分钟</div>
+        </div>
+        <div class="rscore"><b class="s-mid">76</b><span class="unit"> 分</span></div>
+        <span class="rlink">报告 ›</span>
+      </a>
+
+      <a class="card rec" href="review.html">
+        <div class="avatar av2"><img src="assets/avatars/man-1.jpg" alt="周立群"></div>
+        <div class="rmain">
+          <h3>客户拿着竞品方案来比价 <span class="chip blue">客户主动咨询</span></h3>
+          <div class="meta">📞 通话模式 · 本周三 · 用时 11 分钟</div>
+        </div>
+        <div class="rscore"><b class="s-hi">91</b><span class="unit"> 分</span></div>
+        <span class="rlink">报告 ›</span>
+      </a>
+
+      <a class="card rec" href="review.html">
+        <div class="avatar av5"><img src="assets/avatars/woman-3.jpg" alt="吴敏"></div>
+        <div class="rmain">
+          <h3>被前台拦截后的突围 <span class="chip coral">电话销售</span></h3>
+          <div class="meta">⌨️ 文字模式 · 本周二 · 用时 7 分钟</div>
+        </div>
+        <div class="rscore"><b class="s-mid">64</b><span class="unit"> 分</span></div>
+        <span class="rlink">报告 ›</span>
+      </a>
+
+      <a class="card rec" href="review.html">
+        <div class="avatar av3"><img src="assets/avatars/man-4.jpg" alt="孙鹏"></div>
+        <div class="rmain">
+          <h3>展会摊位前的驻足转化 <span class="chip green">地推破冰</span></h3>
+          <div class="meta">📞 通话模式 · 上周六 · 用时 5 分钟</div>
+        </div>
+        <div class="rscore"><b class="s-lo">48</b><span class="unit"> 分</span></div>
+        <span class="rlink">报告 ›</span>
+      </a>
+
+      <a class="card rec" href="review.html">
+        <div class="avatar av6"><img src="assets/avatars/woman-4.jpg" alt="郑海燕"></div>
+        <div class="rmain">
+          <h3>续约涨价 10% 怎么谈 <span class="chip amber">成交谈判</span></h3>
+          <div class="meta">🎙️ 语音模式 · 上周四 · 用时 10 分钟</div>
+        </div>
+        <div class="rscore"><b class="s-hi">93</b><span class="unit"> 分</span></div>
+        <span class="rlink">报告 ›</span>
+      </a>
+
+      <a class="card rec" href="review.html">
+        <div class="avatar av1"><img src="assets/avatars/man-3.jpg" alt="王建国"></div>
+        <div class="rmain">
+          <h3>向谨慎的采购总监报价 <span class="chip coral">电话销售</span></h3>
+          <div class="meta">⌨️ 文字模式 · 上周一 · 用时 8 分钟</div>
+        </div>
+        <div class="rscore"><b class="s-mid">71</b><span class="unit"> 分</span></div>
+        <span class="rlink">报告 ›</span>
+      </a>
+
+    </div>
+  </section>
+
+  <!-- 状态演示：空列表 -->
+  <section class="section" style="padding-top:0">
+    <div class="card empty">
+      <div class="demo-tag">状态演示：空列表</div>
+      <div class="ic">🎯</div>
+      <h3>还没有练习记录</h3>
+      <p>从首页挑一个场景，开始你的第一次练习吧</p>
+      <a class="btn primary" href="index.html">去首页</a>
+    </div>
+  </section>
+
+  <!-- 我的入口 -->
+  <section class="section" style="padding-top:0;padding-bottom:36px">
+    <div class="card me-list">
+      <a href="records.html"><span class="ic">📒</span>练习记录<span class="arrow">›</span></a>
+      <a href="builder.html"><span class="ic">⭐</span>我的场景<span class="arrow">›</span></a>
+      <a href="settings.html"><span class="ic">⚙️</span>设置<span class="arrow">›</span></a>
+      <a href="settings.html#about"><span class="ic">ℹ️</span>关于<span class="arrow">›</span></a>
+    </div>
+  </section>
+
+</main>
+
+<!-- 手机底部 Tab -->
+<nav class="tabbar"><div class="row">
+  <a href="index.html"><span class="ic">🏠</span>首页</a>
+  <a href="builder.html"><span class="ic">🛠️</span>构建</a>
+  <a href="dashboard.html"><span class="ic">📊</span>看板</a>
+  <a class="active" href="records.html"><span class="ic">👤</span>我的</a>
+</div></nav>
+
+</body>
+</html>

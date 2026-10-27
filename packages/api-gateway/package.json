@@ -12,6 +12,7 @@
     "dev": "tsc --watch",
     "start": "node --env-file-if-exists=.env dist/server.js",
     "seed": "pnpm build && node --env-file-if-exists=.env dist/seed-demo.js",
+    "seed:faq": "pnpm build && node --env-file-if-exists=.env dist/seed-sales-faq.js",
     "test": "vitest run --passWithNoTests",
     "lint": "tsc --noEmit"
   },

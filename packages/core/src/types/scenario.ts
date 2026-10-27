@@ -44,6 +44,10 @@ export interface Scenario {
   personaTitle?: string;
   /** 训练方法论标签（如「张伟三步破冰法 · L2」） */
   methodology?: string;
+  /** 场景来源（如「官方」「企业定制」） */
+  source?: string;
+  /** 累计练习次数（展示口径，由后台维护或种子数据预置） */
+  practiceCount?: number;
 }
 
 export interface LearningPathItem {

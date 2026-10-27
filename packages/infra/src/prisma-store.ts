@@ -245,6 +245,9 @@ this.domainEvents = docTable<DomainEvent>(this.prisma.domainEvent, ['id', 'type'
   saveScenario(scenario: Scenario) {
     return this.scenarios.upsertById(scenario);
   }
+  deleteScenario(id: string) {
+    return this.scenarios.delete(id);
+  }
   getLearningPath(id: string) {
     return this.learningPaths.get(id);
   }

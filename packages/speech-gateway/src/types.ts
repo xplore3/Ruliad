@@ -13,8 +13,10 @@ export interface ASRStream {
 export interface ASRStreamHandlers {
   /** 中间识别结果（可变） */
   onPartial(text: string): void;
-  /** 最终识别结果（本轮说话结束） */
+  /** 最终识别结果（流式识别每句结束都可能回调一次，文本为该流累计全量） */
   onFinal(text: string): void;
+  /** 底层任务完全结束（finish 后无更多结果时也会回调，供调用方兜底收尾） */
+  onFinished?(): void;
   onError(err: Error): void;
 }
 

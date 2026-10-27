@@ -24,6 +24,28 @@ interface ImportUserItem {
 export async function usersRoutes(app: FastifyInstance, ctx: RouteContext): Promise<void> {
   const { store } = ctx;
 
+  // 当前用户偏好设置（设置页持久化；未设置过返回 {}）
+  app.get('/users/me/preferences', async (request, reply) => {
+    const user = await store.getUser(request.userId);
+    if (!user) return reply.code(404).send({ error: '用户不存在' });
+    return { preferences: user.preferences ?? {} };
+  });
+
+  // 全量替换当前用户偏好设置；body 须为纯 JSON 对象，序列化后不超过 16KB
+  app.put<{ Body: Record<string, unknown> }>('/users/me/preferences', async (request, reply) => {
+    const body = request.body;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return reply.code(400).send({ error: 'preferences 必须为 JSON 对象' });
+    }
+    if (JSON.stringify(body).length > 16 * 1024) {
+      return reply.code(413).send({ error: '偏好设置过大（上限 16KB）' });
+    }
+    const user = await store.getUser(request.userId);
+    if (!user) return reply.code(404).send({ error: '用户不存在' });
+    await store.saveUser({ ...user, preferences: body });
+    return { preferences: body };
+  });
+
   // 用户列表（admin 专属），支持 ?role= 过滤；输出剔除 passwordHash
   app.get<{ Querystring: { role?: string } }>(
     '/users',

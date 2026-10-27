@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>语音通话 · Grasp 销售 AI 陪练</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+  .call-wrap{display:flex;gap:22px;justify-content:center;align-items:flex-start;padding:28px 0}
+  .call-card{
+    width:480px;max-width:100%;background:#17191F;color:#F7F7FA;border-radius:28px;
+    padding:26px 26px 22px;display:flex;flex-direction:column;align-items:center;gap:14px;
+    box-shadow:0 16px 48px rgba(31,35,41,.25);position:relative;overflow:hidden;
+  }
+  .call-card .st{display:flex;align-items:center;gap:8px;font-size:12.5px;color:#A4A7B3}
+  .call-card .st .dotg{width:8px;height:8px;border-radius:50%;background:var(--green)}
+  .ringbox{position:relative;width:150px;height:150px;display:flex;align-items:center;justify-content:center;margin:8px 0}
+  .ringbox .wave{position:absolute;inset:0;border-radius:50%;border:2px solid var(--coral);opacity:0;animation:wave 2.4s infinite}
+  .ringbox .wave:nth-child(2){animation-delay:1.2s}
+  @keyframes wave{0%{transform:scale(.72);opacity:.7}100%{transform:scale(1.25);opacity:0}}
+  .ringbox .avatar{width:110px;height:110px;font-size:42px;position:relative;z-index:1}
+  .call-card h2{font-size:20px}
+  .call-card .role{font-size:13px;color:#A4A7B3;margin-top:-8px}
+  .mood{font-size:12.5px;color:#FFD9D2;background:rgba(255,107,91,.15);padding:5px 14px;border-radius:999px}
+  .caption{width:100%;background:rgba(255,255,255,.08);border-radius:12px;padding:10px 14px;font-size:13px;color:#E8EAF0}
+  .caption b{color:var(--coral);font-weight:600;font-size:11.5px;display:block;margin-bottom:2px}
+  .ctrl1{display:flex;gap:16px;margin-top:6px}
+  .ctrl1 button{width:48px;height:48px;border-radius:50%;background:rgba(255,255,255,.12);color:#F7F7FA;font-size:18px}
+  .ctrl1 button.on{background:#F7F7FA;color:#17191F}
+  .ctrl2{display:flex;gap:26px;align-items:center;margin-top:8px}
+  .ctrl2 .pause{width:52px;height:52px;border-radius:50%;background:var(--amber);color:#17191F;font-size:20px}
+  .ctrl2 .hangup{width:66px;height:66px;border-radius:50%;background:var(--coral);color:#fff;font-size:26px;box-shadow:var(--shadow-coral)}
+  .ctrl2 .resume{width:52px;height:52px;border-radius:50%;background:rgba(255,255,255,.12);color:#F7F7FA;font-size:20px}
+  .call-card .backlink{font-size:12.5px;color:#A4A7B3;margin-top:4px}
+  .call-card .backlink a{color:var(--coral)}
+
+  .call-side{width:300px;flex:none}
+  .call-side .panel{padding:18px;margin-bottom:14px}
+
+  .demo-title{font-size:13px;color:var(--text-2);margin:26px 0 10px;display:flex;align-items:center;gap:8px}
+  .demo-title::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--coral)}
+
+  .replay-item{display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-bottom:1px solid var(--line)}
+  .replay-item:last-child{border-bottom:none}
+  .replay-item .tm{font-size:12px;color:var(--text-2);flex:none;width:44px}
+  .replay-item .pp{margin-left:auto;flex:none}
+
+  @media (max-width:900px){ .call-side{display:none} }
+  @media (max-width:768px){
+    body{background:#17191F}
+    .wrap{padding:0}
+    .call-wrap{padding:0;display:block}
+    .call-card.live{width:100%;min-height:calc(100vh - 52px);min-height:calc(100dvh - 52px);border-radius:0;justify-content:center;box-shadow:none}
+    .demos{background:var(--bg);padding:18px 14px 30px;border-radius:20px 20px 0 0}
+    .call-card .backlink{display:none}
+  }
+</style>
+</head>
+<body class="no-tab">
+
+<nav class="topnav">
+  <div class="inner">
+    <a class="logo" href="index.html"><span class="dot"></span>Grasp</a>
+    <div class="menu">
+      <a href="index.html">首页</a>
+      <a href="builder.html">构建</a>
+      <a href="dashboard.html">看板</a>
+      <a href="records.html">我的</a>
+    </div>
+    <div class="me"><span class="chip coral">练习中 · 实时通话</span></div>
+  </div>
+</nav>
+
+<div class="mtopbar" style="background:rgba(23,25,31,.92);color:#F7F7FA;border-color:rgba(255,255,255,.1)">
+  <a class="back" href="index.html" style="color:#F7F7FA">←</a>语音通话
+</div>
+
+<main class="wrap">
+  <div class="call-wrap">
+
+    <!-- 通话卡片 -->
+    <div class="call-card live">
+      <div class="st"><span class="dotg"></span>Grasp 练习通话 · 已接通 02:47</div>
+      <div class="ringbox">
+        <span class="wave"></span><span class="wave"></span>
+        <div class="avatar av1"><img src="assets/avatars/man-3.jpg" alt="王建国"></div>
+      </div>
+      <h2>王建国</h2>
+      <div class="role">制造业采购总监 · AI 扮演</div>
+      <div class="mood">对方态度：谨慎，对价格敏感</div>
+      <div class="caption"><b>实时字幕 · 对方</b>这个价格，说实话超出了我们的预期，竞品比你们便宜快两成……</div>
+      <div class="ctrl1">
+        <button title="静音">🎤</button>
+        <button class="on" title="扬声器">🔊</button>
+        <button title="拨号盘">⌨</button>
+        <button title="字幕">CC</button>
+      </div>
+      <div class="ctrl2">
+        <button class="pause" title="暂停">⏸</button>
+        <button class="hangup" title="挂断">📵</button>
+        <button class="resume" title="继续">▶</button>
+      </div>
+      <div class="backlink">暂停后对方将保持通话 · <a href="#replay">查看回放 →</a></div>
+    </div>
+
+    <!-- PC 侧栏 -->
+    <aside class="call-side">
+      <div class="card panel">
+        <h3 style="margin-bottom:8px">🎯 本场目标</h3>
+        <ul style="list-style:none;font-size:13px;display:flex;flex-direction:column;gap:8px">
+          <li>· 不降价，讲清差异化价值</li>
+          <li>· 确认对方真实预算范围</li>
+          <li>· 争取二次面谈时间</li>
+        </ul>
+      </div>
+      <div class="card panel">
+        <h3 style="margin-bottom:8px">💡 教练提示</h3>
+        <p class="small muted">对方说"超出预期"时不要急着解释价格，先问预算结构。</p>
+      </div>
+    </aside>
+  </div>
+
+  <!-- 状态演示：拨号中 / 回放 -->
+  <div class="demos">
+    <div class="demo-title">状态演示：拨号中</div>
+    <div class="call-wrap" style="padding:0;justify-content:flex-start">
+      <div class="call-card" style="width:380px;padding:22px;gap:10px">
+        <div class="st">📞 正在呼叫 王总…</div>
+        <div class="ringbox" style="width:110px;height:110px">
+          <span class="wave"></span><span class="wave"></span>
+          <div class="avatar av1" style="width:80px;height:80px;font-size:30px"><img src="assets/avatars/man-3.jpg" alt="王建国"></div>
+        </div>
+        <div class="role">拨号中，请稍候…</div>
+        <button class="btn ghost sm" style="background:transparent;border-color:rgba(255,255,255,.3);color:#F7F7FA">取消</button>
+      </div>
+    </div>
+
+    <div class="demo-title" id="replay">挂断后：通话回放</div>
+    <div class="card" style="padding:8px 18px">
+      <div class="replay-item">
+        <span class="tm">00:12</span>
+        <div><b style="font-size:13.5px">王建国</b><div class="small muted">你们这个报价，比竞品高了快 20%……</div></div>
+        <button class="btn soft sm pp">▶ 播放</button>
+      </div>
+      <div class="replay-item">
+        <span class="tm">00:38</span>
+        <div><b style="font-size:13.5px">你</b><div class="small muted">想先请教一下，您去年在设备停机上的损失……</div></div>
+        <button class="btn soft sm pp">▶ 播放</button>
+      </div>
+      <div class="replay-item">
+        <span class="tm">01:20</span>
+        <div><b style="font-size:13.5px">王建国</b><div class="small muted">那你把响应时效写进合同里，敢不敢？</div></div>
+        <button class="btn soft sm pp">▶ 播放</button>
+      </div>
+    </div>
+  </div>
+</main>
+
+</body>
+</html>

@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>练习中 · Grasp 销售 AI 陪练</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+  .layout{display:grid;grid-template-columns:250px 1fr 280px;gap:18px;padding:22px 0;align-items:start}
+  .panel{padding:18px}
+  .p-item{display:flex;align-items:center;gap:12px;padding:10px 0}
+  .p-item .avatar{width:46px;height:46px;font-size:18px}
+  .p-item .nm{font-weight:700;font-size:14px}
+  .p-item .rl{font-size:12px;color:var(--text-2)}
+  .p-item .obs{margin-left:auto;font-size:11px;color:var(--green);background:var(--green-soft);padding:2px 8px;border-radius:999px}
+  .p-tags{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 10px 58px}
+  .p-tags span{font-size:11px;color:var(--text-2);background:var(--bg);padding:2px 8px;border-radius:6px}
+
+  .chatcol{display:flex;flex-direction:column;gap:12px}
+  .statuses{display:flex;flex-direction:column;gap:8px}
+  .screen{position:relative;background:#3A3F4A;border-radius:var(--radius-card);box-shadow:var(--shadow-card);
+    min-height:340px;overflow:hidden;display:flex;align-items:center;justify-content:center}
+  .screen .tile{position:absolute;top:14px;left:14px;width:120px;border-radius:12px;overflow:hidden;
+    background:#23262E;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+  .screen .tile .avatar{width:100%;height:86px;border-radius:0}
+  .screen .tile .avatar img{width:100%;height:100%;object-fit:cover}
+  .screen .tile .who{display:flex;align-items:center;gap:5px;padding:6px 9px;font-size:11px;color:#fff}
+  .screen .tile .who span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .screen .thinking{display:flex;gap:7px}
+  .screen .thinking i{width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,.85);animation:blink 1.2s infinite}
+  .screen .thinking i:nth-child(2){animation-delay:.15s}
+  .screen .thinking i:nth-child(3){animation-delay:.3s}
+  .screen .thinking i:nth-child(4){animation-delay:.45s}
+  .screen .thinking i:nth-child(5){animation-delay:.6s}
+  @keyframes blink{0%,100%{opacity:.25}50%{opacity:1}}
+  .screen .timer{position:absolute;bottom:14px;left:14px;background:rgba(0,0,0,.45);color:#fff;
+    font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px}
+  .screen .me-tag{position:absolute;bottom:14px;right:14px;font-size:12px;color:rgba(255,255,255,.85)}
+  .curline{text-align:center;font-size:15.5px;font-weight:600;color:var(--text);padding:4px 12px 0}
+  .curline .play{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:400;color:var(--blue);margin-left:8px;cursor:pointer}
+  .curline .play i{font-style:normal;background:var(--blue-soft);border-radius:999px;padding:2px 8px}
+
+  .goal li{list-style:none;display:flex;gap:8px;font-size:13px;padding:6px 0;color:var(--text)}
+  .goal li::before{content:"🎯";flex:none}
+  .tips li{list-style:none;font-size:12.5px;color:var(--text-2);padding:6px 0 6px 20px;position:relative}
+  .tips li::before{content:"💡";position:absolute;left:0}
+
+  .ops{background:#fff;border-radius:var(--radius-card);box-shadow:var(--shadow-card);padding:14px 18px;
+    display:flex;flex-direction:column;align-items:center;gap:12px}
+  .ops .row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  .rbtn{width:44px;height:44px;border-radius:50%;border:1px solid var(--line);background:#fff;
+    color:var(--text);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s}
+  .rbtn:hover{border-color:var(--coral);color:var(--coral)}
+  .rbtn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+  .rbtn.primary:hover{background:#3D6BD9;color:#fff}
+  .rbtn.stop{background:var(--coral);border-color:var(--coral);color:#fff}
+  .rbtn.stop:hover{background:var(--coral-dark);color:#fff}
+  .microw{display:flex;align-items:center;gap:14px}
+  .mic{width:64px;height:64px;border-radius:50%;background:var(--coral);color:#fff;font-size:26px;
+    display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow-coral)}
+  .mic-hint{font-size:12px;color:var(--text-2)}
+  .textin{display:flex;gap:8px;width:100%;max-width:520px}
+  .textin .input{flex:1;background:var(--bg);border-color:transparent}
+
+  .goal-m{display:none}
+  @media (max-width:1000px){ .layout{grid-template-columns:220px 1fr} .side-r{display:none} }
+  @media (max-width:768px){
+    .layout{display:flex;flex-direction:column;padding:14px 0;gap:12px}
+    .side-l{order:0;width:100%}
+    .side-l .panel{display:flex;gap:14px;overflow-x:auto;padding:12px 14px;align-items:center;scrollbar-width:none}
+    .side-l .panel::-webkit-scrollbar{display:none}
+    .p-item{flex:none;padding:0}
+    .p-item .avatar{width:40px;height:40px}
+    .p-tags{display:none}
+    .goal-m{display:flex;gap:8px;align-items:center;padding:10px 14px;font-size:12.5px;color:var(--text-2)}
+    .chatcol{order:1}
+    .screen{min-height:240px}
+    .screen .tile{width:96px}
+    .screen .tile .avatar{height:70px}
+    .ops{position:sticky;bottom:calc(10px + env(safe-area-inset-bottom));order:2}
+  }
+</style>
+</head>
+<body class="no-tab">
+
+<nav class="topnav">
+  <div class="inner">
+    <a class="logo" href="index.html"><span class="dot"></span>Grasp</a>
+    <div class="menu">
+      <a href="index.html">首页</a>
+      <a href="builder.html">构建</a>
+      <a href="dashboard.html">看板</a>
+      <a href="records.html">我的</a>
+    </div>
+    <div class="me"><span class="chip coral">练习中 · 通话模式</span></div>
+  </div>
+</nav>
+
+<div class="mtopbar"><a class="back" href="index.html">←</a>向谨慎的采购总监报价</div>
+
+<main class="wrap">
+  <div class="layout">
+
+    <!-- 左：参与者 -->
+    <aside class="side-l">
+      <div class="card panel">
+        <h3 style="margin-bottom:6px">参与者</h3>
+        <div class="p-item">
+          <div class="avatar av5">我</div>
+          <div><div class="nm">销售小陈</div><div class="rl">你 · 销售方</div></div>
+        </div>
+        <div class="p-item">
+          <div class="avatar av1"><img src="assets/avatars/man-3.jpg" alt="王建国"></div>
+          <div><div class="nm">王建国</div><div class="rl">制造业采购总监 · AI 扮演</div></div>
+        </div>
+        <div class="p-tags"><span>谨慎</span><span>重数据</span><span>爱压价</span></div>
+        <div class="p-item">
+          <div class="avatar av4">教</div>
+          <div><div class="nm">AI 教练</div><div class="rl">实时提示与点评</div></div>
+          <span class="obs">观察中</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 手机端目标条 -->
+    <div class="card goal-m">🎯 本场目标：不降价讲清差异化价值，争取二次面谈</div>
+
+    <!-- 中：提示屏 + 当前字幕 + 操作 -->
+    <section class="chatcol">
+      <div class="statuses">
+        <div class="statusbar blue">对方正在思考<span class="dots"><i></i><i></i><i></i></span></div>
+        <div class="statusbar"><span class="pulse" style="width:8px;height:8px;border-radius:50%;background:var(--coral)"></span>🎙 轮到你说话了</div>
+        <div class="statusbar gray">💡 教练提示：试着先确认对方的预算范围，再谈价值<span style="margin-left:auto;cursor:pointer">收起 ×</span></div>
+      </div>
+
+      <div class="screen">
+        <div class="tile">
+          <div class="avatar av1"><img src="assets/avatars/man-3.jpg" alt="王建国"></div>
+          <div class="who">🎙<span>王建国 · 采购总监</span></div>
+        </div>
+        <div class="thinking"><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="timer">06:24</div>
+        <div class="me-tag">销售小陈（我）</div>
+      </div>
+
+      <div class="curline">嗯……这个说法有点意思。那你把响应时效写进合同里，敢不敢？
+        <span class="play"><i>▶ 0:08</i>重听</span>
+      </div>
+
+      <div class="ops">
+        <div class="row round">
+          <button class="rbtn" title="重播">↺</button>
+          <button class="rbtn" title="字幕">CC</button>
+          <button class="rbtn primary" title="继续">➜</button>
+          <button class="rbtn" title="暂停">⏸</button>
+          <button class="rbtn stop" title="停止">⏹</button>
+          <button class="rbtn" title="设置">⚙</button>
+        </div>
+        <div class="microw">
+          <button class="mic pulse">🎙</button>
+          <div>
+            <div style="font-weight:700;font-size:14px">按住或点击说话（默认语音）</div>
+            <div class="mic-hint">实时转写中… 说错可重录 <a style="color:var(--coral);font-weight:600;margin-left:8px;cursor:pointer">⌨ 切换文本输入</a></div>
+          </div>
+        </div>
+        <div class="textin">
+          <input class="input" placeholder="切换文本输入后在这里打字回复…">
+          <button class="btn primary sm">发送</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 右：目标与实时提示 -->
+    <aside class="side-r">
+      <div class="card panel" style="margin-bottom:14px">
+        <h3 style="margin-bottom:8px">🎯 本场目标</h3>
+        <ul class="goal">
+          <li>不降价，讲清差异化价值</li>
+          <li>确认对方真实预算范围</li>
+          <li>争取二次面谈时间</li>
+        </ul>
+      </div>
+      <div class="card panel">
+        <h3 style="margin-bottom:8px">实时提示</h3>
+        <ul class="tips">
+          <li>对方两次提到"老板"，决策链可能不止他一人</li>
+          <li>「敢不敢写进合同」是推进成交的机会信号</li>
+          <li>语速 168 WPM，略快，建议放慢</li>
+        </ul>
+      </div>
+    </aside>
+
+  </div>
+</main>
+
+<nav class="tabbar"><div class="row">
+  <a href="index.html"><span class="ic">🏠</span>首页</a>
+  <a href="builder.html"><span class="ic">🛠️</span>构建</a>
+  <a href="dashboard.html"><span class="ic">📊</span>看板</a>
+  <a href="records.html"><span class="ic">👤</span>我的</a>
+</div></nav>
+
+</body>
+</html>

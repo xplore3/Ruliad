@@ -1,23 +1,33 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { fetchScenarios } from '../api';
-import type { Scenario } from '../types';
+import { useState, useEffect, useCallback } from 'react';
+import {
+  fetchScenarios,
+  createScenario,
+  updateScenario,
+  deleteScenario,
+  createPersonaConfig,
+  updatePersonaConfig,
+  fetchSkillPoints,
+  trialChat,
+  getStoredUser,
+  apiError,
+} from '../api';
+import type { Scenario, SkillPoint } from '../types';
 
 type EditorStep = 'base' | 'goal' | 'role' | 'params' | 'eval';
 
 const STEPS: { key: EditorStep; label: string }[] = [
-  { key: 'base', label: '基础' },
-  { key: 'goal', label: '目标' },
-  { key: 'role', label: '角色' },
-  { key: 'params', label: '参数' },
-  { key: 'eval', label: '评估' },
+  { key: 'base', label: '场景基础' },
+  { key: 'goal', label: '练习目标' },
+  { key: 'role', label: '角色画像' },
+  { key: 'params', label: '对话参数' },
+  { key: 'eval', label: '评估配置' },
 ];
 
 const CATEGORIES = [
-  { key: '电话销售', icon: '📞', color: 'coral' },
-  { key: '客户主动咨询', icon: '💬', color: 'cat-ground' },
-  { key: '成交谈判', icon: '🤝', color: 'cat-deal' },
-  { key: '地推破冰', icon: '🚶', color: 'cat-inquiry' },
+  { key: '电话销售', icon: '📞', dot: 'bg-cat-phone', type: 't1' },
+  { key: '客户主动咨询', icon: '💬', dot: 'bg-cat-inquiry', type: 't2' },
+  { key: '成交谈判', icon: '🤝', dot: 'bg-cat-deal', type: 't3' },
+  { key: '地推破冰', icon: '🚶', dot: 'bg-cat-ground', type: 't4' },
 ];
 
 const PERSONALITY_TAGS = ['谨慎', '重数据', '爱压价', '爽快', '强势', '善拖延', '话多', '戒备'];
@@ -27,14 +37,30 @@ const DECISION_STYLES = [
   '向上汇报，本人不拍板',
   '多方询价，拖到最后',
 ];
+const INTERRUPT_OPTIONS = [
+  { key: 'off', label: '从不打断' },
+  { key: 'weak', label: '偶尔打断（接近真实客户）' },
+  { key: 'strong', label: '频繁打断（高压特训）' },
+];
 
 const DIMENSIONS = [
-  { key: 'opening', name: '开场破冰', desc: '前 30 秒建立联系', defaultWeight: 20 },
-  { key: 'discovery', name: '需求挖掘', desc: '提问与倾听的比例', defaultWeight: 25 },
-  { key: 'presentation', name: '价值呈现', desc: '差异化卖点传递', defaultWeight: 20 },
-  { key: 'objection', name: '异议处理', desc: '常见反对应对', defaultWeight: 20 },
-  { key: 'closing', name: '推进成交', desc: '抓住承诺信号', defaultWeight: 15 },
+  { key: 'discovery', name: '需求挖掘', desc: '是否问出真实需求与决策链', defaultWeight: 20 },
+  { key: 'presentation', name: '价值表达', desc: '讲清差异化，而非罗列功能', defaultWeight: 20 },
+  { key: 'objection', name: '异议处理', desc: '面对压价的回应质量', defaultWeight: 20 },
+  { key: 'closing', name: '流程推进', desc: '是否拿到下一步承诺', defaultWeight: 15 },
+  { key: 'rhythm', name: '沟通节奏', desc: '倾听、停顿、不打断对方', defaultWeight: 15 },
+  { key: 'compliance', name: '专业合规', desc: '话术准确，不踩禁止事项', defaultWeight: 10 },
 ];
+
+const DIFF_LABELS: Record<number, string> = { 1: '初级', 2: '进阶', 3: '挑战' };
+const AVATARS = [
+  '/avatars/man-1.jpg', '/avatars/man-2.jpg', '/avatars/man-3.jpg', '/avatars/man-4.jpg',
+  '/avatars/woman-1.jpg', '/avatars/woman-2.jpg', '/avatars/woman-3.jpg', '/avatars/woman-4.jpg',
+];
+
+const DEFAULT_WEIGHTS: Record<string, number> = Object.fromEntries(
+  DIMENSIONS.map((d) => [d.key, d.defaultWeight])
+);
 
 interface BuildForm {
   name: string;
@@ -53,75 +79,101 @@ interface BuildForm {
   objections: string;
   hiddenInfo: string;
   speechRate: number;
-  voice: string;
-  opener: 'ai' | 'user';
-  maxDuration: number;
-  hintLevel: 'off' | 'weak' | 'strong';
+  challenge: number;
+  interruptLevel: 'off' | 'weak' | 'strong';
+  skillPointIds: string[];
   dimensionWeights: Record<string, number>;
 }
 
-const INITIAL_FORM: BuildForm = {
-  name: '向谨慎的采购总监报价',
+const EMPTY_FORM: BuildForm = {
+  name: '',
   category: '电话销售',
-  description: '王总对价格极度敏感，习惯用竞品压价，需要在 5 分钟内讲清差异化价值，不被对方的节奏带走。',
-  difficulty: 2,
-  duration: 8,
-  goal: '不降价讲清差异化价值，争取二次面谈',
-  successCriteria: '对方同意下周带技术团队来司考察',
-  doNot: '不得承诺超出 5% 的折扣；不得诋毁竞品',
-  roleName: '王建国',
-  roleTitle: '采购总监',
-  roleIndustry: '装备制造',
-  personalities: ['谨慎', '重数据', '爱压价'],
-  decisionStyle: '理性比较，需要数据佐证',
-  objections: '竞品更便宜；预算有限',
-  hiddenInfo: '公司已内定竞品入围，只是在比价压价',
+  description: '',
+  difficulty: 1,
+  duration: 5,
+  goal: '',
+  successCriteria: '60',
+  doNot: '',
+  roleName: '',
+  roleTitle: '',
+  roleIndustry: '',
+  personalities: [],
+  decisionStyle: DECISION_STYLES[0],
+  objections: '',
+  hiddenInfo: '',
   speechRate: 2,
-  voice: '成熟男声',
-  opener: 'ai',
-  maxDuration: 8,
-  hintLevel: 'weak',
-  dimensionWeights: {
-    opening: 20,
-    discovery: 25,
-    presentation: 20,
-    objection: 20,
-    closing: 15,
-  },
+  challenge: 3,
+  interruptLevel: 'weak',
+  skillPointIds: [],
+  dimensionWeights: { ...DEFAULT_WEIGHTS },
 };
 
-interface MineScenario {
-  id: string;
-  name: string;
-  desc: string;
-  category: string;
-  categoryIcon: string;
-  diff: string;
-  duration: string;
-  version: string;
-  updatedAt: string;
-  practiceCount: number;
-  isDerived: boolean;
+interface TrialMsg {
+  role: 'user' | 'assistant';
+  content: string;
 }
 
-const MINE_SCENARIOS: MineScenario[] = [
-  { id: 'ms-001', name: '向谨慎的采购总监报价', desc: '基于官方模板调整：王总对价格极度敏感，习惯用竞品压价。', category: '电话销售', categoryIcon: '📞', diff: '进阶', duration: '约 8 分钟', version: 'v3', updatedAt: '3 天前', practiceCount: 12, isDerived: true },
-  { id: 'ms-002', name: '教培课程咨询（少儿英语版）', desc: '把官方咨询场景改成本行业话术：家长来电问价。', category: '客户主动咨询', categoryIcon: '💬', diff: '初级', duration: '约 5 分钟', version: 'v1', updatedAt: '上周创建', practiceCount: 4, isDerived: true },
-  { id: 'ms-003', name: '账期谈判（大客户加强版）', desc: '提高了角色强势程度：赵总要求 90 天账期 + 独家折扣。', category: '成交谈判', categoryIcon: '🤝', diff: '挑战', duration: '约 12 分钟', version: 'v2', updatedAt: '2 周前更新', practiceCount: 7, isDerived: true },
-  { id: 'ms-004', name: '社区门店 30 秒破冰', desc: '商场场景改成社区门店语境：陈姐赶时间、戒备心强。', category: '地推破冰', categoryIcon: '🚶', diff: '初级', duration: '约 4 分钟', version: 'v1', updatedAt: '3 周前创建', practiceCount: 0, isDerived: true },
-];
+const weightsKey = (scenarioId: string) => `grasp-eval-weights:${scenarioId}`;
+
+function loadWeights(scenarioId: string): Record<string, number> | null {
+  try {
+    const raw = localStorage.getItem(weightsKey(scenarioId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Record<string, number>;
+    return { ...DEFAULT_WEIGHTS, ...parsed };
+  } catch {
+    return null;
+  }
+}
+
+function saveWeights(scenarioId: string, weights: Record<string, number>) {
+  localStorage.setItem(weightsKey(scenarioId), JSON.stringify(weights));
+}
+
+function avatarFor(id: string): string {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+  return AVATARS[hash % AVATARS.length];
+}
 
 export default function Build() {
-  const navigate = useNavigate();
+  const isAdmin = getStoredUser()?.role === 'admin';
+
   const [activeTab, setActiveTab] = useState<'list' | 'editor'>('list');
   const [activeStep, setActiveStep] = useState<EditorStep>('base');
-  const [form, setForm] = useState<BuildForm>(INITIAL_FORM);
-  const [scenarios, setScenarios] = useState<Scenario[]>([]);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState<BuildForm>(EMPTY_FORM);
+  const [mine, setMine] = useState<Scenario[]>([]);
+  const [listLoading, setListLoading] = useState(true);
+  const [skillPoints, setSkillPoints] = useState<SkillPoint[]>([]);
+  const [editingScenarioId, setEditingScenarioId] = useState<string | null>(null);
+  const [editingPersonaConfigId, setEditingPersonaConfigId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [trial, setTrial] = useState<{ open: boolean; messages: TrialMsg[]; input: string; sending: boolean }>({
+    open: false,
+    messages: [],
+    input: '',
+    sending: false,
+  });
+
+  const loadMine = useCallback(async () => {
+    setListLoading(true);
+    try {
+      const data = await fetchScenarios();
+      setMine(data.scenarios.filter((s) => s.source !== '官方'));
+    } catch (err) {
+      setNotice(apiError(err, '场景列表加载失败'));
+    } finally {
+      setListLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    fetchScenarios().then((data) => setScenarios(data.scenarios)).catch(console.error);
-  }, []);
+    loadMine();
+    fetchSkillPoints()
+      .then((data) => setSkillPoints(data.skillPoints))
+      .catch(() => setSkillPoints([]));
+  }, [loadMine]);
 
   const updateForm = (updates: Partial<BuildForm>) => {
     setForm((prev) => ({ ...prev, ...updates }));
@@ -133,31 +185,225 @@ export default function Build() {
       : updateForm({ personalities: [...form.personalities, tag] });
   };
 
-  const totalWeight = Object.values(form.dimensionWeights).reduce((a, b) => a + b, 0);
-
-  const handleReset = () => {
-    setForm(INITIAL_FORM);
-    setEditingId(null);
+  const toggleSkillPoint = (id: string) => {
+    form.skillPointIds.includes(id)
+      ? updateForm({ skillPointIds: form.skillPointIds.filter((s) => s !== id) })
+      : updateForm({ skillPointIds: [...form.skillPointIds, id] });
   };
 
-  return (
-    <div className="px-4 py-4">
-      {/* 顶部 */}
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-text-primary text-lg font-bold">构建</h1>
-          <p className="text-xs text-text-tertiary mt-0.5">创建和管理你的练习场景</p>
-        </div>
-        <button
-          onClick={() => { setActiveTab('editor'); handleReset(); }}
-          className="px-4 py-2 bg-coral text-white rounded-full text-xs font-medium hover:bg-coral-hover transition-colors shadow-md shadow-coral/20"
-        >
-          + 新建场景
-        </button>
-      </div>
+  const totalWeight = Object.values(form.dimensionWeights).reduce((a, b) => a + b, 0);
 
+  const skillIdsFromNames = (names?: string[]): string[] => {
+    if (!names?.length) return [];
+    return names
+      .map((n) => skillPoints.find((sp) => sp.name === n)?.id)
+      .filter((id): id is string => !!id);
+  };
+
+  const resetTrial = () => setTrial({ open: false, messages: [], input: '', sending: false });
+
+  const handleReset = () => {
+    setForm(EMPTY_FORM);
+    setEditingScenarioId(null);
+    setEditingPersonaConfigId(null);
+    resetTrial();
+  };
+
+  const handleEdit = (scenario: Scenario) => {
+    setEditingScenarioId(scenario.id);
+    setEditingPersonaConfigId(scenario.personaConfigId);
+    setForm({
+      ...EMPTY_FORM,
+      name: scenario.name,
+      category: CATEGORIES.some((c) => c.key === scenario.methodology) ? scenario.methodology! : EMPTY_FORM.category,
+      description: scenario.coverageTopics?.[0] ?? '',
+      difficulty: scenario.difficulty || 1,
+      duration: scenario.durationMinutes || 5,
+      successCriteria: String(scenario.successCriteria?.passScore ?? 60),
+      roleName: scenario.personaName ?? '',
+      roleTitle: scenario.personaTitle ?? '',
+      skillPointIds: skillIdsFromNames(scenario.skillPointNames),
+      dimensionWeights: loadWeights(scenario.id) ?? { ...DEFAULT_WEIGHTS },
+    });
+    resetTrial();
+    setActiveStep('base');
+    setActiveTab('editor');
+  };
+
+  const handleDuplicate = async (scenario: Scenario) => {
+    if (!isAdmin) return;
+    try {
+      const { scenario: created } = await createScenario({
+        name: `${scenario.name}（副本）`,
+        personaConfigId: scenario.personaConfigId,
+        skillPointIds: skillIdsFromNames(scenario.skillPointNames),
+        passScore: scenario.successCriteria?.passScore ?? 60,
+        durationMinutes: scenario.durationMinutes,
+        difficulty: scenario.difficulty,
+        coverageTopics: scenario.coverageTopics,
+        methodology: scenario.methodology,
+        source: scenario.source ?? '自建',
+      });
+      const weights = loadWeights(scenario.id);
+      if (weights) saveWeights(created.id, weights);
+      setNotice(`已复制为「${created.name}」`);
+      await loadMine();
+    } catch (err) {
+      setNotice(apiError(err, '复制失败'));
+    }
+  };
+
+  const handleDelete = async (scenario: Scenario) => {
+    if (!isAdmin) return;
+    if (!window.confirm(`确定删除场景「${scenario.name}」吗？此操作不可恢复。`)) return;
+    try {
+      await deleteScenario(scenario.id);
+      localStorage.removeItem(weightsKey(scenario.id));
+      setNotice(`已删除「${scenario.name}」`);
+      await loadMine();
+    } catch (err) {
+      setNotice(apiError(err, '删除失败'));
+    }
+  };
+
+  const buildBackground = (): string => {
+    const parts: string[] = [];
+    if (form.roleIndustry) parts.push(`行业：${form.roleIndustry}`);
+    if (form.personalities.length) parts.push(`性格标签：${form.personalities.join('、')}`);
+    if (form.decisionStyle) parts.push(`决策风格：${form.decisionStyle}`);
+    if (form.objections) parts.push(`典型异议：${form.objections}`);
+    if (form.hiddenInfo) parts.push(`禁止透露（除非被追问）：${form.hiddenInfo}`);
+    return parts.join('\n');
+  };
+
+  const buildBehaviorBands = () => {
+    const rate = { 1: '语速偏慢', 2: '语速标准', 3: '语速偏快' }[form.speechRate] ?? '语速标准';
+    const challenge =
+      form.challenge >= 4 ? '追问犀利、让步很少' : form.challenge >= 3 ? '有来有回、适度施压' : '态度温和、容易沟通';
+    const interrupt =
+      { off: '从不打断对方', weak: '偶尔打断对方', strong: '频繁打断对方' }[form.interruptLevel];
+    return [
+      { key: 'calm', minArousal: 0, maxArousal: 0.33, instruction: `保持平和友好的语气，${rate}，${challenge}，${interrupt}。` },
+      { key: 'engaged', minArousal: 0.33, maxArousal: 0.66, instruction: `态度认真专注，${rate}，${challenge}，${interrupt}。` },
+      { key: 'agitated', minArousal: 0.66, maxArousal: 1, instruction: `情绪激动、不耐烦，${rate}，施压升级，${interrupt}。` },
+    ];
+  };
+
+  const handleSave = async () => {
+    if (!isAdmin || saving) return;
+    if (!form.name.trim()) {
+      setNotice('请填写场景标题');
+      return;
+    }
+    if (totalWeight !== 100) {
+      setNotice(`六维权重合计需为 100%（当前 ${totalWeight}%）`);
+      return;
+    }
+    const parsed = Number(form.successCriteria);
+    const passScore = Number.isFinite(parsed) && parsed > 0 ? Math.min(100, Math.round(parsed)) : 60;
+    const personaPayload = {
+      name: form.roleName.trim() || `${form.name.trim()}角色`,
+      background: buildBackground(),
+      occupation: form.roleTitle.trim() || undefined,
+      behaviorBands: buildBehaviorBands(),
+    };
+    setSaving(true);
+    try {
+      let scenarioId = editingScenarioId;
+      let personaConfigId = editingPersonaConfigId;
+      if (scenarioId) {
+        if (personaConfigId) await updatePersonaConfig(personaConfigId, personaPayload);
+        await updateScenario(scenarioId, {
+          name: form.name.trim(),
+          skillPointIds: form.skillPointIds,
+          passScore,
+          durationMinutes: form.duration,
+          difficulty: form.difficulty,
+          coverageTopics: form.description.trim() ? [form.description.trim()] : [],
+          methodology: form.category,
+          source: '自建',
+        });
+      } else {
+        const { persona } = await createPersonaConfig(personaPayload);
+        personaConfigId = persona.id;
+        const { scenario } = await createScenario({
+          name: form.name.trim(),
+          personaConfigId: persona.id,
+          skillPointIds: form.skillPointIds,
+          passScore,
+          durationMinutes: form.duration,
+          difficulty: form.difficulty,
+          coverageTopics: form.description.trim() ? [form.description.trim()] : [],
+          methodology: form.category,
+          source: '自建',
+        });
+        scenarioId = scenario.id;
+        setEditingScenarioId(scenario.id);
+        setEditingPersonaConfigId(persona.id);
+      }
+      if (scenarioId) saveWeights(scenarioId, form.dimensionWeights);
+      setNotice(editingScenarioId ? '场景已更新' : '场景已保存，可在「我的场景」中查看');
+      await loadMine();
+    } catch (err) {
+      setNotice(apiError(err, '保存失败'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const trialRounds = trial.messages.filter((m) => m.role === 'user').length;
+  const trialFinished = trialRounds >= 3;
+
+  const handleTrialToggle = () => {
+    if (trial.open) {
+      resetTrial();
+      return;
+    }
+    if (!editingPersonaConfigId) {
+      setNotice('请先保存场景，再试聊三轮预览');
+      return;
+    }
+    setTrial({ open: true, messages: [], input: '', sending: false });
+  };
+
+  const handleTrialSend = async () => {
+    const text = trial.input.trim();
+    if (!text || !editingPersonaConfigId || trial.sending || trialFinished) return;
+    const nextMessages: TrialMsg[] = [...trial.messages, { role: 'user', content: text }];
+    setTrial((prev) => ({ ...prev, messages: nextMessages, input: '', sending: true }));
+    try {
+      const { reply } = await trialChat(editingPersonaConfigId, nextMessages);
+      setTrial((prev) => ({
+        ...prev,
+        messages: [...nextMessages, { role: 'assistant', content: reply }],
+        sending: false,
+      }));
+    } catch (err) {
+      setTrial((prev) => ({ ...prev, messages: prev.messages.slice(0, -1), sending: false }));
+      setNotice(apiError(err, '试聊失败'));
+    }
+  };
+
+  const scrollToStep = (key: EditorStep) => {
+    setActiveStep(key);
+    document.getElementById(`bsec-${key}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const catType = (key: string) => CATEGORIES.find((c) => c.key === key)?.type ?? 't1';
+  const catDot = (key: string) => CATEGORIES.find((c) => c.key === key)?.dot ?? 'bg-cat-phone';
+  const catChip = (key: string) => {
+    const map: Record<string, string> = { '电话销售': 'chip-coral', '客户主动咨询': 'chip-blue', '成交谈判': 'chip-amber', '地推破冰': 'chip-green' };
+    return map[key] ?? 'chip-coral';
+  };
+  const cardCategory = (s: Scenario) =>
+    CATEGORIES.some((c) => c.key === s.methodology) ? s.methodology! : s.methodology || s.source || '自建';
+
+  const adminTip = '仅管理员可保存场景';
+
+  return (
+    <div>
       {/* Tab 切换 */}
-      <div className="flex gap-0.5 mb-5 bg-dark-panel rounded-full p-1">
+      <div className="flex gap-0.5 mb-6 bg-white rounded-full p-1 border border-line max-w-sm">
         <button
           onClick={() => setActiveTab('list')}
           className={`flex-1 py-2 rounded-full text-xs font-medium transition-all ${
@@ -176,420 +422,331 @@ export default function Build() {
         </button>
       </div>
 
-      {/* 我的场景列表 */}
-      {activeTab === 'list' && (
-        <div className="space-y-3">
-          {MINE_SCENARIOS.map((scenario) => (
-            <ScenarioCard
-              key={scenario.id}
-              scenario={scenario}
-              onEdit={() => {
-                setActiveTab('editor');
-                setEditingId(scenario.id);
-                setForm({ ...INITIAL_FORM, name: scenario.name, category: scenario.category });
-              }}
-              onPractice={() => navigate('/practice/new')}
-            />
-          ))}
-
-          {MINE_SCENARIOS.length === 0 && (
-            <div className="bg-dark-card rounded-2xl p-10 text-center border border-white/5">
-              <p className="text-text-secondary text-sm">暂无自定义场景</p>
-              <p className="text-text-tertiary text-xs mt-1">点击「新建场景」创建第一个练习场景</p>
-            </div>
-          )}
+      {notice && (
+        <div className="card" style={{ padding: '10px 16px', marginBottom: 16, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>{notice}</span>
+          <button className="act-btn" onClick={() => setNotice(null)}>✕</button>
         </div>
       )}
 
-      {/* 场景编辑器 */}
+      {/* ===== 我的场景 ===== */}
+      {activeTab === 'list' && (
+        <section className="section">
+          <div className="sec-head">
+            <h2><span>🛠️</span> 我的场景</h2>
+            <button onClick={() => { handleReset(); setActiveTab('editor'); }} className="btn btn-primary">
+              ＋ 新建场景
+            </button>
+          </div>
+          {listLoading ? (
+            <div className="empty">
+              <div className="ic">⏳</div>
+              <h3>加载中…</h3>
+            </div>
+          ) : (
+            <>
+              <div className="mine-grid">
+                {mine.map((scenario) => (
+                  <div key={scenario.id} className="card mine-card">
+                    <div className={`cover ${catType(cardCategory(scenario))}`}>
+                      <span className={`chip ${catChip(cardCategory(scenario))} cat`}>
+                        <i className={`cdot ${catDot(cardCategory(scenario))}`} />{cardCategory(scenario)}
+                      </span>
+                      <span className="chip gray derived">{scenario.source ?? '自建'}</span>
+                      <img className="coverimg" src={avatarFor(scenario.id)} alt={scenario.name} />
+                      <span className="diff">
+                        {DIFF_LABELS[scenario.difficulty] ?? '进阶'} · 约 {scenario.durationMinutes} 分钟
+                      </span>
+                    </div>
+                    <div className="sbody">
+                      <h3>{scenario.name}</h3>
+                      <p className="desc">
+                        {scenario.coverageTopics?.join('；') ||
+                          [scenario.personaName, scenario.personaTitle].filter(Boolean).join(' · ') ||
+                          '暂无描述'}
+                      </p>
+                      <div className="who">
+                        {(scenario.practiceCount ?? 0) > 0
+                          ? <span className="chip green">已练 {scenario.practiceCount} 次</span>
+                          : <span className="chip gray">未练习</span>}
+                        {scenario.skillPointNames?.slice(0, 2).map((n) => (
+                          <span key={n} className="chip gray">{n}</span>
+                        ))}
+                      </div>
+                      <div className="card-actions">
+                        <button className="act-btn" onClick={() => handleEdit(scenario)}>✏️ 编辑</button>
+                        <button
+                          className="act-btn"
+                          disabled={!isAdmin}
+                          title={!isAdmin ? adminTip : undefined}
+                          onClick={() => handleDuplicate(scenario)}
+                        >
+                          ⧉ 复制
+                        </button>
+                        <button
+                          className="act-btn danger"
+                          disabled={!isAdmin}
+                          title={!isAdmin ? adminTip : undefined}
+                          onClick={() => handleDelete(scenario)}
+                        >
+                          🗑 删除
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {mine.length === 0 && (
+                <div className="empty">
+                  <div className="ic">🛠️</div>
+                  <h3>暂无自定义场景</h3>
+                  <p>点击「新建场景」创建第一个练习场景</p>
+                </div>
+              )}
+            </>
+          )}
+        </section>
+      )}
+
+      {/* ===== 场景编辑器 ===== */}
       {activeTab === 'editor' && (
-        <div>
-          {/* 步骤条（手机端横向滚动） */}
-          <div className="flex gap-1 mb-4 overflow-x-auto pb-1">
-            {STEPS.map((step, idx) => (
-              <button
-                key={step.key}
-                onClick={() => setActiveStep(step.key)}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-full text-xs whitespace-nowrap transition-all shrink-0 ${
-                  activeStep === step.key
-                    ? 'bg-coral text-white font-medium'
-                    : 'bg-dark-panel text-text-secondary'
-                }`}
-              >
-                <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                  activeStep === step.key ? 'bg-white/20' : 'bg-dark-elevated text-text-tertiary'
-                }`}>
-                  {idx + 1}
-                </span>
-                {step.label}
-              </button>
-            ))}
+        <section className="section" style={{ paddingTop: 8 }}>
+          <div className="sec-head">
+            <h2><span>✏️</span> 场景编辑器</h2>
+            <span className="chip chip-gray">{editingScenarioId ? '正在编辑已有场景' : '新场景草稿'}</span>
           </div>
 
-          {/* 表单区（手机单栏） */}
-          <div className="bg-dark-card rounded-2xl border border-white/5 p-4 space-y-5">
-            {/* 场景基础 */}
-            {activeStep === 'base' && (
-              <>
-                <FieldGroup label="场景标题" hint="建议突出对练情境">
-                  <input
-                    type="text"
-                    value={form.name}
-                    onChange={(e) => updateForm({ name: e.target.value })}
-                    className="input-field"
-                    placeholder="如：首次电话邀约"
-                    maxLength={30}
-                  />
-                </FieldGroup>
-
-                <FieldGroup label="场景类别">
-                  <div className="grid grid-cols-2 gap-2">
-                    {CATEGORIES.map((cat) => (
-                      <button
-                        key={cat.key}
-                        onClick={() => updateForm({ category: cat.key })}
-                        className={`flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-medium border transition-all ${
-                          form.category === cat.key
-                            ? `bg-${cat.color}/15 border-${cat.color}/30 text-${cat.color}`
-                            : 'bg-dark-panel border-white/5 text-text-secondary hover:border-coral/20'
-                        }`}
-                      >
-                        {cat.icon} {cat.key}
-                      </button>
-                    ))}
-                  </div>
-                </FieldGroup>
-
-                <FieldGroup label="场景描述" hint="描述场景背景和特点">
-                  <textarea
-                    value={form.description}
-                    onChange={(e) => updateForm({ description: e.target.value })}
-                    className="input-field resize-none"
-                    rows={3}
-                    placeholder="描述场景背景和特点..."
-                    maxLength={200}
-                  />
-                  <p className="text-[11px] text-text-tertiary mt-1">{form.description.length}/200</p>
-                </FieldGroup>
-
-                <FieldGroup label="难度">
-                  <div className="flex gap-1.5">
-                    {[
-                      { val: 1, label: '入门', color: 'text-success' },
-                      { val: 2, label: '进阶', color: 'text-cat-ground' },
-                      { val: 3, label: '挑战', color: 'text-cat-deal' },
-                      { val: 4, label: '高压', color: 'text-coral' },
-                      { val: 5, label: '极限', color: 'text-warning' },
-                    ].map((d) => (
-                      <button
-                        key={d.val}
-                        onClick={() => updateForm({ difficulty: d.val })}
-                        className={`flex-1 py-2 rounded-lg text-[11px] font-medium border transition-all ${
-                          form.difficulty === d.val
-                            ? 'bg-coral border-coral text-white'
-                            : 'border-white/5 bg-dark-panel text-text-secondary hover:border-coral/30'
-                        }`}
-                      >
-                        {d.label}
-                      </button>
-                    ))}
-                  </div>
-                </FieldGroup>
-
-                <FieldGroup label="预计时长">
-                  <div className="flex gap-2 overflow-x-auto pb-1">
-                    {Array.from({ length: 14 }, (_, i) => i + 3).map((v) => (
-                      <button
-                        key={v}
-                        onClick={() => updateForm({ duration: v })}
-                        className={`px-3 py-1.5 rounded-full text-xs shrink-0 transition-all ${
-                          form.duration === v
-                            ? 'bg-coral text-white'
-                            : 'bg-dark-panel text-text-secondary'
-                        }`}
-                      >
-                        {v} 分钟
-                      </button>
-                    ))}
-                  </div>
-                </FieldGroup>
-              </>
-            )}
-
-            {/* 练习目标 */}
-            {activeStep === 'goal' && (
-              <>
-                <FieldGroup label="我方目标" hint="AI 会围绕这个目标给角色施压">
-                  <textarea
-                    value={form.goal}
-                    onChange={(e) => updateForm({ goal: e.target.value })}
-                    className="input-field resize-none"
-                    rows={2}
-                    placeholder="AI 会围绕这个目标给角色施压..."
-                  />
-                </FieldGroup>
-                <FieldGroup label="成功标准">
-                  <input
-                    type="text"
-                    value={form.successCriteria}
-                    onChange={(e) => updateForm({ successCriteria: e.target.value })}
-                    className="input-field"
-                    placeholder="对方同意下周带技术团队来司考察"
-                  />
-                </FieldGroup>
-                <FieldGroup label="禁止事项">
-                  <input
-                    type="text"
-                    value={form.doNot}
-                    onChange={(e) => updateForm({ doNot: e.target.value })}
-                    className="input-field"
-                    placeholder="不得承诺超出 5% 的折扣"
-                  />
-                </FieldGroup>
-              </>
-            )}
-
-            {/* 角色画像 */}
-            {activeStep === 'role' && (
-              <>
-                <div className="grid grid-cols-2 gap-3">
-                  <FieldGroup label="姓名">
-                    <input type="text" value={form.roleName} onChange={(e) => updateForm({ roleName: e.target.value })} className="input-field" />
-                  </FieldGroup>
-                  <FieldGroup label="职位">
-                    <input type="text" value={form.roleTitle} onChange={(e) => updateForm({ roleTitle: e.target.value })} className="input-field" />
-                  </FieldGroup>
-                </div>
-                <FieldGroup label="行业">
-                  <input type="text" value={form.roleIndustry} onChange={(e) => updateForm({ roleIndustry: e.target.value })} className="input-field" />
-                </FieldGroup>
-                <FieldGroup label="性格标签（可多选）">
-                  <div className="flex flex-wrap gap-1.5">
-                    {PERSONALITY_TAGS.map((tag) => (
-                      <button
-                        key={tag}
-                        onClick={() => togglePersonality(tag)}
-                        className={`px-2.5 py-1 rounded-lg text-xs border transition-all ${
-                          form.personalities.includes(tag)
-                            ? 'bg-coral/15 border-coral/30 text-coral font-medium'
-                            : 'border-white/5 bg-dark-panel text-text-secondary hover:border-coral/20'
-                        }`}
-                      >
-                        {tag}
-                      </button>
-                    ))}
-                  </div>
-                </FieldGroup>
-                <FieldGroup label="决策风格">
-                  <select
-                    value={form.decisionStyle}
-                    onChange={(e) => updateForm({ decisionStyle: e.target.value })}
-                    className="input-field"
+          <div className="editor">
+            {/* 左侧锚点导航（仅 PC） */}
+            <aside className="ednav">
+              <div className="card inner-card">
+                {STEPS.map((step, idx) => (
+                  <a
+                    key={step.key}
+                    href={`#bsec-${step.key}`}
+                    className={activeStep === step.key ? 'active' : ''}
+                    onClick={() => scrollToStep(step.key)}
                   >
+                    <span className="no">{idx + 1}</span>
+                    {step.label}
+                  </a>
+                ))}
+                <div className="ver">{editingScenarioId ? '保存将更新该场景' : '保存后出现在「我的场景」'}</div>
+              </div>
+            </aside>
+
+            {/* 右侧表单 */}
+            <div>
+              {/* ① 场景基础 */}
+              <div className="card formsec" id="bsec-base">
+                <div className="fs-head"><h3>① 场景基础</h3><span className="sub">这个场景是做什么的</span></div>
+                <div className="field">
+                  <label>场景标题</label>
+                  <input type="text" value={form.name} onChange={(e) => updateForm({ name: e.target.value })} className="input" placeholder="如：首次电话邀约" maxLength={30} />
+                </div>
+                <div className="field">
+                  <label>场景类别</label>
+                  <div className="pick">
+                    {CATEGORIES.map((cat) => (
+                      <span key={cat.key} onClick={() => updateForm({ category: cat.key })} className={`chip ${form.category === cat.key ? 'on' : ''}`}>
+                        {cat.icon} {cat.key}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div className="field">
+                  <label>场景描述</label>
+                  <textarea value={form.description} onChange={(e) => updateForm({ description: e.target.value })} className="input" rows={3} placeholder="描述场景背景和特点..." maxLength={200} />
+                </div>
+                <div className="row2">
+                  <div className="field">
+                    <label>难度</label>
+                    <select value={form.difficulty} onChange={(e) => updateForm({ difficulty: Number(e.target.value) })} className="input">
+                      <option value={1}>初级</option>
+                      <option value={2}>进阶</option>
+                      <option value={3}>挑战</option>
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>预计时长</label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <input type="number" min={1} max={60} value={form.duration} onChange={(e) => updateForm({ duration: Number(e.target.value) })} className="input" />
+                      <span style={{ fontSize: '14px', color: '#6B7280', flexShrink: 0 }}>分钟</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* ② 练习目标 */}
+              <div className="card formsec" id="bsec-goal">
+                <div className="fs-head"><h3>② 练习目标</h3><span className="sub">练完要达成什么</span></div>
+                <div className="field">
+                  <label>我方目标</label>
+                  <textarea value={form.goal} onChange={(e) => updateForm({ goal: e.target.value })} className="input" rows={2} />
+                  <div className="hint">AI 会围绕这个目标给角色施压，评估也以此为准绳。</div>
+                </div>
+                <div className="field">
+                  <label>成功标准</label>
+                  <input type="text" value={form.successCriteria} onChange={(e) => updateForm({ successCriteria: e.target.value })} className="input" />
+                  <div className="hint">填写达标分数（0-100），保存为场景的及格线，非数字时按 60 处理。</div>
+                </div>
+                <div className="field">
+                  <label>禁止事项</label>
+                  <input type="text" value={form.doNot} onChange={(e) => updateForm({ doNot: e.target.value })} className="input" />
+                </div>
+              </div>
+
+              {/* ③ 角色画像 */}
+              <div className="card formsec" id="bsec-role">
+                <div className="fs-head"><h3>③ 角色画像</h3><span className="sub">你在和谁对话</span></div>
+                <div className="row3">
+                  <div className="field"><label>姓名</label><input type="text" value={form.roleName} onChange={(e) => updateForm({ roleName: e.target.value })} className="input" /></div>
+                  <div className="field"><label>职位</label><input type="text" value={form.roleTitle} onChange={(e) => updateForm({ roleTitle: e.target.value })} className="input" /></div>
+                  <div className="field"><label>行业</label><input type="text" value={form.roleIndustry} onChange={(e) => updateForm({ roleIndustry: e.target.value })} className="input" /></div>
+                </div>
+                <div className="field">
+                  <label>性格标签（可多选）</label>
+                  <div className="pick">
+                    {PERSONALITY_TAGS.map((tag) => (
+                      <span key={tag} onClick={() => togglePersonality(tag)} className={`chip ${form.personalities.includes(tag) ? 'on-soft' : ''}`}>
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div className="field">
+                  <label>决策风格</label>
+                  <select value={form.decisionStyle} onChange={(e) => updateForm({ decisionStyle: e.target.value })} className="input">
                     {DECISION_STYLES.map((s) => <option key={s}>{s}</option>)}
                   </select>
-                </FieldGroup>
-                <FieldGroup label="典型异议">
-                  <textarea
-                    value={form.objections}
-                    onChange={(e) => updateForm({ objections: e.target.value })}
-                    className="input-field resize-none"
-                    rows={2}
-                    placeholder="角色会在对话中自然抛出这些异议"
-                  />
-                </FieldGroup>
-                <FieldGroup label="隐藏信息" hint="除非被追问，角色不会主动说出">
-                  <input
-                    type="text"
-                    value={form.hiddenInfo}
-                    onChange={(e) => updateForm({ hiddenInfo: e.target.value })}
-                    className="input-field"
-                  />
-                </FieldGroup>
-              </>
-            )}
+                </div>
+                <div className="field">
+                  <label>典型异议</label>
+                  <textarea value={form.objections} onChange={(e) => updateForm({ objections: e.target.value })} className="input" rows={2} />
+                  <div className="hint">角色会在对话中自然抛出这些异议，一行一个或用分号分隔。</div>
+                </div>
+                <div className="field">
+                  <label>禁止透露内容</label>
+                  <input type="text" value={form.hiddenInfo} onChange={(e) => updateForm({ hiddenInfo: e.target.value })} className="input" />
+                  <div className="hint">角色不会主动说出的信息，除非被你追问出来。</div>
+                </div>
+              </div>
 
-            {/* 对话参数 */}
-            {activeStep === 'params' && (
-              <>
-                <FieldGroup label="角色语速">
-                  <input
-                    type="range"
-                    min={1}
-                    max={5}
-                    value={form.speechRate}
-                    onChange={(e) => updateForm({ speechRate: Number(e.target.value) })}
-                    className="w-full accent-coral"
-                  />
-                  <div className="flex justify-between text-[11px] text-text-tertiary mt-1">
-                    <span>慢</span><span>标准</span><span>快</span>
-                  </div>
-                </FieldGroup>
-                <FieldGroup label="音色">
-                  <select value={form.voice} onChange={(e) => updateForm({ voice: e.target.value })} className="input-field">
-                    <option>成熟男声</option>
-                    <option>温柔女声</option>
-                    <option>活力男声</option>
-                    <option>沉稳女声</option>
+              {/* ④ 对话参数 */}
+              <div className="card formsec" id="bsec-params">
+                <div className="fs-head"><h3>④ 对话参数</h3><span className="sub">角色说话的脾气</span></div>
+                <div className="field">
+                  <label>语速</label>
+                  <input type="range" min={1} max={3} step={1} value={form.speechRate} onChange={(e) => updateForm({ speechRate: Number(e.target.value) })} />
+                  <div className="range-vals"><span>慢</span><span>标准</span><span>快</span></div>
+                  <div className="hint">标准 ≈ 150 WPM</div>
+                </div>
+                <div className="field">
+                  <label>挑战强度</label>
+                  <input type="range" min={1} max={5} step={1} value={form.challenge} onChange={(e) => updateForm({ challenge: Number(e.target.value) })} />
+                  <div className="range-vals"><span>温和</span><span>有来有回</span><span>步步紧逼</span></div>
+                  <div className="hint">强度越高，角色追问越狠、让步越少。</div>
+                </div>
+                <div className="field">
+                  <label>打断频率</label>
+                  <select value={form.interruptLevel} onChange={(e) => updateForm({ interruptLevel: e.target.value as BuildForm['interruptLevel'] })} className="input">
+                    {INTERRUPT_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
                   </select>
-                </FieldGroup>
-                <FieldGroup label="谁先开场">
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => updateForm({ opener: 'ai' })}
-                      className={`flex-1 py-2.5 rounded-xl text-xs font-medium border transition-all ${
-                        form.opener === 'ai' ? 'bg-coral border-coral text-white' : 'border-white/5 bg-dark-panel text-text-secondary'
-                      }`}
-                    >
-                      AI 先说话
-                    </button>
-                    <button
-                      onClick={() => updateForm({ opener: 'user' })}
-                      className={`flex-1 py-2.5 rounded-xl text-xs font-medium border transition-all ${
-                        form.opener === 'user' ? 'bg-coral border-coral text-white' : 'border-white/5 bg-dark-panel text-text-secondary'
-                      }`}
-                    >
-                      用户先说话
-                    </button>
-                  </div>
-                </FieldGroup>
-              </>
-            )}
+                </div>
+              </div>
 
-            {/* 评估配置 */}
-            {activeStep === 'eval' && (
-              <FieldGroup label={`维度权重（总和 ${totalWeight}%）`} hint="建议总计 100%">
-                <div className="grid grid-cols-2 gap-2">
+              {/* ⑤ 评估配置 */}
+              <div className="card formsec" id="bsec-eval">
+                <div className="fs-head"><h3>⑤ 评估配置</h3><span className="sub">考核技能点与六维权重</span></div>
+                <div className="field">
+                  <label>考核技能点（可多选）</label>
+                  <div className="pick">
+                    {skillPoints.map((sp) => (
+                      <span key={sp.id} onClick={() => toggleSkillPoint(sp.id)} className={`chip ${form.skillPointIds.includes(sp.id) ? 'on-soft' : ''}`}>
+                        {sp.name}
+                      </span>
+                    ))}
+                  </div>
+                  {skillPoints.length === 0 && <div className="hint">暂无可用技能点</div>}
+                </div>
+                <div className="weights">
                   {DIMENSIONS.map((dim) => (
-                    <div key={dim.key} className="bg-dark-panel rounded-xl p-3 border border-white/5">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs text-text-primary font-medium">{dim.name}</span>
-                        <input
-                          type="number"
-                          min={0}
-                          max={100}
-                          value={form.dimensionWeights[dim.key] || 0}
-                          onChange={(e) => updateForm({
-                            dimensionWeights: { ...form.dimensionWeights, [dim.key]: Number(e.target.value) }
-                          })}
-                          className="w-12 px-1.5 py-1 text-center text-xs font-bold border border-white/8 rounded-lg bg-dark-card text-text-primary focus:border-coral focus:outline-none"
-                        />
+                    <div key={dim.key} className="witem">
+                      <div className="wl">
+                        <span>{dim.name}</span>
+                        <input type="number" min={0} max={100} value={form.dimensionWeights[dim.key] ?? dim.defaultWeight}
+                          onChange={(e) => updateForm({ dimensionWeights: { ...form.dimensionWeights, [dim.key]: Number(e.target.value) } })} />
                       </div>
-                      <p className="text-[10px] text-text-tertiary">{dim.desc}</p>
+                      <div className="wd">{dim.desc}</div>
                     </div>
                   ))}
                 </div>
-                {totalWeight !== 100 && (
-                  <p className="text-[11px] text-warning mt-2">⚠ 当前总和 {totalWeight}%，建议调整为 100%</p>
-                )}
-              </FieldGroup>
-            )}
+                <div className="hint" style={{ marginTop: 12 }}>
+                  权重合计需 = 100%（当前 {totalWeight}%{totalWeight === 100 ? ' ✅' : '，请调整'}）
+                </div>
+              </div>
 
-            {/* 底部操作条 */}
-            <div className="pt-3 border-t border-white/5 flex items-center justify-between sticky bottom-0 bg-dark-card">
-              <button
-                onClick={handleReset}
-                className="px-3 py-1.5 bg-dark-panel text-text-secondary rounded-full text-xs hover:bg-dark-elevated transition-colors"
-              >
-                重置
-              </button>
-              <div className="flex gap-2">
-                <button className="px-3 py-1.5 bg-dark-panel text-text-secondary rounded-full text-xs hover:bg-dark-elevated transition-colors">
-                  保存草稿
+              {/* 底部操作条 */}
+              <div className="card editor-actions">
+                <button className="btn btn-ghost" onClick={handleTrialToggle}>
+                  🎧 {trial.open ? '收起试聊' : '试聊三轮预览'}
                 </button>
                 <button
-                  onClick={() => navigate('/practice/new')}
-                  className="px-4 py-1.5 bg-coral text-white rounded-full text-xs font-medium hover:bg-coral-hover transition-colors"
+                  className="btn btn-primary"
+                  disabled={!isAdmin || saving}
+                  title={!isAdmin ? adminTip : undefined}
+                  onClick={handleSave}
                 >
-                  发布并试练
+                  {saving ? '保存中…' : '保存为新版本'}
                 </button>
+                <span className="note">
+                  {isAdmin
+                    ? editingScenarioId ? '保存将更新该场景' : '保存后出现在「我的场景」'
+                    : `${adminTip}（试聊可用）`}
+                </span>
               </div>
+
+              {/* 试聊三轮预览 */}
+              {trial.open && (
+                <div className="card formsec">
+                  <div className="fs-head"><h3>🎧 试聊预览</h3><span className="sub">第 {Math.min(trialRounds + (trialFinished ? 0 : 1), 3)} / 3 轮</span></div>
+                  {trial.messages.length === 0 && (
+                    <div className="hint" style={{ marginBottom: 8 }}>以销售身份发第一句话，角色会以客户口吻回应。</div>
+                  )}
+                  {trial.messages.map((m, idx) => (
+                    <div key={idx} className={`msg ${m.role === 'user' ? 'msg-me' : ''}`}>
+                      <div className="bubble">{m.content}</div>
+                    </div>
+                  ))}
+                  {trial.sending && <div className="hint">角色思考中…</div>}
+                  {trialFinished ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
+                      <span className="chip green">三轮预览已结束</span>
+                      <button className="btn btn-ghost" onClick={resetTrial}>重新开始</button>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                      <input
+                        type="text"
+                        className="input"
+                        style={{ flex: 1 }}
+                        placeholder="输入你的话术…"
+                        value={trial.input}
+                        disabled={trial.sending}
+                        onChange={(e) => setTrial((prev) => ({ ...prev, input: e.target.value }))}
+                        onKeyDown={(e) => { if (e.key === 'Enter') handleTrialSend(); }}
+                      />
+                      <button className="btn btn-primary" disabled={trial.sending || !trial.input.trim()} onClick={handleTrialSend}>
+                        发送
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
-        </div>
+        </section>
       )}
-
-      {/* Input 统一样式 */}
-      <style>{`
-        .input-field {
-          width: 100%;
-          padding: 8px 12px;
-          background: #22252D;
-          border: 1px solid rgba(255,255,255,0.06);
-          border-radius: 10px;
-          color: #F7F7FA;
-          font-size: 13px;
-          outline: none;
-          transition: border-color 0.15s;
-        }
-        .input-field:focus { border-color: rgba(232,92,98,0.4); }
-        .input-field::placeholder { color: #6B7080; }
-        select.input-field { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236B7080' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; padding-right: 30px; }
-        textarea.input-field { min-height: 60px; }
-      `}</style>
-    </div>
-  );
-}
-
-// ===== 子组件 =====
-
-function FieldGroup({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <label className="block text-xs text-text-secondary font-medium mb-1.5">{label}</label>
-      {children}
-      {hint && <p className="text-[11px] text-text-tertiary mt-1">{hint}</p>}
-    </div>
-  );
-}
-
-const CATEGORY_COLORS: Record<string, string> = {
-  '电话销售': 'bg-coral/15 text-coral',
-  '客户主动咨询': 'bg-cat-ground/15 text-cat-ground',
-  '成交谈判': 'bg-cat-deal/15 text-cat-deal',
-  '地推破冰': 'bg-cat-inquiry/15 text-cat-inquiry',
-};
-
-function ScenarioCard({ scenario, onEdit, onPractice }: { scenario: MineScenario; onEdit: () => void; onPractice: () => void }) {
-  return (
-    <div className="bg-dark-card rounded-2xl p-4 border border-white/5">
-      {/* 顶部标签 */}
-      <div className="flex items-center justify-between mb-2.5">
-        <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${CATEGORY_COLORS[scenario.category] || 'bg-dark-panel text-text-secondary'}`}>
-          {scenario.categoryIcon} {scenario.category}
-        </span>
-        {scenario.isDerived && (
-          <span className="px-2 py-0.5 bg-dark-elevated text-text-tertiary rounded-full text-[11px]">
-            我的派生
-          </span>
-        )}
-      </div>
-
-      {/* 内容 */}
-      <h3 className="text-text-primary text-sm font-medium truncate">{scenario.name}</h3>
-      <p className="text-[11px] text-text-secondary mt-1 line-clamp-2">{scenario.desc}</p>
-
-      <div className="flex items-center gap-2 mt-2.5 flex-wrap">
-        <span className="px-2 py-0.5 bg-dark-panel text-text-tertiary rounded-md text-[11px]">
-          {scenario.diff} · {scenario.duration}
-        </span>
-        <span className="px-2 py-0.5 bg-dark-panel text-text-tertiary rounded-md text-[11px]">
-          {scenario.version} · {scenario.updatedAt}
-        </span>
-        <span className={`px-2 py-0.5 rounded-md text-[11px] ${
-          scenario.practiceCount > 0 ? 'bg-success/10 text-success' : 'bg-dark-panel text-text-tertiary'
-        }`}>
-          {scenario.practiceCount > 0 ? `已练 ${scenario.practiceCount} 次` : '未练习'}
-        </span>
-      </div>
-
-      {/* 操作按钮 */}
-      <div className="flex gap-1.5 mt-3 pt-3 border-t border-white/5">
-        <button onClick={onEdit} className="flex-1 py-1.5 bg-dark-panel text-text-secondary text-[11px] rounded-lg font-medium hover:bg-coral/10 hover:text-coral transition-colors">✏️ 编辑</button>
-        <button className="flex-1 py-1.5 bg-dark-panel text-text-secondary text-[11px] rounded-lg font-medium hover:bg-coral/10 hover:text-coral transition-colors">⧉ 复制</button>
-        <button className="flex-1 py-1.5 bg-dark-panel text-text-secondary text-[11px] rounded-lg font-medium hover:bg-coral/10 hover:text-coral transition-colors">🗑 删除</button>
-        <button onClick={onPractice} className="py-1.5 px-3 bg-coral/15 text-coral text-[11px] rounded-lg font-medium hover:bg-coral/25 transition-colors">▶ 试练</button>
-      </div>
     </div>
   );
 }

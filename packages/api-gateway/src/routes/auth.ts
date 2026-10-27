@@ -107,6 +107,16 @@ export async function authRoutes(app: FastifyInstance, ctx: RouteContext): Promi
 
     app.log.info(`[验证码] ${phone} => ${code}`);
 
+    // 开发回显模式：SMS_DEV_ECHO=1 时跳过真实短信发送，直接回显验证码（前端自动填充登录）
+    if (process.env.SMS_DEV_ECHO === '1') {
+      app.log.info(`[SMS] SMS_DEV_ECHO=1，跳过真实发送，回显验证码`);
+      return reply.code(200).send({
+        success: true,
+        message: '验证码已发送（开发模式）',
+        _devCode: code,
+      });
+    }
+
     // 调用腾讯云短信服务发送验证码
     const client = getSmsClient();
     if (client) {

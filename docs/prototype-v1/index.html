@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>首页 · Grasp 销售 AI 陪练</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+  /* 搜索 + 类别筛选 */
+  .searchrow{display:flex;gap:12px;align-items:center;margin:22px 0 14px}
+  .searchbox{flex:1;display:flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);
+    border-radius:999px;padding:10px 18px;max-width:520px;color:var(--text-3);transition:.2s}
+  .searchbox:focus-within{border-color:var(--coral);box-shadow:0 0 0 3px var(--coral-soft)}
+  .searchbox input{border:none;outline:none;flex:1;background:none}
+  .cats{display:flex;gap:10px;overflow-x:auto;padding:4px 0 12px;scrollbar-width:none}
+  .cats::-webkit-scrollbar{display:none}
+  .cats .chip{flex:none;padding:8px 16px;font-size:13.5px;cursor:pointer}
+  .cats .chip.all{background:var(--text);color:#fff}
+
+  /* 推荐横幅 */
+  .hero{display:flex;gap:22px;align-items:center;padding:24px 28px;margin:8px 0 26px;
+    background:linear-gradient(120deg,#FFF0EE 0%,#fff 60%)}
+  .hero .avatar{width:84px;height:84px;font-size:32px;box-shadow:0 8px 20px -6px rgba(31,35,41,.25);
+    border:2.5px solid #fff}
+  .hero h2{font-size:19px;margin-bottom:4px}
+  .hero p{color:var(--text-2);font-size:13.5px;max-width:560px}
+  .hero .cta{margin-left:auto;flex:none}
+
+  /* 瀑布流卡片 */
+  .masonry{column-count:4;column-gap:18px}
+  .scene-card{break-inside:avoid;margin-bottom:18px;cursor:pointer;
+    transition:transform .2s ease-out,box-shadow .2s ease-out;position:relative}
+  .scene-card:hover{transform:translateY(-4px);box-shadow:0 2px 4px rgba(16,24,40,.05),0 18px 40px -16px rgba(16,24,40,.18)}
+  .cover{position:relative;display:block}
+  /* 真图封面：照片通栏；底部浅色渐隐保证徽章可读 */
+  .cover::after{content:"";position:absolute;left:0;right:0;bottom:0;height:44px;
+    background:linear-gradient(transparent,rgba(31,35,41,.18))}
+  .cover.t1 .coverimg{height:190px}
+  .cover.t2 .coverimg{height:155px}
+  .cover.t3 .coverimg{height:215px}
+  .cover.t4 .coverimg{height:170px}
+  .cover .cat{position:absolute;top:10px;left:10px;z-index:1;background:rgba(255,255,255,.94);color:var(--text);
+    box-shadow:0 1px 4px rgba(16,24,40,.08)}
+  .cover .diff{position:absolute;bottom:10px;right:10px;z-index:1;font-size:11px;color:var(--text);background:rgba(255,255,255,.92);
+    padding:2px 9px;border-radius:999px}
+  .practiced{position:absolute;top:10px;right:10px;z-index:1;background:rgba(255,255,255,.94);color:var(--coral);font-size:11.5px;font-weight:700;
+    padding:4px 10px;border-radius:999px;box-shadow:0 1px 4px rgba(16,24,40,.08)}
+  .sbody{padding:12px 14px 14px}
+  .sbody h3{margin-bottom:4px;letter-spacing:-.01em}
+  .sbody .desc{font-size:12.5px;color:var(--text-2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .sbody .who{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12.5px;color:var(--text-2)}
+  .tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+  .tags span{font-size:11px;color:var(--text-2);background:#F3F4F6;padding:2px 8px;border-radius:6px}
+  .again{display:inline-block;margin-top:10px;font-size:12.5px;color:var(--coral);font-weight:600}
+  /* 章节标题：左侧珊瑚红竖条替代 emoji */
+  .sec-head h2.bar::before{content:"";width:4px;height:15px;border-radius:2px;background:var(--coral)}
+
+  @media (min-width:769px) and (max-width:1200px){ .masonry{column-count:3} }
+  @media (max-width:768px){
+    .masonry{column-count:2;column-gap:10px}
+    .scene-card{margin-bottom:10px}
+    .searchrow{margin:14px 0 8px}
+    .hero{flex-direction:row;gap:14px;padding:16px;margin:6px 0 18px}
+    .hero .avatar{width:60px;height:60px;font-size:24px}
+    .hero h2{font-size:15.5px}
+    .hero p{font-size:12px;-webkit-line-clamp:2;display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden}
+    .hero .cta{margin-left:0}
+    .hero .cta .btn{padding:8px 14px;font-size:13px}
+    .cover.t1 .coverimg{height:145px}
+    .cover.t2 .coverimg{height:120px}
+    .cover.t3 .coverimg{height:160px}
+    .cover.t4 .coverimg{height:132px}
+    .sbody{padding:10px 11px 12px}
+    .sbody h3{font-size:13.5px}
+    .sbody .who{font-size:11.5px}
+  }
+</style>
+</head>
+<body>
+
+<!-- PC 顶部菜单 -->
+<nav class="topnav">
+  <div class="inner">
+    <a class="logo" href="index.html"><span class="dot"></span>Grasp</a>
+    <div class="menu">
+      <a class="active" href="index.html">首页</a>
+      <a href="builder.html">构建</a>
+      <a href="dashboard.html">看板</a>
+      <a href="records.html">我的</a>
+    </div>
+    <div class="me">
+      <span class="chip gray"><i class="cdot" style="background:var(--coral)"></i>连续练习 6 天</span>
+      <div class="avatar av5" style="width:36px;height:36px;font-size:14px">我</div>
+    </div>
+  </div>
+</nav>
+
+<!-- 手机标题栏 -->
+<div class="mtopbar">Grasp<span class="right">连续 6 天</span></div>
+
+<main class="wrap">
+  <!-- 搜索与类别 -->
+  <div class="searchrow">
+    <div class="searchbox">🔍 <input placeholder="搜索场景、角色或行业，如「报价」「医美」"></div>
+    <button class="btn ghost sm" style="flex:none">筛选 ⌄</button>
+  </div>
+  <div class="cats">
+    <span class="chip all">全部</span>
+    <span class="chip gray"><i class="cdot" style="background:var(--coral)"></i>电话销售</span>
+    <span class="chip gray"><i class="cdot" style="background:var(--blue)"></i>客户主动咨询</span>
+    <span class="chip gray"><i class="cdot" style="background:var(--amber)"></i>成交谈判</span>
+    <span class="chip gray"><i class="cdot" style="background:var(--green)"></i>地推破冰</span>
+    <span class="chip gray">仅看已练习</span>
+  </div>
+
+  <!-- 为你推荐 -->
+  <section class="card hero">
+    <div class="avatar"><img src="assets/avatars/man-3.jpg" alt="王建国"></div>
+    <div>
+      <div class="chip coral" style="margin-bottom:6px">为你推荐 · 针对弱项「异议处理」</div>
+      <h2>客户嫌贵？向谨慎的采购总监报价</h2>
+      <p>对方以"预算有限、竞品更便宜"连续施压。练习目标：不降价的前提下重构价值表达，争取二次面谈。</p>
+    </div>
+    <div class="cta"><a class="btn primary" href="practice.html">立即开练</a></div>
+  </section>
+
+  <!-- 场景卡片瀑布流 -->
+  <div class="sec-head"><h2 class="bar">热门场景</h2><span class="more">按你的行业智能排序</span></div>
+  <div class="masonry">
+
+    <div class="card scene-card">
+      <div class="cover t1">
+        <img class="coverimg" src="assets/avatars/man-3.jpg" alt="王建国">
+        <span class="chip cat"><i class="cdot" style="background:var(--coral)"></i>电话销售</span>
+        <span class="diff">进阶 · 约 8 分钟</span>
+      </div>
+      <div class="sbody">
+        <h3>向谨慎的采购总监报价</h3>
+        <p class="desc">王总对价格极度敏感，习惯用竞品压价，需要在 5 分钟内讲清差异化价值。</p>
+        <div class="who"><div class="avatar" style="width:20px;height:20px"><img src="assets/avatars/man-3.jpg" alt=""></div>王建国 · 制造业采购总监</div>
+        <div class="tags"><span>谨慎</span><span>重数据</span><span>爱压价</span></div>
+      </div>
+    </div>
+
+    <div class="card scene-card">
+      <div class="cover t2">
+        <img class="coverimg" src="assets/avatars/woman-1.jpg" alt="林晓雯">
+        <span class="chip cat"><i class="cdot" style="background:var(--blue)"></i>客户主动咨询</span>
+        <span class="practiced">已练习 · 82 分</span>
+        <span class="diff">初级 · 约 5 分钟</span>
+      </div>
+      <div class="sbody">
+        <h3>接住主动上门的咨询</h3>
+        <p class="desc">林女士来电询问课程报价，需求模糊。目标：3 个问题内确认真实需求与决策人。</p>
+        <div class="who"><div class="avatar" style="width:20px;height:20px"><img src="assets/avatars/woman-1.jpg" alt=""></div>林晓雯 · 培训机构负责人</div>
+        <div class="tags"><span>爽快</span><span>需求模糊</span></div>
+        <a class="again" href="practice.html">再练一次 →</a>
+      </div>
+    </div>
+
+    <div class="card scene-card">
+      <div class="cover t3">
+        <img class="coverimg" src="assets/avatars/man-2.jpg" alt="赵铭">
+        <span class="chip cat"><i class="cdot" style="background:var(--amber)"></i>成交谈判</span>
+        <span class="diff">挑战 · 约 12 分钟</span>
+      </div>
+      <div class="sbody">
+        <h3>临门一脚：合同条款博弈</h3>
+        <p class="desc">赵总认可产品，但要求账期延长 + 独家折扣，否则"再考虑考虑"。练习让步策略与截止时间管理。</p>
+        <div class="who"><div class="avatar" style="width:20px;height:20px"><img src="assets/avatars/man-2.jpg" alt=""></div>赵铭 · 连锁餐饮创始人</div>
+        <div class="tags"><span>精明</span><span>强势</span><span>善拖延</span></div>
+      </div>
+    </div>
+
+    <div class="card scene-card">
+      <div class="cover t4">
+        <img class="coverimg" src="assets/avatars/woman-2.jpg" alt="陈丽">
+        <span class="chip cat"><i class="cdot" style="background:var(--green)"></i>地推破冰</span>
+        <span class="diff">初级 · 约 4 分钟</span>
+      </div>
+      <div class="sbody">
+        <h3>商场里 30 秒破冰</h3>
+        <p class="desc">陈姐在赶时间，对推销天然戒备。练习开场白设计与第一句钩子，争取到加微信。</p>
+        <div class="who"><div class="avatar" style="width:20px;height:20px"><img src="assets/avatars/woman-2.jpg" alt=""></div>陈丽 · 商场路过顾客</div>
+        <div class="tags"><span>戒备</span><span>赶时间</span></div>
+      </div>
+    </div>
+
+    <div class="card scene-card">
+      <div class="cover t2">
+        <img class="coverimg" src="assets/avatars/man-1.jpg" alt="周立群">
+        <span class="chip cat"><i class="cdot" style="background:var(--blue)"></i>客户主动咨询</span>
+        <span class="diff">进阶 · 约 10 分钟</span>
+      </div>
+      <div class="sbody">
+        <h3>客户拿着竞品方案来比价</h3>
+        <p class="desc">周工已拿到竞品详细报价单，开门见山问"你们贵在哪"。练习不诋毁竞品的对比表达。</p>
+        <div class="who"><div class="avatar" style="width:20px;height:20px"><img src="assets/avatars/man-1.jpg" alt=""></div>周立群 · IT 技术主管</div>
+        <div class="tags"><span>理性</span><span>技术导向</span><span>已比价</span></div>
+      </div>
+    </div>
+
+    <div class="card scene-card">
+      <div class="cover t1">
+        <img class="coverimg" src="assets/avatars/woman-3.jpg" alt="吴敏">
+        <span class="chip cat"><i class="cdot" style="background:var(--coral)"></i>电话销售</span>
+        <span class="practiced">已练习 · 64 分</span>
+        <span class="diff">进阶 · 约 8 分钟</span>
+      </div>
+      <div class="sbody">
+        <h3>被前台拦截后的突围</h3>
+        <p class="desc">吴主管拒绝转接决策人。练习在不冒犯的前提下拿到关键人联系方式或约到回电时间。</p>
+        <div class="who"><div class="avatar" style="width:20px;height:20px"><img src="assets/avatars/woman-3.jpg" alt=""></div>吴敏 · 行政主管</div>
+        <div class="tags"><span>程式化</span><span>防火墙</span></div>
+        <a class="again" href="practice.html">再练一次 →</a>
+      </div>
+    </div>
+
+    <div class="card scene-card">
+      <div class="cover t4">
+        <img class="coverimg" src="assets/avatars/man-4.jpg" alt="孙鹏">
+        <span class="chip cat"><i class="cdot" style="background:var(--green)"></i>地推破冰</span>
+        <span class="diff">挑战 · 约 6 分钟</span>
+      </div>
+      <div class="sbody">
+        <h3>展会摊位前的驻足转化</h3>
+        <p class="desc">孙总路过展位扫了一眼就要走。用一句行业洞察让他停下来，并约到展后详谈。</p>
+        <div class="who"><div class="avatar" style="width:20px;height:20px"><img src="assets/avatars/man-4.jpg" alt=""></div>孙鹏 · 经销商老板</div>
+        <div class="tags"><span>见多识广</span><span>时间碎</span></div>
+      </div>
+    </div>
+
+    <div class="card scene-card">
+      <div class="cover t3">
+        <img class="coverimg" src="assets/avatars/woman-4.jpg" alt="郑海燕">
+        <span class="chip cat"><i class="cdot" style="background:var(--amber)"></i>成交谈判</span>
+        <span class="practiced">已练习 · 91 分</span>
+        <span class="diff">进阶 · 约 10 分钟</span>
+      </div>
+      <div class="sbody">
+        <h3>续约涨价 10% 怎么谈</h3>
+        <p class="desc">老客户郑经理对续约涨价抵触，拿去年服务小事故说事。练习先修复信任再谈价格。</p>
+        <div class="who"><div class="avatar" style="width:20px;height:20px"><img src="assets/avatars/woman-4.jpg" alt=""></div>郑海燕 · 客户成功对接人</div>
+        <div class="tags"><span>念旧情</span><span>会翻旧账</span></div>
+        <a class="again" href="practice.html">再练一次 →</a>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<!-- 手机底部 Tab -->
+<nav class="tabbar"><div class="row">
+  <a class="active" href="index.html"><span class="ic">🏠</span>首页</a>
+  <a href="builder.html"><span class="ic">🛠️</span>构建</a>
+  <a href="dashboard.html"><span class="ic">📊</span>看板</a>
+  <a href="records.html"><span class="ic">👤</span>我的</a>
+</div></nav>
+
+</body>
+</html>

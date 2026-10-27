@@ -47,6 +47,12 @@ export interface Session {
   videoFrames?: Array<{ url: string; atMs: number }>;
   /** 考题答题记录 */
   quizResults?: QuizResult[];
+  /** 暂停开始时间（ISO），非空即处于暂停中 */
+  pausedAt?: string;
+  /** 历史累计暂停时长（毫秒），恢复时累加 */
+  pausedMs?: number;
+  /** AI 教练开场白缓存（首次生成后复用） */
+  coachOpening?: string;
   startedAt: string;
   endedAt?: string;
 }

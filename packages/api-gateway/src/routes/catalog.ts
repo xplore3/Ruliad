@@ -60,7 +60,7 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     return null;
   }
 
-  // 场景列表（join 角色名与技能点名）
+  // 场景列表（join 角色名/职业与技能点名；methodology/source/practiceCount 随记录透传）
   app.get('/scenarios', async (request) => {
     const scenarios = await store.listScenarios(request.tenantId);
     const items = await Promise.all(
@@ -70,6 +70,8 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
         return {
           ...s,
           personaName: persona?.name ?? null,
+          // 前端展示用角色头衔：优先角色职业，缺省回落到场景自带的一句话设定
+          personaTitle: persona?.occupation ?? s.personaTitle ?? null,
           skillPointNames: skillPoints.filter((p) => p !== undefined).map((p) => p.name),
         };
       })
@@ -88,9 +90,11 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
       difficulty?: number;
       coverageTopics?: string[];
       productKBId?: string;
+      methodology?: string;
+      source?: string;
     };
   }>('/scenarios', { preHandler: requireRoles('admin') }, async (request, reply) => {
-    const { name, personaConfigId, skillPointIds, passScore, durationMinutes, difficulty, coverageTopics, productKBId } =
+    const { name, personaConfigId, skillPointIds, passScore, durationMinutes, difficulty, coverageTopics, productKBId, methodology, source } =
       request.body ?? {};
     if (!name || !personaConfigId || !Array.isArray(skillPointIds) || skillPointIds.length === 0) {
       return reply.code(400).send({ error: 'name / personaConfigId / skillPointIds 必填' });
@@ -117,10 +121,86 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
       durationMinutes,
       difficulty: difficulty ?? 1,
       coverageTopics,
+      methodology,
+      source,
     };
     await store.saveScenario(scenario);
     return reply.code(201).send(scenario);
   });
+
+  // 更新场景（部分字段更新，仅传需要改的字段；admin 专属）
+  app.put<{
+    Params: { id: string };
+    Body: {
+      name?: string;
+      personaConfigId?: string;
+      skillPointIds?: string[];
+      passScore?: number;
+      durationMinutes?: number;
+      difficulty?: number;
+      coverageTopics?: string[];
+      productKBId?: string | null;
+      methodology?: string;
+      source?: string;
+    };
+  }>('/scenarios/:id', { preHandler: requireRoles('admin') }, async (request, reply) => {
+    const existing = await store.getScenario(request.params.id);
+    if (!existing || existing.tenantId !== request.tenantId) {
+      return reply.code(404).send({ error: '场景不存在' });
+    }
+    const body = request.body ?? {};
+    const scenario: Scenario = { ...existing };
+    if (body.name !== undefined) scenario.name = body.name;
+    if (body.personaConfigId !== undefined) {
+      const persona = await store.getPersonaConfig(body.personaConfigId);
+      if (!persona) return reply.code(400).send({ error: 'personaConfigId 不存在' });
+      scenario.personaConfigId = body.personaConfigId;
+    }
+    if (body.skillPointIds !== undefined) {
+      if (!Array.isArray(body.skillPointIds) || body.skillPointIds.length === 0) {
+        return reply.code(400).send({ error: 'skillPointIds 必须为非空数组' });
+      }
+      for (const spId of body.skillPointIds) {
+        if (!(await store.getSkillPoint(spId))) {
+          return reply.code(400).send({ error: `技能点不存在: ${spId}` });
+        }
+      }
+      scenario.skillPointIds = body.skillPointIds;
+    }
+    if (body.passScore !== undefined) {
+      if (typeof body.passScore !== 'number') {
+        return reply.code(400).send({ error: 'passScore 必须为数字' });
+      }
+      scenario.successCriteria = { ...existing.successCriteria, passScore: body.passScore };
+    }
+    if (body.durationMinutes !== undefined) {
+      if (typeof body.durationMinutes !== 'number') {
+        return reply.code(400).send({ error: 'durationMinutes 必须为数字' });
+      }
+      scenario.durationMinutes = body.durationMinutes;
+    }
+    if (body.difficulty !== undefined) scenario.difficulty = body.difficulty;
+    if (body.coverageTopics !== undefined) scenario.coverageTopics = body.coverageTopics;
+    if (body.productKBId !== undefined) scenario.productKBId = body.productKBId || undefined;
+    if (body.methodology !== undefined) scenario.methodology = body.methodology;
+    if (body.source !== undefined) scenario.source = body.source;
+    await store.saveScenario(scenario);
+    return scenario;
+  });
+
+  // 删除场景（admin 专属）
+  app.delete<{ Params: { id: string } }>(
+    '/scenarios/:id',
+    { preHandler: requireRoles('admin') },
+    async (request, reply) => {
+      const existing = await store.getScenario(request.params.id);
+      if (!existing || existing.tenantId !== request.tenantId) {
+        return reply.code(404).send({ error: '场景不存在' });
+      }
+      await store.deleteScenario(request.params.id);
+      return { ok: true };
+    }
+  );
 
   app.get('/persona-configs', async (request) => ({
     personaConfigs: await store.listPersonaConfigs(request.tenantId),

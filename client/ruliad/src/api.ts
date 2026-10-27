@@ -2,10 +2,14 @@ import axios from 'axios';
 import type {
   User,
   Scenario,
-  Session,
+  PersonaConfig,
   RoleCard,
   GrowthData,
   TaskView,
+  ReviewData,
+  TurnResult,
+  SessionCreated,
+  Session,
 } from './types';
 
 const TOKEN_KEY = 'grasp-token';
@@ -26,8 +30,7 @@ export function getToken(): string | null {
 }
 
 export function isTokenValid(): boolean {
-  // Demo 模式：始终返回 true
-  return true;
+  return !!getToken();
 }
 
 export function setToken(token: string) {
@@ -40,69 +43,20 @@ export function clearToken() {
 }
 
 export function getStoredUser(): StoredUser | null {
-  // Demo 模式：返回模拟用户
-  return {
-    id: 'demo-user-001',
-    username: 'demo',
-    name: '演示用户',
-    role: 'admin',
-    tenantId: 'demo-tenant',
-  };
+  const raw = localStorage.getItem(USER_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as StoredUser;
+  } catch {
+    return null;
+  }
 }
 
 export function setStoredUser(user: StoredUser) {
   localStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
-// ====== Mock Data（演示数据） ======
-
-const MOCK_ROLE_CARDS: RoleCard[] = [
-  { id: 'rc-001', scenarioId: 'sc-001', name: '王总', title: '电话销售 · 首次电话邀约', tags: ['B2B', '制造业'], target: '破冰开场，获取面谈机会', source: '官方', difficulty: '入门', industry: '制造业', role: '采购总监', avatar: '' },
-  { id: 'rc-002', scenarioId: 'sc-002', name: '李经理', title: '客户主动咨询 · 产品咨询应答', tags: ['SaaS', '科技'], target: '准确传递产品价值，挖掘需求', source: '官方', difficulty: '进阶', industry: '科技', role: 'IT 经理', avatar: '' },
-  { id: 'rc-003', scenarioId: 'sc-003', name: '张主任', title: '成交谈判 · 价格异议化解', tags: ['金融', '保险'], target: '守住价格底线，促成签约', source: '官方', difficulty: '高压', industry: '金融', role: '财务总监', avatar: '' },
-  { id: 'rc-004', scenarioId: 'sc-004', name: '刘姐', title: '地推破冰 · 社区推广开场', tags: ['消费', '零售'], target: '30秒内打开话匣子', source: '官方', difficulty: '入门', industry: '零售', role: '消费者', avatar: '' },
-  { id: 'rc-005', scenarioId: 'sc-005', name: '陈工', title: '电话销售 · 二次跟进促成', tags: ['工业', '设备'], target: '推动决策者拍板', source: '社区', difficulty: '进阶', industry: '工业', role: '技术主管', avatar: '' },
-  { id: 'rc-006', scenarioId: 'sc-006', name: '赵总', title: '成交谈判 · 合同条款协商', tags: ['医疗', '器械'], target: '双赢签约', source: '官方', difficulty: '高压', industry: '医疗', role: '采购副总', avatar: '' },
-  { id: 'rc-007', scenarioId: 'sc-007', name: '孙女士', title: '客户主动咨询 · 售后投诉处理', tags: ['电商', '消费'], target: '化解不满，挽留客户', source: '官方', difficulty: '进阶', industry: '电商', role: '客户', avatar: '' },
-  { id: 'rc-008', scenarioId: 'sc-008', name: '周校长', title: '地推破冰 · 校园推广', tags: ['教育', 'B2B'], target: '建立信任，约定演示', source: '社区', difficulty: '入门', industry: '教育', role: '校长', avatar: '' },
-];
-
-const MOCK_TASKS: TaskView[] = [
-  { scenarioId: 'sc-001', scenarioName: '首次电话邀约', durationMinutes: 8, difficulty: 1, status: 'passed', bestScore: 85, lastScore: 85, needsRetry: false, isReview: false, personaName: '王总', order: 1, requiredPassScore: 70, personaTitle: '采购总监', methodology: 'SPIN', practiceCount: 3 },
-  { scenarioId: 'sc-002', scenarioName: '产品咨询应答', durationMinutes: 12, difficulty: 2, status: 'in_progress', bestScore: 0, lastScore: 0, needsRetry: false, isReview: false, personaName: '李经理', order: 2, requiredPassScore: 75, personaTitle: 'IT 经理', methodology: 'FAB', practiceCount: 0 },
-  { scenarioId: 'sc-003', scenarioName: '价格异议化解', durationMinutes: 15, difficulty: 3, status: 'failed_pending_retry', bestScore: 58, lastScore: 58, needsRetry: true, isReview: false, personaName: '张主任', order: 3, requiredPassScore: 70, personaTitle: '财务总监', methodology: 'NEAT', practiceCount: 1 },
-  { scenarioId: 'sc-005', scenarioName: '二次跟进促成', durationMinutes: 10, difficulty: 2, status: 'available', bestScore: 0, lastScore: 0, needsRetry: false, isReview: true, reviewDueAt: '2026-10-27T10:00:00Z', reviewLabel: 'D7', personaName: '陈工', order: 5, requiredPassScore: 70, personaTitle: '技术主管', methodology: 'SPIN', practiceCount: 0 },
-];
-
-const MOCK_SCENARIOS: Scenario[] = [
-  { id: 'sc-001', tenantId: 'demo', name: '首次电话邀约', personaConfigId: 'p-001', successCriteria: { passScore: 70 }, durationMinutes: 8, difficulty: 2, coverageTopics: ['开场白', '需求确认'], personaName: '王总', personaTitle: '采购总监', skillPointNames: ['沟通表达', '需求洞察'], methodology: 'SPIN', source: '官方', practiceCount: 3 },
-  { id: 'sc-002', tenantId: 'demo', name: '产品咨询应答', personaConfigId: 'p-002', successCriteria: { passScore: 75 }, durationMinutes: 12, difficulty: 3, coverageTopics: ['产品介绍', '异议预判'], personaName: '李经理', personaTitle: 'IT 经理', skillPointNames: ['产品讲解', '需求洞察'], methodology: 'FAB', source: '官方', practiceCount: 0 },
-  { id: 'sc-003', tenantId: 'demo', name: '价格异议化解', personaConfigId: 'p-003', successCriteria: { passScore: 70 }, durationMinutes: 15, difficulty: 4, coverageTopics: ['价格谈判', '价值重塑'], personaName: '张主任', personaTitle: '财务总监', skillPointNames: ['异议处理', '成交推进'], methodology: 'NEAT', source: '官方', practiceCount: 1 },
-];
-
-const MOCK_GROWTH: GrowthData = {
-  skills: [
-    { skillPointId: 'sp-001', name: '沟通表达', currentLevel: 2, maxLevel: 3, history: [], historyCount: 8 },
-    { skillPointId: 'sp-002', name: '需求洞察', currentLevel: 1, maxLevel: 3, history: [], historyCount: 5 },
-    { skillPointId: 'sp-003', name: '产品讲解', currentLevel: 2, maxLevel: 3, history: [], historyCount: 6 },
-    { skillPointId: 'sp-004', name: '异议处理', currentLevel: 1, maxLevel: 3, history: [], historyCount: 3 },
-    { skillPointId: 'sp-005', name: '成交推进', currentLevel: 2, maxLevel: 3, history: [], historyCount: 4 },
-    { skillPointId: 'sp-006', name: '情绪管理', currentLevel: 3, maxLevel: 3, history: [], historyCount: 7 },
-  ],
-  sessions: [
-    { sessionId: 's-001', scenarioName: '首次电话邀约', mode: 'practice', totalScore: 85, passed: true, at: '2026-10-24T14:30:00Z', prevSessionId: undefined },
-    { sessionId: 's-002', scenarioName: '首次电话邀约', mode: 'practice', totalScore: 72, passed: true, at: '2026-10-23T10:00:00Z', prevSessionId: 's-001' },
-    { sessionId: 's-003', scenarioName: '产品咨询应答', mode: 'practice', totalScore: 68, passed: false, at: '2026-10-22T16:00:00Z', prevSessionId: undefined },
-    { sessionId: 's-004', scenarioName: '价格异议化解', mode: 'practice', totalScore: 58, passed: false, at: '2026-10-21T09:00:00Z', prevSessionId: undefined },
-    { sessionId: 's-005', scenarioName: '首次电话邀约', mode: 'exam', totalScore: 88, passed: true, at: '2026-10-20T15:00:00Z', prevSessionId: 's-002' },
-    { sessionId: 's-006', scenarioName: '二次跟进促成', mode: 'practice', totalScore: 75, passed: true, at: '2026-10-19T11:30:00Z', prevSessionId: undefined },
-    { sessionId: 's-007', scenarioName: '产品咨询应答', mode: 'practice', totalScore: 80, passed: true, at: '2026-10-18T14:00:00Z', prevSessionId: 's-003' },
-  ],
-  fillerTrend: [],
-  certs: [],
-};
-
-// ====== Axios 实例（保留真实 API 调用能力，失败时回退 mock） ======
+// ====== Axios 实例 ======
 
 const api = axios.create({
   baseURL: '/api/v1',
@@ -119,85 +73,239 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    if (error?.response?.status === 401) {
       clearToken();
-      if (location.pathname !== '/login') {
-        location.href = '/login';
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
       }
     }
     return Promise.reject(error);
   }
 );
 
-// ====== 认证 API ======
-
-export async function login(username: string, _password: string) {
-  return { token: 'demo-token', user: { id: 'demo', name: '演示用户', role: 'admin', username } } as { token: string; user: User };
+/** 从错误响应提取后端 error 文案 */
+export function apiError(err: unknown, fallback = '请求失败，请稍后重试'): string {
+  if (axios.isAxiosError(err)) {
+    const msg = (err.response?.data as { error?: string } | undefined)?.error;
+    if (msg) return msg;
+  }
+  return fallback;
 }
 
-export async function register(_username: string, _name: string, _password: string) {
-  return { token: 'demo-token', user: { id: 'demo', name: '演示用户', role: 'admin', username: 'demo' } } as { token: string; user: User };
+// ====== 认证 API ======
+
+export async function login(username: string, password: string) {
+  const { data } = await api.post('/auth/login', { username, password });
+  const res = data as { token: string; user: User };
+  setToken(res.token);
+  setStoredUser(res.user);
+  return res;
+}
+
+export async function register(username: string, name: string, password: string) {
+  const { data } = await api.post('/auth/register', { username, name, password });
+  const res = data as { token: string; user: User };
+  setToken(res.token);
+  setStoredUser(res.user);
+  return res;
+}
+
+/** 发送短信验证码；开发环境后端会回 _devCode */
+export async function sendSmsCode(phone: string) {
+  const { data } = await api.post('/auth/send-code', { phone });
+  return data as { success: boolean; message: string; _devCode?: string };
+}
+
+/** 验证码登录/注册一体 */
+export async function loginByCode(phone: string, code: string, name?: string) {
+  const { data } = await api.post('/auth/verify-code', { phone, code, name });
+  const res = data as { token: string; user: User; isNewUser: boolean };
+  setToken(res.token);
+  setStoredUser(res.user);
+  return res;
 }
 
 export async function fetchCurrentUser() {
-  return getStoredUser() as unknown as User;
+  const { data } = await api.get('/auth/me');
+  const user = data as User;
+  setStoredUser(user);
+  return user;
 }
 
-// ====== 场景 API（fallback mock） ======
+// ====== 目录 API ======
+
+export async function fetchScenarios() {
+  const { data } = await api.get('/scenarios');
+  return data as { scenarios: Scenario[] };
+}
 
 export async function fetchRoleCards() {
-  try {
-    const { data } = await api.get('/role-cards');
-    return data as { cards: RoleCard[] };
-  } catch {
-    return { cards: MOCK_ROLE_CARDS };
-  }
+  const { data } = await api.get('/role-cards');
+  return data as { cards: RoleCard[] };
 }
 
 export async function fetchTasks() {
-  try {
-    const { data } = await api.get('/tasks');
-    return data as { tasks: TaskView[] };
-  } catch {
-    return { tasks: MOCK_TASKS };
-  }
-}
-
-export async function fetchScenarios() {
-  try {
-    const { data } = await api.get('/scenarios');
-    return data as { scenarios: Scenario[] };
-  } catch {
-    return { scenarios: MOCK_SCENARIOS };
-  }
+  const { data } = await api.get('/tasks');
+  return data as { tasks: TaskView[] };
 }
 
 // ====== 会话 API ======
 
-export async function createSession(_scenarioId: string, _mode: 'practice' | 'exam' = 'practice') {
-  const session: Session = {
-    id: `s-${Date.now()}`,
-    tenantId: 'demo',
-    userId: 'demo-user',
-    scenarioId: _scenarioId,
-    mode: _mode,
-    status: 'active',
-    transcript: [],
-    hintsUsed: 0,
-    startedAt: new Date().toISOString(),
-  };
-  return { session, persona: { name: 'AI角色', background: '模拟客户角色' }, scenario: { name: '模拟场景', durationMinutes: 10 }, remainingSeconds: 600 };
+export async function createSession(scenarioId: string, mode: 'practice' | 'exam' = 'practice') {
+  const { data } = await api.post('/sessions', { scenarioId, mode });
+  return data as SessionCreated;
 }
 
-// ====== 成长 API（fallback mock） ======
+export async function fetchSession(sessionId: string) {
+  const { data } = await api.get(`/sessions/${sessionId}`);
+  return data as {
+    session: Session;
+    persona: SessionCreated['persona'] | null;
+    scenario: SessionCreated['scenario'] | null;
+    remainingSeconds: number | null;
+  };
+}
+
+export async function sendTurn(sessionId: string, text: string) {
+  const { data } = await api.post(`/sessions/${sessionId}/turns`, { text });
+  return data as TurnResult;
+}
+
+export async function requestHint(sessionId: string) {
+  const { data } = await api.post(`/sessions/${sessionId}/hint`);
+  return data as { hintTurn: import('./types').TranscriptTurn; hintsRemaining: number };
+}
+
+export async function endSession(sessionId: string) {
+  const { data } = await api.post(`/sessions/${sessionId}/end`);
+  return data as { sessionId: string; skippedReport?: boolean };
+}
+
+/** AI 教练开场白；voice=true 时附带教练与 persona 开场白的 TTS 音频（base64 wav） */
+export async function fetchOpening(sessionId: string, voice: boolean) {
+  const { data } = await api.post(`/sessions/${sessionId}/opening${voice ? '?voice=1' : ''}`);
+  return data as { coachText: string; coachAudio?: string; personaAudio?: string };
+}
+
+export async function pauseSession(sessionId: string) {
+  const { data } = await api.post(`/sessions/${sessionId}/pause`);
+  return data as { pausedAt: string; remainingSeconds: number | null };
+}
+
+export async function resumeSession(sessionId: string) {
+  const { data } = await api.post(`/sessions/${sessionId}/resume`);
+  return data as { remainingSeconds: number | null };
+}
+
+export async function fetchReview(sessionId: string) {
+  const { data } = await api.get(`/sessions/${sessionId}/review`);
+  return data as ReviewData;
+}
+
+export interface MySessionRecord {
+  sessionId: string;
+  scenarioId: string;
+  scenarioName: string | null;
+  mode: string;
+  status: string;
+  totalScore: number | null;
+  passed: boolean | null;
+  durationSec: number | null;
+  at: string;
+}
+
+export async function fetchMySessions() {
+  const { data } = await api.get('/my/sessions');
+  return data as { records: MySessionRecord[] };
+}
+
+// ====== 成长 API ======
 
 export async function fetchGrowth() {
-  try {
-    const { data } = await api.get('/growth');
-    return data as GrowthData;
-  } catch {
-    return MOCK_GROWTH;
-  }
+  const { data } = await api.get('/growth');
+  return data as GrowthData;
+}
+
+// ====== 场景构建 API（admin） ======
+
+export interface ScenarioPayload {
+  name: string;
+  personaConfigId: string;
+  skillPointIds: string[];
+  passScore: number;
+  durationMinutes: number;
+  difficulty?: number;
+  coverageTopics?: string[];
+  methodology?: string;
+  source?: string;
+}
+
+export async function createScenario(payload: ScenarioPayload) {
+  const { data } = await api.post('/scenarios', payload);
+  return data as { scenario: Scenario };
+}
+
+export async function updateScenario(id: string, payload: Partial<ScenarioPayload>) {
+  const { data } = await api.put(`/scenarios/${id}`, payload);
+  return data as { scenario: Scenario };
+}
+
+export async function deleteScenario(id: string) {
+  await api.delete(`/scenarios/${id}`);
+}
+
+export interface PersonaConfigPayload {
+  name: string;
+  background: string;
+  age?: number;
+  occupation?: string;
+  elementIds?: string[];
+  behaviorBands?: { key: string; instruction: string; minArousal: number; maxArousal: number }[];
+  voiceProfile?: Record<string, unknown>;
+}
+
+export async function createPersonaConfig(payload: PersonaConfigPayload) {
+  const { data } = await api.post('/persona-configs', payload);
+  return data as { persona: PersonaConfig };
+}
+
+export async function updatePersonaConfig(id: string, payload: Partial<PersonaConfigPayload>) {
+  const { data } = await api.put(`/persona-configs/${id}`, payload);
+  return data as { persona: PersonaConfig };
+}
+
+export async function fetchSkillPoints() {
+  const { data } = await api.get('/skill-points');
+  return data as { skillPoints: import('./types').SkillPoint[] };
+}
+
+/** 试聊：不落库的角色试聊 */
+export async function trialChat(personaConfigId: string, messages: { role: 'user' | 'assistant'; content: string }[]) {
+  const { data } = await api.post(`/persona-configs/${personaConfigId}/trial-chat`, { messages });
+  return data as { reply: string };
+}
+
+// ====== 用户偏好 ======
+
+export type Preferences = Record<string, unknown>;
+
+export async function fetchPreferences() {
+  const { data } = await api.get('/users/me/preferences');
+  return data as { preferences: Preferences };
+}
+
+export async function savePreferences(preferences: Preferences) {
+  const { data } = await api.put('/users/me/preferences', preferences);
+  return data as { preferences: Preferences };
+}
+
+// ====== 语音 WebSocket =======
+
+/** 语音 WS 地址（token 经 query 传递，浏览器 WS 无法带 header） */
+export function voiceWsUrl(sessionId: string, kind: 'voice' | 'voice-call' = 'voice'): string {
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const token = encodeURIComponent(getToken() ?? '');
+  return `${proto}//${window.location.host}/api/v1/sessions/${sessionId}/${kind}?token=${token}`;
 }
 
 export default api;

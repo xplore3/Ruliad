@@ -60,6 +60,12 @@ export interface Session {
   emotionTrace?: { seq: number; arousal: number; bandKey: string; at: string }[];
   hintsUsed: number;
   prevSessionId?: string;
+  /** 暂停开始时间（ISO），非空即处于暂停中 */
+  pausedAt?: string;
+  /** 历史累计暂停时长（毫秒） */
+  pausedMs?: number;
+  /** AI 教练开场白缓存 */
+  coachOpening?: string;
   startedAt: string;
   endedAt?: string;
   videoFrames?: string[];
@@ -87,35 +93,43 @@ export interface QuizResult {
 export interface ScoreReport {
   id: string;
   sessionId: string;
-  tenantId: string;
-  userId: string;
-  scenarioId: string;
+  tenantId?: string;
+  userId?: string;
+  scenarioId?: string;
   totalScore: number;
   passed: boolean;
-  skillScores: { skillPointId: string; score: number }[];
+  fatalViolation?: boolean;
+  skillScores: { skillPointId: string; skillPointName?: string; score: number; maxScore?: number }[];
   items: ScoreItem[];
+  violations?: { ruleId: string; kind: string; detail: string; fatal: boolean }[];
   ruleStats: {
     fillerCounts: Record<string, number>;
-    talkRatio: number;
-    avgSpeechRate: number;
-    pauseCount: number;
+    talkRatio?: number;
+    avgSpeechRate?: number;
+    pauseCount?: number;
+    interruptions?: number;
+    coverageHits?: string[];
+    coverageMisses?: string[];
   };
-  betterScripts: Record<string, string>;
-  summary: string;
+  betterScripts?: Record<string, string>;
+  summary?: string;
 }
 
 export interface ScoreItem {
-  id: string;
-  defId: string;
+  itemId: string;
+  itemName: string;
   skillPointId: string;
-  name: string;
-  score: number;
-  weight: number;
   levelKey: string;
+  levelLabel?: string;
+  score: number;
+  weight?: number;
   quote?: string;
   quoteTurnSeq?: number;
   rationale?: string;
   betterScript?: string;
+  confidence?: number;
+  isObservation?: boolean;
+  layer?: string;
 }
 
 export interface SkillPoint {
@@ -222,11 +236,23 @@ export interface ReviewData {
   prevScore: number | null;
 }
 
+export interface QuizQuestion {
+  id: string;
+  type: 'single_choice' | 'multi_choice' | 'true_false' | 'short_answer' | 'scenario_pick';
+  prompt: string;
+  options?: string[];
+  score: number;
+  required?: boolean;
+}
+
 export interface TurnResult {
   traineeTurn: TranscriptTurn;
   personaTurn: TranscriptTurn;
+  arousal?: number | null;
+  bandKey?: string | null;
   remainingSeconds: number;
-  timeUp: boolean;
+  timeUp?: boolean;
+  pendingQuizzes?: QuizQuestion[];
 }
 
 export interface SessionCreated {

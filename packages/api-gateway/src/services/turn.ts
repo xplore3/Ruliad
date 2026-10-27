@@ -12,7 +12,11 @@ const CONSISTENCY_CORRECTION = '（注意：上一次回复出戏或泄露了不
 const SYSTEM_GREETING_TOKEN = '__SYSTEM_GREETING__';
 
 export function remainingSeconds(session: Session, scenario: Scenario): number {
-  const elapsedMs = Date.now() - new Date(session.startedAt).getTime();
+  const nowMs = Date.now();
+  const pausedMs =
+    (session.pausedMs ?? 0) +
+    (session.pausedAt ? nowMs - new Date(session.pausedAt).getTime() : 0);
+  const elapsedMs = nowMs - new Date(session.startedAt).getTime() - pausedMs;
   return Math.max(0, Math.round(scenario.durationMinutes * 60 - elapsedMs / 1000));
 }
 
