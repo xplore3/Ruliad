@@ -323,6 +323,43 @@ export async function savePreferences(preferences: Preferences) {
   return data as { preferences: Preferences };
 }
 
+// ====== 新手指引（地推引流课） API ======
+
+export type GuidanceVoiceRole = 'persona' | 'coach' | 'sales' | 'narrator';
+
+export interface DemoLine {
+  role: 'sales' | 'customer' | 'narrator';
+  text: string;
+}
+
+/** 资格提问回答：raw PCM 上传，返回识别文本；q=2 时 experienced 给出结论 */
+export async function qualifyAnswer(sessionId: string, q: 1 | 2, audio: ArrayBuffer) {
+  const { data } = await api.post(`/sessions/${sessionId}/qualify-answer?q=${q}`, audio, {
+    headers: { 'Content-Type': 'audio/pcm' },
+  });
+  return data as { text: string; experienced: boolean | null };
+}
+
+/** 获取一版示范对话剧本 */
+export async function fetchDemo(sessionId: string, version: number) {
+  const { data } = await api.post(`/sessions/${sessionId}/demo`, { version });
+  return data as { lines: DemoLine[] };
+}
+
+/** 示范播完后的语音选择：raw PCM 上传，返回识别文本与选择 */
+export async function demoChoice(sessionId: string, audio: ArrayBuffer) {
+  const { data } = await api.post(`/sessions/${sessionId}/demo-choice`, audio, {
+    headers: { 'Content-Type': 'audio/pcm' },
+  });
+  return data as { text: string; choice: 'replay' | 'practice' };
+}
+
+/** 任意文本合成语音；voiceRole 选择音色（默认 persona） */
+export async function ttsClip(sessionId: string, text: string, voiceRole: GuidanceVoiceRole = 'persona') {
+  const { data } = await api.post(`/sessions/${sessionId}/tts`, { text, voiceRole });
+  return data as { audioBase64: string; audioFormat: string };
+}
+
 // ====== 语音 WebSocket =======
 
 /** 语音 WS 地址（token 经 query 传递，浏览器 WS 无法带 header） */

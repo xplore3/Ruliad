@@ -9,7 +9,7 @@ const CATEGORY_RULES = [
   { label: '电话销售', color: '#FF6B5B', keywords: ['电话', '外呼', '电销', '前台'] },
   { label: '客户主动咨询', color: '#4B7BEC', keywords: ['咨询', '来电', '上门', '询价', '比价'] },
   { label: '成交谈判', color: '#F5A623', keywords: ['谈判', '成交', '续约', '涨价', '条款', '价格', '签约'] },
-  { label: '地推破冰', color: '#2FAE7B', keywords: ['地推', '破冰', '陌生', '展会', '商场', '摊位', '驻足'] },
+  { label: '地推引流课', color: '#2FAE7B', keywords: ['地推', '破冰', '陌生', '展会', '商场', '摊位', '驻足'] },
 ] as const;
 
 const CATEGORIES = [

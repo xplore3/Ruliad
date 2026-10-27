@@ -318,7 +318,9 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
             avatar: personaConfig.avatar,
           }
         : null,
-      scenario: scenario ? { name: scenario.name, durationMinutes: scenario.durationMinutes } : null,
+      scenario: scenario
+        ? { name: scenario.name, durationMinutes: scenario.durationMinutes, coverageTopics: scenario.coverageTopics }
+        : null,
       remainingSeconds: scenario ? remainingSeconds(session, scenario) : null,
     };
   });

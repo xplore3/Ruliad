@@ -258,6 +258,6 @@ export interface TurnResult {
 export interface SessionCreated {
   session: Session;
   persona: { name: string; age?: number; occupation?: string; background: string; avatar?: string };
-  scenario: { name: string; durationMinutes: number };
+  scenario: { name: string; durationMinutes: number; coverageTopics?: string[] };
   remainingSeconds: number;
 }

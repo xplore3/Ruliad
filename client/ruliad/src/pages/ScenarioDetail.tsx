@@ -7,7 +7,7 @@ const CATEGORY_RULES = [
   { label: '电话销售', keywords: ['电话', '外呼', '电销', '前台'] },
   { label: '客户主动咨询', keywords: ['咨询', '来电', '上门', '询价', '比价'] },
   { label: '成交谈判', keywords: ['谈判', '成交', '续约', '涨价', '条款', '价格', '签约'] },
-  { label: '地推破冰', keywords: ['地推', '破冰', '陌生', '展会', '商场', '摊位', '驻足'] },
+  { label: '地推引流课', keywords: ['地推', '破冰', '陌生', '展会', '商场', '摊位', '驻足'] },
 ] as const;
 
 function categoryOf(s: Scenario): string | null {
