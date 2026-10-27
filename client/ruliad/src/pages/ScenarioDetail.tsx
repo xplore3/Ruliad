@@ -2,17 +2,10 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { fetchScenarios, createSession, apiError } from '../api';
 import type { Scenario } from '../types';
+import { categoryOf } from '../lib/categories';
 
-const CATEGORY_RULES = [
-  { label: '电话销售', keywords: ['电话', '外呼', '电销', '前台'] },
-  { label: '客户主动咨询', keywords: ['咨询', '来电', '上门', '询价', '比价'] },
-  { label: '成交谈判', keywords: ['谈判', '成交', '续约', '涨价', '条款', '价格', '签约'] },
-  { label: '地推引流课', keywords: ['地推', '破冰', '陌生', '展会', '商场', '摊位', '驻足'] },
-] as const;
-
-function categoryOf(s: Scenario): string | null {
-  const text = [s.name, ...(s.coverageTopics ?? [])].join(' ');
-  return CATEGORY_RULES.find((r) => r.keywords.some((k) => text.includes(k)))?.label ?? null;
+function categoryLabelOf(s: Scenario): string | null {
+  return categoryOf(s)?.label ?? null;
 }
 
 type StartTarget = 'call' | 'voice' | 'text';
@@ -113,7 +106,7 @@ export default function ScenarioDetail() {
       {/* 场景头部卡片 */}
       <div className="bg-dark-card rounded-2xl p-4 border border-white/5 mb-5">
         <div className="flex items-center gap-2 mb-3">
-          <span className="px-2 py-0.5 bg-coral/15 text-coral text-xs rounded-full font-medium">{categoryOf(scenario) ?? '综合场景'}</span>
+          <span className="px-2 py-0.5 bg-coral/15 text-coral text-xs rounded-full font-medium">{categoryLabelOf(scenario) ?? '综合场景'}</span>
           <span className="text-xs text-text-tertiary">时长 {scenario.durationMinutes} 分钟</span>
           <span className="ml-auto flex gap-0.5">
             {[1, 2, 3, 4, 5].map((i) => (

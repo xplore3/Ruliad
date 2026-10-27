@@ -4,9 +4,9 @@ import { login, loginByCode, sendSmsCode, savePreferences, apiError } from '../a
 
 const SCENES = [
   { em: '📞', title: '电话销售', desc: '主动外呼、绕过前台、开场破冰' },
-  { em: '💬', title: '客户主动咨询', desc: '接住上门线索，快速摸清需求' },
-  { em: '🤝', title: '成交谈判', desc: '价格博弈、条款拉扯、临门一脚' },
-  { em: '👋', title: '地推破冰', desc: '陌生场景下 30 秒打开话题' },
+  { em: '💬', title: '咨询接待', desc: '接住上门线索，快速摸清需求' },
+  { em: '🤝', title: '现场成交', desc: '价格博弈、条款拉扯、临门一脚' },
+  { em: '👋', title: '地推引流课', desc: '陌生场景下 30 秒打开话题' },
 ];
 
 export default function Login() {

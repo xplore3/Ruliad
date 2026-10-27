@@ -10,6 +10,10 @@ import type {
   TurnResult,
   SessionCreated,
   Session,
+  ExamWindow,
+  SceneType,
+  ScenarioScript,
+  ScenarioParticipant,
 } from './types';
 
 const TOKEN_KEY = 'grasp-token';
@@ -151,9 +155,14 @@ export async function fetchTasks() {
 
 // ====== 会话 API ======
 
-export async function createSession(scenarioId: string, mode: 'practice' | 'exam' = 'practice') {
-  const { data } = await api.post('/sessions', { scenarioId, mode });
+export async function createSession(scenarioId: string, mode: 'practice' | 'exam' = 'practice', examWindowId?: string) {
+  const { data } = await api.post('/sessions', { scenarioId, mode, ...(examWindowId ? { examWindowId } : {}) });
   return data as SessionCreated;
+}
+
+export async function fetchExamWindows() {
+  const { data } = await api.get('/exam-windows');
+  return data as { windows: ExamWindow[] };
 }
 
 export async function fetchSession(sessionId: string) {
@@ -238,6 +247,10 @@ export interface ScenarioPayload {
   coverageTopics?: string[];
   methodology?: string;
   source?: string;
+  hasScript?: boolean;
+  sceneType?: SceneType;
+  script?: ScenarioScript | null;
+  participants?: ScenarioParticipant[] | null;
 }
 
 export async function createScenario(payload: ScenarioPayload) {
