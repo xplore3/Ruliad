@@ -131,17 +131,17 @@ export default function Home() {
     }
   };
 
-  /** 实用场景 - 练习（对练模式按「设置 → 默认模式」偏好导航） */
-  const startPractice = async (scenarioId: string) => {
+  /** 实用场景 - 练习（按场景类别跳转：电话销售类进实时通话页，其余按「设置 → 默认模式」偏好进练习页） */
+  const startPractice = async (scene: Scenario) => {
     if (startingId) return;
-    setStartingId(scenarioId);
+    setStartingId(scene.id);
     setStartError('');
     try {
-      const data = await createSession(scenarioId, 'practice');
-      if (defaultMode === 'voice-call') {
+      const data = await createSession(scene.id, 'practice');
+      if (categoryOf(scene)?.label === '电话销售') {
         navigate(`/call?sessionId=${data.session.id}`);
       } else {
-        navigate(`/practice/${data.session.id}?mode=${defaultMode}`);
+        navigate(`/practice/${data.session.id}?mode=${defaultMode === 'text' ? 'text' : 'voice'}`);
       }
     } catch (err) {
       setStartError(apiError(err, '创建会话失败，请稍后重试'));
@@ -351,7 +351,7 @@ export default function Home() {
                         <button
                           className="btn btn-soft btn-sm"
                           disabled={startingId !== null}
-                          onClick={() => startPractice(scene.id)}
+                          onClick={() => startPractice(scene)}
                         >
                           {busy ? '创建会话中…' : '练习'}
                         </button>
