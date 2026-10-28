@@ -168,7 +168,15 @@ export default function Review() {
   ];
 
   const durationMin = session.endedAt
-    ? Math.max(1, Math.round((new Date(session.endedAt).getTime() - new Date(session.startedAt).getTime()) / 60000))
+    ? Math.max(
+        1,
+        Math.round(
+          (new Date(session.endedAt).getTime() -
+            new Date(session.liveStartedAt ?? session.startedAt).getTime() -
+            (session.pausedMs ?? 0)) /
+            60000
+        )
+      )
     : null;
   const weakest = report.items.length > 0
     ? [...report.items].sort((a, b) => a.score - b.score)[0]

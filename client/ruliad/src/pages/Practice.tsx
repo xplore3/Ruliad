@@ -8,6 +8,7 @@ import {
   pauseSession,
   resumeSession,
   fetchOpening,
+  markLiveStart,
   qualifyAnswer,
   fetchDemo,
   demoChoice,
@@ -401,6 +402,14 @@ export default function Practice() {
   const startLive = () => {
     stopGuidanceMedia();
     setPhaseBoth('live');
+    // 通知服务端从此刻起倒计时（开场/新手指引不消耗时长）；失败时回退为按会话创建时间计时
+    if (sessionId) {
+      markLiveStart(sessionId)
+        .then((res) => {
+          if (typeof res.remainingSeconds === 'number') setRemaining(Math.max(0, res.remainingSeconds));
+        })
+        .catch(() => { /* 不影响本地流程 */ });
+    }
     if (isVoice && personaAudioRef.current && playerRef.current) {
       introClipRef.current = 'persona';
       // 开场白音频已全量拿到（单段），播完即轮到用户
@@ -1253,6 +1262,13 @@ export default function Practice() {
                       <>
                         <div className="think5"><i /><i /><i /><i /><i /></div>
                         <div className="text-[13.5px] font-medium opacity-85">正在生成示范对话…</div>
+                        <button
+                          className="btn btn-sm"
+                          style={{ background: 'rgba(255,255,255,.14)', color: '#fff' }}
+                          onClick={startLive}
+                        >
+                          ⏭ 跳过示范，直接开始
+                        </button>
                       </>
                     )}
                     {demoStage === 'playing' && (
@@ -1286,6 +1302,13 @@ export default function Practice() {
                         {demoLines.length > 0 && (
                           <div className="text-[12px] font-medium opacity-60 tabular-nums">{demoIndex + 1} / {demoLines.length}</div>
                         )}
+                        <button
+                          className="btn btn-sm"
+                          style={{ background: 'rgba(255,255,255,.14)', color: '#fff' }}
+                          onClick={startLive}
+                        >
+                          ⏭ 跳过示范，直接开始
+                        </button>
                       </div>
                     )}
                     {demoStage === 'ask' && (

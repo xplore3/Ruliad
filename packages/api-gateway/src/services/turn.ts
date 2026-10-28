@@ -12,12 +12,17 @@ const CONSISTENCY_CORRECTION = '（注意：上一次回复出戏或泄露了不
 const SYSTEM_GREETING_TOKEN = '__SYSTEM_GREETING__';
 
 export function remainingSeconds(session: Session, scenario: Scenario): number {
+  // 倒计时从进入正式对练（live）起算；开场/新手指引阶段不消耗时长
+  if (!session.liveStartedAt) return scenario.durationMinutes * 60;
   const nowMs = Date.now();
   const pausedMs =
     (session.pausedMs ?? 0) +
     (session.pausedAt ? nowMs - new Date(session.pausedAt).getTime() : 0);
-  const elapsedMs = nowMs - new Date(session.startedAt).getTime() - pausedMs;
-  return Math.max(0, Math.round(scenario.durationMinutes * 60 - elapsedMs / 1000));
+  const elapsedMs = nowMs - new Date(session.liveStartedAt).getTime() - pausedMs;
+  return Math.min(
+    scenario.durationMinutes * 60,
+    Math.max(0, Math.round(scenario.durationMinutes * 60 - elapsedMs / 1000))
+  );
 }
 
 /** 加载 persona 运行时（编译后的 bundle + 原始配置），配置缺失返回 undefined */
@@ -80,7 +85,7 @@ return [];
 const allQuizzes = [...quizzes, ...genericQuizzes.filter((q) => !q.scenarioId)];
 const answeredIds = new Set((session.quizResults ?? []).map((r) => r.quizId));
 const pending: QuizQuestion[] = [];
-const elapsedSec = Math.round((Date.now() - new Date(session.startedAt).getTime()) / 1000);
+const elapsedSec = Math.round((Date.now() - new Date(session.liveStartedAt ?? session.startedAt).getTime()) / 1000);
 const traineeTurns = session.transcript.filter((t) => t.speaker === 'trainee');
 const traineeAll = traineeTurns.map((t) => t.text).join('\n') + '\n' + traineeText;
 const coverageHits = (scenario.coverageTopics ?? []).filter((topic) => traineeAll.includes(topic));
@@ -118,6 +123,12 @@ export async function runTurn(
   const { store, gateway } = ctx;
   const isSystemGreeting = text === SYSTEM_GREETING_TOKEN;
   const displayText = isSystemGreeting ? '（电话接通）' : text;
+
+  // 兜底：学员实际发言说明已进入对练，若倒计时尚未启动则此刻启动（兼容旧会话）
+  if (!session.liveStartedAt) {
+    session = { ...session, liveStartedAt: new Date().toISOString(), pausedMs: 0 };
+    await store.updateSession(session.id, { liveStartedAt: session.liveStartedAt, pausedMs: 0 });
+  }
 
   const now = new Date().toISOString();
   const traineeTurn: TranscriptTurn = {
@@ -240,7 +251,7 @@ traineeTurn,
 personaTurn,
 arousal: snapshot.arousal,
 bandKey: snapshot.bandKey,
-remainingSeconds: remainingSeconds({ ...session, startedAt: session.startedAt }, scenario),
+remainingSeconds: remainingSeconds(session, scenario),
 pendingQuizzes: pendingQuizzes.length > 0 ? pendingQuizzes.map(toPublicQuiz) : undefined,
 };
 }

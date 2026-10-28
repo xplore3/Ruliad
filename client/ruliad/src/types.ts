@@ -108,6 +108,8 @@ export interface Session {
   pausedMs?: number;
   /** AI 教练开场白缓存 */
   coachOpening?: string;
+  /** 进入正式对练（live）的时间（ISO），倒计时与用时以此为起点 */
+  liveStartedAt?: string;
   startedAt: string;
   endedAt?: string;
   videoFrames?: string[];

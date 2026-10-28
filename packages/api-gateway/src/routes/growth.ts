@@ -5,7 +5,7 @@ export async function growthRoutes(app: FastifyInstance, ctx: RouteContext): Pro
   const { store } = ctx;
 
   // 我的练习记录：当前用户全部会话（active/completed/abandoned），新→旧；
-  // totalScore/passed 取自评分报告（无报告为 null），durationSec 由 startedAt→endedAt 计算
+  // totalScore/passed 取自评分报告（无报告为 null），durationSec 由 liveStartedAt（无则 startedAt）→endedAt 计算
   app.get('/my/sessions', async (request) => {
     const userId = request.userId;
     const sessions = (await store.listSessions({ userId }))
@@ -24,7 +24,7 @@ export async function growthRoutes(app: FastifyInstance, ctx: RouteContext): Pro
           totalScore: report?.totalScore ?? null,
           passed: report?.passed ?? null,
           durationSec: s.endedAt
-            ? Math.round((new Date(s.endedAt).getTime() - new Date(s.startedAt).getTime()) / 1000)
+            ? Math.round((new Date(s.endedAt).getTime() - new Date(s.liveStartedAt ?? s.startedAt).getTime()) / 1000)
             : null,
           at: s.endedAt ?? s.startedAt,
         };

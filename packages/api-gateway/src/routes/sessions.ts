@@ -57,7 +57,7 @@ async function finalizeSession(session: Session, ctx: RouteContext, log?: Fastif
   // 检查是否有足够的对话内容生成报告
   const traineeTurns = session.transcript.filter((t) => t.speaker === 'trainee').length;
   const durationSec =
-    (new Date(endedAt).getTime() - new Date(session.startedAt).getTime()) / 1000;
+    (new Date(endedAt).getTime() - new Date(session.liveStartedAt ?? session.startedAt).getTime()) / 1000;
 
   if (traineeTurns < MIN_TRAINEE_TURNS || durationSec < MIN_DURATION_SECONDS) {
     log?.info(
@@ -575,6 +575,25 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
       (session.pausedMs ?? 0) + (Date.now() - new Date(session.pausedAt).getTime());
     const updated: Session = { ...session, pausedMs, pausedAt: undefined };
     await store.updateSession(session.id, { pausedMs, pausedAt: undefined });
+    const scenario = await store.getScenario(session.scenarioId);
+    return { remainingSeconds: scenario ? remainingSeconds(updated, scenario) : null };
+  });
+
+  // 进入正式对练（live）：从此时起倒计时开始；开场/新手指引阶段不消耗时长。幂等，重复调用不重置
+  app.post<{ Params: { id: string } }>('/sessions/:id/live-start', async (request, reply) => {
+    const session = await store.getSession(request.params.id);
+    if (!session || session.userId !== request.userId) {
+      return reply.code(404).send({ error: '会话不存在' });
+    }
+    if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
+
+    const updated: Session = session.liveStartedAt
+      ? session
+      : { ...session, liveStartedAt: new Date().toISOString(), pausedMs: 0 };
+    if (!session.liveStartedAt) {
+      // 开场/指引阶段的累计暂停时长不计入对练倒计时，一并清零
+      await store.updateSession(session.id, { liveStartedAt: updated.liveStartedAt, pausedMs: 0 });
+    }
     const scenario = await store.getScenario(session.scenarioId);
     return { remainingSeconds: scenario ? remainingSeconds(updated, scenario) : null };
   });

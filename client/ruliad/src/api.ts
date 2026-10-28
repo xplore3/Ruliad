@@ -216,6 +216,12 @@ export async function resumeSession(sessionId: string) {
   return data as { remainingSeconds: number | null };
 }
 
+/** 进入正式对练（live）：通知服务端从此刻开始倒计时（幂等）。失败不影响本地流程 */
+export async function markLiveStart(sessionId: string) {
+  const { data } = await api.post(`/sessions/${sessionId}/live-start`);
+  return data as { remainingSeconds: number | null };
+}
+
 export async function fetchReview(sessionId: string) {
   const { data } = await api.get(`/sessions/${sessionId}/review`);
   // 报告就绪即触发本地通知（受设置页「报告生成通知」开关控制）
