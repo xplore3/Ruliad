@@ -329,6 +329,11 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
       defaultDifficulty: body.defaultDifficulty ?? 1,
       scoringFocus: body.scoringFocus ?? [],
     } as ScenarioGuidance;
+    // 每场景只允许一条引导包（getScenarioGuidance 按 scenarioId 单条取值）
+    const existing = await store.getScenarioGuidance(guidance.scenarioId);
+    if (existing && existing.id !== guidance.id) {
+      return reply.code(409).send({ error: '该场景已配置引导包，请编辑现有记录', existingId: existing.id });
+    }
     await store.saveScenarioGuidance(guidance);
     return reply.code(201).send(guidance);
   });
