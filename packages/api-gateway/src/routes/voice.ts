@@ -134,11 +134,12 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
 
   /** TTS 说话角色：persona=按人设音色（默认，兼容现状）；coach/sales/narrator/child=指引模式固定音色 */
   type VoiceRole = 'persona' | 'coach' | 'sales' | 'narrator' | 'child';
-  // 指引模式各角色的固定音色（CosyVoice v2，与 persona 常用默认 longxiaochun_v2 区分开）；
-  // mock speech 忽略音色参数，aliyun 未知音色会报错——这里选的是 CosyVoice v2 官方音色（child 为儿童音色）
+  // 指引模式各角色的固定音色（与 persona 常用默认 longxiaochun_v2 区分开）；
+  // mock speech 忽略音色参数，aliyun 未知音色会报错——这里选的都是官方音色。
+  // sales 用 CosyVoice v3 音色 longanhuan（欢脱元气女，v3 模型表现力更强；provider 会按音色自动切到 cosyvoice-v3-flash）
   const ROLE_VOICES: Record<Exclude<VoiceRole, 'persona'>, string> = {
     coach: 'longshu_v2',
-    sales: 'longwan_v2',
+    sales: 'longanhuan',
     narrator: 'longhua_v2',
     child: 'longtong_v2',
   };

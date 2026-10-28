@@ -30,6 +30,13 @@ const DEFAULT_URL = 'wss://dashscope.aliyuncs.com/api-ws/v1/inference';
 const TASK_START_TIMEOUT_MS = 10_000;
 const TTS_TIMEOUT_MS = 30_000;
 
+/**
+ * 本账号实测可用的 CosyVoice v3 音色（v3 音色与 v2 不通用，v2 音色在 v3 上合成会报 418）。
+ * 用这些音色合成时自动切换到 cosyvoice-v3-flash 模型。
+ */
+const V3_VOICES = new Set(['longanyang', 'longanhuan']);
+const V3_MODEL = 'cosyvoice-v3-flash';
+
 /** 内部流回调：比公开接口多一个任务结束通知（批量 transcribe 用） */
 interface InternalASRHandlers extends ASRStreamHandlers {
   onFinished?(): void;
@@ -50,6 +57,11 @@ export class AliyunSpeechProvider implements ASRProvider, TTSProvider {
     return new WebSocket(this.config.url ?? DEFAULT_URL, {
       headers: { Authorization: `bearer ${this.config.apiKey}` },
     });
+  }
+
+  /** 按音色选模型：v3 音色用 cosyvoice-v3-flash，其余用配置的 ttsModel（默认 cosyvoice-v2） */
+  private resolveModel(voice?: string): string {
+    return V3_VOICES.has(voice ?? this.config.ttsVoice) ? V3_MODEL : this.config.ttsModel;
   }
 
   // ---------- ASR ----------
@@ -240,15 +252,17 @@ export class AliyunSpeechProvider implements ASRProvider, TTSProvider {
           task_group: 'audio',
           task: 'tts',
           function: 'SpeechSynthesizer',
-          model: this.config.ttsModel,
+          model: this.resolveModel(opts?.voice),
           parameters: {
             text_type: 'PlainText',
             voice: opts?.voice ?? this.config.ttsVoice,
             format,
             sample_rate: 22050,
             volume: params.volume,
-            speech_rate: params.speechRate,
-            pitch_rate: params.pitchRate,
+            // CosyVoice（cosyvoice-v2 现行协议）语速/音调参数名为 rate/pitch；
+            // 旧名 speech_rate/pitch_rate 会被服务端静默忽略（实测音频无变化）
+            rate: params.speechRate,
+            pitch: params.pitchRate,
           },
           input: {},
         });
@@ -326,15 +340,17 @@ export class AliyunSpeechProvider implements ASRProvider, TTSProvider {
         task_group: 'audio',
         task: 'tts',
         function: 'SpeechSynthesizer',
-        model: this.config.ttsModel,
+        model: this.resolveModel(opts?.voice),
         parameters: {
           text_type: 'PlainText',
           voice: opts?.voice ?? this.config.ttsVoice,
           format,
           sample_rate: 22050,
           volume: params.volume,
-          speech_rate: params.speechRate,
-          pitch_rate: params.pitchRate,
+          // CosyVoice（cosyvoice-v2 现行协议）语速/音调参数名为 rate/pitch；
+          // 旧名 speech_rate/pitch_rate 会被服务端静默忽略（实测音频无变化）
+          rate: params.speechRate,
+          pitch: params.pitchRate,
         },
         input: {},
       });
