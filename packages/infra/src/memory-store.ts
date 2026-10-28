@@ -1,4 +1,5 @@
 import type {
+  AnalysisStandard,
   Appeal,
   CalibrationEvent,
   CertRecord,
@@ -15,8 +16,10 @@ import type {
   PersonaConfig,
   ProductKB,
   QuizQuestion,
+  RealismStandard,
   RegressionRun,
   Scenario,
+  ScenarioGuidance,
   ScenarioTask,
   ScoreItemDef,
   ScoreReport,
@@ -49,6 +52,9 @@ export class MemoryStore implements Store {
   private scoreReports = new Map<string, ScoreReport>();
   private scoreItemDefs = new Map<string, ScoreItemDef>();
   private customerQuestions = new Map<string, CustomerQuestion>();
+  private scenarioGuidances = new Map<string, ScenarioGuidance>();
+  private analysisStandards = new Map<string, AnalysisStandard>();
+  private realismStandards = new Map<string, RealismStandard>();
   private appeals = new Map<string, Appeal>();
   private examWindows = new Map<string, ExamWindow>();
   private certRecords: CertRecord[] = [];
@@ -234,6 +240,41 @@ private events: DomainEvent[] = [];
     this.customerQuestions.delete(id);
   }
 
+  // ---- 场景引导资源库 ----
+  async getScenarioGuidance(scenarioId: string) {
+    return [...this.scenarioGuidances.values()].find((g) => g.scenarioId === scenarioId);
+  }
+  async getScenarioGuidanceById(id: string) {
+    return this.scenarioGuidances.get(id);
+  }
+  async listScenarioGuidances(tenantId: string) {
+    return [...this.scenarioGuidances.values()].filter((g) => g.tenantId === tenantId);
+  }
+  async saveScenarioGuidance(g: ScenarioGuidance) {
+    this.scenarioGuidances.set(g.id, g);
+  }
+  async deleteScenarioGuidance(id: string) {
+    this.scenarioGuidances.delete(id);
+  }
+  async listAnalysisStandards(tenantId: string) {
+    return [...this.analysisStandards.values()].filter((s) => s.tenantId === tenantId);
+  }
+  async saveAnalysisStandard(s: AnalysisStandard) {
+    this.analysisStandards.set(s.id, s);
+  }
+  async deleteAnalysisStandard(id: string) {
+    this.analysisStandards.delete(id);
+  }
+  async listRealismStandards(tenantId: string) {
+    return [...this.realismStandards.values()].filter((s) => s.tenantId === tenantId);
+  }
+  async saveRealismStandard(s: RealismStandard) {
+    this.realismStandards.set(s.id, s);
+  }
+  async deleteRealismStandard(id: string) {
+    this.realismStandards.delete(id);
+  }
+
   // ---- 申诉 ----
   async createAppeal(appeal: Appeal) {
     this.appeals.set(appeal.id, appeal);
@@ -391,5 +432,8 @@ this.quizQuestions.delete(id);
     for (const k of data.productKBs) this.productKBs.set(k.id, k);
     for (const w of data.examWindows ?? []) this.examWindows.set(w.id, w);
     for (const p of data.extractionProjects ?? []) this.extractionProjects.set(p.id, p);
+    for (const s of data.analysisStandards ?? []) this.analysisStandards.set(s.id, s);
+    for (const s of data.realismStandards ?? []) this.realismStandards.set(s.id, s);
+    for (const g of data.scenarioGuidance ?? []) this.scenarioGuidances.set(g.id, g);
   }
 }

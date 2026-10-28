@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import type {
+  AnalysisStandard,
   Appeal,
   CalibrationEvent,
   CertRecord,
@@ -17,8 +18,10 @@ import type {
   PersonaConfig,
   ProductKB,
   QuizQuestion,
+  RealismStandard,
   RegressionRun,
   Scenario,
+  ScenarioGuidance,
   ScenarioTask,
   ScoreItemDef,
   ScoreReport,
@@ -130,6 +133,9 @@ export class PrismaStore implements Store {
   private scoreReports;
   private scoreItemDefs;
   private customerQuestions;
+  private scenarioGuidances;
+  private analysisStandards;
+  private realismStandards;
   private appeals;
   private examWindows;
   private certRecords;
@@ -159,6 +165,9 @@ private domainEvents;
     this.scoreReports = docTable<ScoreReport>(this.prisma.scoreReport, ['id', 'sessionId', 'totalScore', 'passed', 'createdAt']);
     this.scoreItemDefs = docTable<ScoreItemDef>(this.prisma.scoreItemDef, ['id', 'tenantId', 'skillPointId', 'name', 'layer']);
     this.customerQuestions = docTable<CustomerQuestion>(this.prisma.customerQuestion, ['id', 'tenantId', 'category']);
+    this.scenarioGuidances = docTable<ScenarioGuidance>(this.prisma.scenarioGuidance, ['id', 'tenantId', 'scenarioId', 'name']);
+    this.analysisStandards = docTable<AnalysisStandard>(this.prisma.analysisStandard, ['id', 'tenantId', 'name', 'category']);
+    this.realismStandards = docTable<RealismStandard>(this.prisma.realismStandard, ['id', 'tenantId', 'name', 'category']);
     this.appeals = docTable<Appeal>(this.prisma.appeal, ['id', 'sessionId', 'userId', 'status', 'createdAt']);
     this.examWindows = docTable<ExamWindow>(this.prisma.examWindow, ['id', 'tenantId', 'name', 'status', 'startsAt', 'endsAt']);
     this.certRecords = docTable<CertRecord>(this.prisma.certRecord, ['id', 'tenantId', 'userId', 'examWindowId', 'passed']);
@@ -342,6 +351,42 @@ this.domainEvents = docTable<DomainEvent>(this.prisma.domainEvent, ['id', 'type'
     return this.customerQuestions.delete(id);
   }
 
+  // ---- 场景引导资源库 ----
+  async getScenarioGuidance(scenarioId: string) {
+    const rows = await this.scenarioGuidances.list({ scenarioId });
+    return rows[0];
+  }
+  getScenarioGuidanceById(id: string) {
+    return this.scenarioGuidances.get(id);
+  }
+  listScenarioGuidances(tenantId: string) {
+    return this.scenarioGuidances.list({ tenantId });
+  }
+  saveScenarioGuidance(g: ScenarioGuidance) {
+    return this.scenarioGuidances.upsertById(g);
+  }
+  deleteScenarioGuidance(id: string) {
+    return this.scenarioGuidances.delete(id);
+  }
+  listAnalysisStandards(tenantId: string) {
+    return this.analysisStandards.list({ tenantId });
+  }
+  saveAnalysisStandard(s: AnalysisStandard) {
+    return this.analysisStandards.upsertById(s);
+  }
+  deleteAnalysisStandard(id: string) {
+    return this.analysisStandards.delete(id);
+  }
+  listRealismStandards(tenantId: string) {
+    return this.realismStandards.list({ tenantId });
+  }
+  saveRealismStandard(s: RealismStandard) {
+    return this.realismStandards.upsertById(s);
+  }
+  deleteRealismStandard(id: string) {
+    return this.realismStandards.delete(id);
+  }
+
   // ---- 申诉 ----
   createAppeal(appeal: Appeal) {
     return this.appeals.create(appeal);
@@ -497,5 +542,8 @@ await this.quizQuestions.delete(id);
     for (const k of data.productKBs) await this.productKBs.upsertById(k);
     for (const w of data.examWindows ?? []) await this.examWindows.upsertById(w);
     for (const p of data.extractionProjects ?? []) await this.extractionProjects.upsertById(p);
+    for (const s of data.analysisStandards ?? []) await this.analysisStandards.upsertById(s);
+    for (const s of data.realismStandards ?? []) await this.realismStandards.upsertById(s);
+    for (const g of data.scenarioGuidance ?? []) await this.scenarioGuidances.upsertById(g);
   }
 }

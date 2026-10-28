@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import type {
+  AnalysisStandard,
   ChatMessage,
   CustomerQuestion,
   GoldenCase,
+  RealismStandard,
+  ScenarioGuidance,
   ScoreItemDef,
   ScoreLevel,
 } from '@grasp-mvp/core';
@@ -238,6 +241,104 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
       return reply.code(404).send({ error: '金标准案例不存在' });
     }
     await store.deleteGoldenCase(request.params.id);
+    return { ok: true };
+  });
+
+  // ---- 分析标准库（场景引导第3步引用） ----
+  app.get('/library/analysis-standards', async (request) => ({
+    items: await store.listAnalysisStandards(request.tenantId),
+  }));
+
+  app.post<{ Body: Partial<AnalysisStandard> }>('/library/analysis-standards', async (request, reply) => {
+    const body = request.body ?? {};
+    if (!body.name?.trim()) return reply.code(400).send({ error: 'name 必填' });
+    if (!body.category?.trim()) return reply.code(400).send({ error: 'category 必填' });
+    if (!body.description?.trim()) return reply.code(400).send({ error: 'description 必填' });
+    const standard: AnalysisStandard = {
+      id: body.id ?? randomUUID(),
+      tenantId: request.tenantId,
+      name: body.name.trim(),
+      category: body.category.trim(),
+      description: body.description.trim(),
+      example: body.example?.trim() || undefined,
+    };
+    await store.saveAnalysisStandard(standard);
+    return reply.code(201).send(standard);
+  });
+
+  app.delete<{ Params: { id: string } }>('/library/analysis-standards/:id', async (request, reply) => {
+    const items = await store.listAnalysisStandards(request.tenantId);
+    if (!items.some((s) => s.id === request.params.id)) {
+      return reply.code(404).send({ error: '分析标准不存在' });
+    }
+    await store.deleteAnalysisStandard(request.params.id);
+    return { ok: true };
+  });
+
+  // ---- 真实度标准库（场景引导第4步引用） ----
+  app.get('/library/realism-standards', async (request) => ({
+    items: await store.listRealismStandards(request.tenantId),
+  }));
+
+  app.post<{ Body: Partial<RealismStandard> }>('/library/realism-standards', async (request, reply) => {
+    const body = request.body ?? {};
+    if (!body.name?.trim()) return reply.code(400).send({ error: 'name 必填' });
+    if (!body.category?.trim()) return reply.code(400).send({ error: 'category 必填' });
+    if (!body.description?.trim()) return reply.code(400).send({ error: 'description 必填' });
+    const standard: RealismStandard = {
+      id: body.id ?? randomUUID(),
+      tenantId: request.tenantId,
+      name: body.name.trim(),
+      category: body.category.trim(),
+      description: body.description.trim(),
+    };
+    await store.saveRealismStandard(standard);
+    return reply.code(201).send(standard);
+  });
+
+  app.delete<{ Params: { id: string } }>('/library/realism-standards/:id', async (request, reply) => {
+    const items = await store.listRealismStandards(request.tenantId);
+    if (!items.some((s) => s.id === request.params.id)) {
+      return reply.code(404).send({ error: '真实度标准不存在' });
+    }
+    await store.deleteRealismStandard(request.params.id);
+    return { ok: true };
+  });
+
+  // ---- 场景引导资源包 ----
+  app.get('/library/scenario-guidance', async (request) => ({
+    items: await store.listScenarioGuidances(request.tenantId),
+  }));
+
+  app.post<{ Body: Partial<ScenarioGuidance> }>('/library/scenario-guidance', async (request, reply) => {
+    const body = request.body ?? {};
+    if (!body.scenarioId?.trim()) return reply.code(400).send({ error: 'scenarioId 必填' });
+    if (!body.name?.trim()) return reply.code(400).send({ error: 'name 必填' });
+    if (!Array.isArray(body.qualifyQuestions) || body.qualifyQuestions.length === 0) {
+      return reply.code(400).send({ error: 'qualifyQuestions 至少一题' });
+    }
+    const guidance = {
+      ...body,
+      id: body.id ?? randomUUID(),
+      tenantId: request.tenantId,
+      demo: body.demo ?? null,
+      keyPoints: body.keyPoints ?? [],
+      analysisStandardIds: body.analysisStandardIds ?? [],
+      realismStandardIds: body.realismStandardIds ?? [],
+      difficultyLevels: body.difficultyLevels ?? [],
+      defaultDifficulty: body.defaultDifficulty ?? 1,
+      scoringFocus: body.scoringFocus ?? [],
+    } as ScenarioGuidance;
+    await store.saveScenarioGuidance(guidance);
+    return reply.code(201).send(guidance);
+  });
+
+  app.delete<{ Params: { id: string } }>('/library/scenario-guidance/:id', async (request, reply) => {
+    const items = await store.listScenarioGuidances(request.tenantId);
+    if (!items.some((g) => g.id === request.params.id)) {
+      return reply.code(404).send({ error: '场景引导资源不存在' });
+    }
+    await store.deleteScenarioGuidance(request.params.id);
     return { ok: true };
   });
 

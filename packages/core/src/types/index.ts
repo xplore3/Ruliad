@@ -9,3 +9,4 @@ export * from './content.js';
 export * from './user-skill.js';
 export * from './quiz.js';
 export * from './question.js';
+export * from './guidance.js';
