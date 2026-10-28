@@ -24,6 +24,21 @@ export class OpenAICompatibleProvider implements LLMProvider {
   ) {}
 
   async chat(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResult> {
+    // 思维链模型（如 deepseek-v4-flash）偶发"只有 reasoning_content、content 为空"的响应，重试最多 2 次
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await this.chatOnce(messages, options);
+      } catch (err) {
+        lastErr = err;
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!msg.includes('LLM 返回空内容')) throw err;
+      }
+    }
+    throw lastErr;
+  }
+
+  private async chatOnce(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResult> {
     const f = this.fetchFn ?? fetch;
     const timeoutMs = this.config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const body: Record<string, unknown> = {
