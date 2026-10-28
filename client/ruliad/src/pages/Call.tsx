@@ -55,6 +55,7 @@ export default function Call() {
   const [partialText, setPartialText] = useState('');
   const [historyReplay, setHistoryReplay] = useState<ReplayItem[]>([]);
   const [micError, setMicError] = useState(false);
+  const [micErrorMsg, setMicErrorMsg] = useState('');
   const [toastMsg, setToastMsg] = useState('');
   /** 场景信息（目标/剧本，来自场景库配置） */
   const [scenarioInfo, setScenarioInfo] = useState<SessionCreated['scenario'] | null>(null);
@@ -264,8 +265,10 @@ export default function Call() {
     try {
       await recorderRef.current.start();
       setMicError(false);
-    } catch {
+      setMicErrorMsg('');
+    } catch (err) {
       setMicError(true);
+      setMicErrorMsg(err instanceof Error && err.message ? err.message : '麦克风不可用');
     }
   };
 
@@ -427,7 +430,7 @@ export default function Call() {
               )}
               {micError && (
                 <div style={{ background: 'rgba(255,107,91,.12)', border: '1px solid rgba(255,107,91,.45)', borderRadius: '10px', padding: '10px 12px', fontSize: '13px', color: '#FFB4A8', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <span>需要麦克风权限才能进行语音通话。</span>
+                  <span>需要麦克风权限才能进行语音通话。{micErrorMsg ? `（${micErrorMsg}）` : ''}</span>
                   <span style={{ display: 'flex', gap: '12px' }}>
                     <a style={{ color: '#FF6B5B', cursor: 'pointer', fontWeight: 600 }} onClick={() => void startRecorder()}>重试</a>
                     <a style={{ color: '#FF6B5B', cursor: 'pointer', fontWeight: 600 }} onClick={() => navigate(`/practice/${sessionId}`)}>改用文字练习 →</a>

@@ -68,10 +68,18 @@ export class OpenAICompatibleProvider implements LLMProvider {
     const choice = json.choices?.[0];
     let content = choice?.message?.content ?? '';
 
-    // 如果 content 为空但存在 completionTokens，可能是模型返回了 tool_calls 或格式异常
+    // 如果 content 为空但存在 completionTokens，尝试多种兜底提取
     if (!content && json.usage?.completion_tokens > 0) {
-      // 尝试从 tool_calls 中提取内容
-      const toolCalls = choice?.message?.tool_calls;
+      // 兜底1：deepseek 部分模型（如 deepseek-flash）可能把内容放在 delta 中
+      const deltaContent = choice?.delta?.content;
+      if (typeof deltaContent === 'string' && deltaContent.trim()) {
+        content = deltaContent.trim();
+      }
+    }
+
+    if (!content && json.usage?.completion_tokens > 0) {
+      // 兜底2：尝试从 tool_calls 中提取内容
+      const toolCalls = choice?.message?.tool_calls ?? choice?.delta?.tool_calls;
       if (toolCalls && toolCalls.length > 0) {
         const toolContent = toolCalls
           .map((tc: any) => tc.function?.arguments ?? '')
@@ -83,8 +91,23 @@ export class OpenAICompatibleProvider implements LLMProvider {
       }
     }
 
-    // 如果仍然为空，抛出明确错误便于上层重试
+    // 如果仍然为空，打印原始选择体以便诊断，然后抛出错误
     if (!content) {
+      console.error(
+        '[LLMGateway] 空内容诊断:',
+        JSON.stringify(
+          {
+            model: json.model ?? this.config.model,
+            usage: json.usage,
+            choiceKeys: choice ? Object.keys(choice) : null,
+            messageKeys: choice?.message ? Object.keys(choice.message) : null,
+            deltaKeys: choice?.delta ? Object.keys(choice.delta) : null,
+            finishReason: choice?.finish_reason,
+          },
+          null,
+          2
+        )
+      );
       throw new Error(`LLM 返回空内容：model=${json.model ?? this.config.model}, completionTokens=${json.usage?.completion_tokens ?? 0}`);
     }
 
