@@ -212,14 +212,15 @@ export interface DemoFaqPoolItem {
 
 /** FAQ 池路由：池标识 → 客户提问问题库的分类集合；'ground-push-demo-faq' 走内置 28 条题库 */
 const FAQ_POOL_CATEGORIES: Record<string, string[]> = {
+  'ground-push-demo-faq': ['地推示范'],
   'inquiry-demo-faq': ['咨询接待场景', '线下谈单场景', '通用场景'],
   'phone-sales-demo-faq': ['电销场景', '地推电销拓客场景', '地推电销场景'],
 };
 
 /**
  * 按 faqPoolRef 解析 FAQ 池：
- * - 'ground-push-demo-faq'（或未配置）→ demo-faq.data.ts 内置 28 条
- * - 其他池 → store.listCustomerQuestions 按分类取（referenceAnswer 作为标准答案），不足 need 条时回退地推池
+ * - 优先从客户提问问题库（CustomerQuestion）按 FAQ_POOL_CATEGORIES 分类读取，referenceAnswer 作为标准答案
+ * - 库中取不足 need 条时回退 demo-faq.data.ts 内置 28 条地推 FAQ（保证 mock/空库可跑）
  */
 export async function resolveFaqPool(
   store: Store,

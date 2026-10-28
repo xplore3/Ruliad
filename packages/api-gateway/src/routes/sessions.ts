@@ -5,7 +5,7 @@ import { bandFor, PersonaActor } from '@grasp-mvp/role-engine';
 import { scoreSession } from '@grasp-mvp/scoring-engine';
 import type { RouteContext } from '../ctx.js';
 import { mkEvent } from '../events.js';
-import { loadRuntime, remainingSeconds, runTurn } from '../services/turn.js';
+import { effectiveDurationMinutes, loadRuntime, remainingSeconds, runTurn } from '../services/turn.js';
 import { personaVoice } from './voice.js';
 import { readFramesAsDataUrls } from '../services/video-store.js';
 
@@ -343,7 +343,7 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
           script: scenario.script,
           participants: scenario.participants,
         },
-        remainingSeconds: remainingSeconds(session, scenario),
+        remainingSeconds: remainingSeconds(session, scenario, await effectiveDurationMinutes(store, scenario)),
       });
     }
   );
@@ -380,7 +380,9 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
             participants: scenario.participants,
           }
         : null,
-      remainingSeconds: scenario ? remainingSeconds(session, scenario) : null,
+      remainingSeconds: scenario
+        ? remainingSeconds(session, scenario, await effectiveDurationMinutes(store, scenario))
+        : null,
     };
   });
 
@@ -557,7 +559,7 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
     return {
       pausedAt,
       remainingSeconds: scenario
-        ? remainingSeconds({ ...session, pausedAt }, scenario)
+        ? remainingSeconds({ ...session, pausedAt }, scenario, await effectiveDurationMinutes(store, scenario))
         : null,
     };
   });
@@ -576,7 +578,11 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
     const updated: Session = { ...session, pausedMs, pausedAt: undefined };
     await store.updateSession(session.id, { pausedMs, pausedAt: undefined });
     const scenario = await store.getScenario(session.scenarioId);
-    return { remainingSeconds: scenario ? remainingSeconds(updated, scenario) : null };
+    return {
+      remainingSeconds: scenario
+        ? remainingSeconds(updated, scenario, await effectiveDurationMinutes(store, scenario))
+        : null,
+    };
   });
 
   // 进入正式对练（live）：从此时起倒计时开始；开场/新手指引阶段不消耗时长。幂等，重复调用不重置
@@ -595,7 +601,11 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
       await store.updateSession(session.id, { liveStartedAt: updated.liveStartedAt, pausedMs: 0 });
     }
     const scenario = await store.getScenario(session.scenarioId);
-    return { remainingSeconds: scenario ? remainingSeconds(updated, scenario) : null };
+    return {
+      remainingSeconds: scenario
+        ? remainingSeconds(updated, scenario, await effectiveDurationMinutes(store, scenario))
+        : null,
+    };
   });
 
   // ---- 考题答题 ----

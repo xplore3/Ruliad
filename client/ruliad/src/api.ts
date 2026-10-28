@@ -399,7 +399,7 @@ export async function fetchPersonaConfigs() {
   return data as { personaConfigs: PersonaConfig[] };
 }
 
-export type LibraryExtractTarget = 'scenario' | 'question' | 'score-item' | 'golden-case';
+export type LibraryExtractTarget = 'scenario' | 'question' | 'score-item' | 'golden-case' | 'analysis-standard' | 'realism-standard';
 
 export interface LibraryExtractResult {
   reply: string;

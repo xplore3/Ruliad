@@ -12,7 +12,16 @@ import type {
 } from '@grasp-mvp/core';
 import type { RouteContext } from '../ctx.js';
 
-type ExtractTarget = 'scenario' | 'question' | 'score-item' | 'golden-case';
+type ExtractTarget = 'scenario' | 'question' | 'score-item' | 'golden-case' | 'analysis-standard' | 'realism-standard';
+
+const EXTRACT_TARGETS: ExtractTarget[] = [
+  'scenario',
+  'question',
+  'score-item',
+  'golden-case',
+  'analysis-standard',
+  'realism-standard',
+];
 
 const SCORE_LAYERS = new Set<ScoreItemDef['layer']>(['company', 'team', 'personal']);
 
@@ -352,8 +361,8 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     '/library/extract',
     async (request, reply) => {
       const { target, text } = request.body ?? {};
-      if (!target || !['scenario', 'question', 'score-item', 'golden-case'].includes(target)) {
-        return reply.code(400).send({ error: "target 仅支持 'scenario' | 'question' | 'score-item' | 'golden-case'" });
+      if (!target || !EXTRACT_TARGETS.includes(target)) {
+        return reply.code(400).send({ error: `target 仅支持 ${EXTRACT_TARGETS.map((t) => `'${t}'`).join(' | ')}` });
       }
       if (!text?.trim()) return reply.code(400).send({ error: 'text 必填' });
 
@@ -401,6 +410,19 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
           '- name: 案例名称',
           '- transcript: 对话数组，每项 { seq: 轮次序号, speaker: "trainee"|"persona", text: 内容 }',
           '- expected: 期望判定数组，每项 { itemName: 评分项名称, levelKey: 期望档位 key }',
+        ].join('\n'),
+        'analysis-standard': [
+          '把文本提炼为示范讲解的分析标准（第3步讲解示范案例时引用的标准），rows 每项字段：',
+          '- name: 标准名称（如 语调标准 / 语速标准 / 关键方法 / 礼仪标准）',
+          '- category: "tone"（语调）| "pace"（语速）| "method"（关键方法）| "etiquette"（礼仪）',
+          '- description: 标准的具体说明',
+          '- example: 示例（若有）',
+        ].join('\n'),
+        'realism-standard': [
+          '把文本提炼为 AI 客户的真实度标准（第4步模拟演练的逼真度要求），rows 每项字段：',
+          '- name: 标准名称（如 反应自然度 / 拒绝行为 / 拖延行为 / 情绪变化）',
+          '- category: "reaction"（反应自然度）| "objection"（拒绝行为）| "stalling"（拖延行为）| "emotion"（情绪变化）',
+          '- description: 标准的具体说明',
         ].join('\n'),
       };
 

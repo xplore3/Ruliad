@@ -664,6 +664,8 @@ export default function Library() {
           categoryOptions={ANALYSIS_CATEGORY_OPTIONS}
           hasExample
           emptyDraft={{ name: '', category: 'method', description: '' }}
+          extractTarget="analysis-standard"
+          pasteExample={'名称\t分类\t说明\t示例\n语速平稳\t语速\t保持 200-240 字/分钟，重点词放慢\t介绍价格时放慢报数'}
           list={() => listAnalysisStandards().then((r) => r.items)}
           save={saveAnalysisStandard}
           remove={deleteAnalysisStandard}
@@ -675,6 +677,8 @@ export default function Library() {
           categoryOptions={REALISM_CATEGORY_OPTIONS}
           hasExample={false}
           emptyDraft={{ name: '', category: 'reaction', description: '' }}
+          extractTarget="realism-standard"
+          pasteExample={'名称\t分类\t说明\n直接拒绝\t拒绝行为\t客户不问理由直接拒绝，测试销售的第一反应'}
           list={() => listRealismStandards().then((r) => r.items)}
           save={saveRealismStandard}
           remove={deleteRealismStandard}
@@ -717,9 +721,13 @@ interface StandardRowData {
   example?: string;
 }
 
-function StandardTab({ categoryOptions, hasExample, emptyDraft, list, save, remove, setNotice }: {
+function StandardTab({ categoryOptions, hasExample, emptyDraft, extractTarget, pasteExample, list, save, remove, setNotice }: {
   categoryOptions: { value: string; label: string }[];
   hasExample: boolean;
+  /** AI 提炼 target（后端 /library/extract 已支持） */
+  extractTarget: 'analysis-standard' | 'realism-standard';
+  /** 粘贴表格示例文本 */
+  pasteExample: string;
   emptyDraft: StandardRowData;
   list: () => Promise<(AnalysisStandard | RealismStandard)[]>;
   save: (d: StandardRowData) => Promise<StandardRowData>;
@@ -727,6 +735,7 @@ function StandardTab({ categoryOptions, hasExample, emptyDraft, list, save, remo
   setNotice: (s: string | null) => void;
 }) {
   const { rows, setRows, loadRows, addDrafts, updateRow, toggleDelete } = useRows<StandardRowData>();
+  const [panel, setPanel] = useState<'extract' | 'paste' | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -738,6 +747,46 @@ function StandardTab({ categoryOptions, hasExample, emptyDraft, list, save, remo
       .finally(() => setLoading(false));
   };
   useEffect(reload, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** 分类值解析：英文枚举原样保留，中文标签映射回枚举值，其余按自定义保留并提示 */
+  const resolveCategory = (v: string): { category: string; warn?: string } => {
+    const t = v.trim();
+    if (!t) return { category: emptyDraft.category };
+    const byValue = categoryOptions.find((c) => c.value === t);
+    if (byValue) return { category: byValue.value };
+    const byLabel = categoryOptions.find((c) => c.label === t);
+    if (byLabel) return { category: byLabel.value };
+    return { category: t, warn: `分类「${t}」未匹配，已按自定义保留` };
+  };
+
+  const mapExtracted = (r: Record<string, unknown>): { data: StandardRowData; warn?: string[] } => {
+    const cat = resolveCategory(String(r.category ?? ''));
+    return {
+      data: {
+        name: String(r.name ?? ''),
+        category: cat.category,
+        description: String(r.description ?? ''),
+        example: hasExample && r.example ? String(r.example) : undefined,
+      },
+      warn: cat.warn ? [cat.warn] : undefined,
+    };
+  };
+
+  const mapPasted = (cells: string[][]): { data: StandardRowData; warn?: string[] }[] =>
+    cells.map((c) => {
+      const cat = resolveCategory(c[1] ?? '');
+      return {
+        data: {
+          name: c[0] ?? '',
+          category: cat.category,
+          description: c[2] ?? '',
+          example: hasExample ? c[3] || undefined : undefined,
+        },
+        warn: cat.warn ? [cat.warn] : undefined,
+      };
+    });
+
+  const pasteHeaders = hasExample ? ['名称', '分类', '说明', '示例'] : ['名称', '分类', '说明'];
 
   const handlers: SaveHandlers<StandardRowData> = {
     validate: (d) => {
@@ -768,6 +817,8 @@ function StandardTab({ categoryOptions, hasExample, emptyDraft, list, save, remo
         pendingCount={pendingCount}
         saving={saving}
         onAdd={() => addDrafts([{ data: { ...emptyDraft } }])}
+        onExtract={() => setPanel('extract')}
+        onPaste={() => setPanel('paste')}
         onReload={reload}
         onSave={saveAll}
       />
@@ -809,6 +860,17 @@ function StandardTab({ categoryOptions, hasExample, emptyDraft, list, save, remo
           </table>
         </div>
       )}
+      {panel === 'extract' && (
+        <ExtractPanel target={extractTarget} onClose={() => setPanel(null)} onRows={(rs) => addDrafts(rs.map(mapExtracted))} />
+      )}
+      {panel === 'paste' && (
+        <PastePanel
+          headers={pasteHeaders}
+          example={pasteExample}
+          onClose={() => setPanel(null)}
+          onRows={(rs) => addDrafts(mapPasted(rs))}
+        />
+      )}
     </div>
   );
 }
@@ -816,7 +878,7 @@ function StandardTab({ categoryOptions, hasExample, emptyDraft, list, save, remo
 /** ===== AI 提炼 / 粘贴表格 面板（各 Tab 复用） ===== */
 
 function ExtractPanel({ target, onClose, onRows }: {
-  target: 'scenario' | 'question' | 'score-item' | 'golden-case';
+  target: 'scenario' | 'question' | 'score-item' | 'golden-case' | 'analysis-standard' | 'realism-standard';
   onClose: () => void;
   onRows: (rows: Record<string, unknown>[]) => void;
 }) {

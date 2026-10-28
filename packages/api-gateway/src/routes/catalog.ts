@@ -252,6 +252,9 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
         return reply.code(404).send({ error: '场景不存在' });
       }
       await store.deleteScenario(request.params.id);
+      // 级联删除该场景的引导资源包
+      const guidance = await store.getScenarioGuidance(request.params.id);
+      if (guidance) await store.deleteScenarioGuidance(guidance.id);
       return { ok: true };
     }
   );
