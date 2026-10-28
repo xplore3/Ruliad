@@ -8,7 +8,9 @@ export async function reportsRoutes(app: FastifyInstance, ctx: RouteContext): Pr
   app.get<{ Params: { id: string } }>('/sessions/:id/review', async (request, reply) => {
     const startedAt = Date.now();
     const session = await store.getSession(request.params.id);
-    if (!session) return reply.code(404).send({ error: '会话不存在' });
+    if (!session || session.userId !== request.userId) {
+      return reply.code(404).send({ error: '会话不存在' });
+    }
 
     // 会话被放弃（对话太少或时间太短）—— 不生成报告
     if (session.status === 'abandoned') {

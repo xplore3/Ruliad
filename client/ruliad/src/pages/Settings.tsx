@@ -1,6 +1,15 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { apiError, clearToken, fetchPreferences, getStoredUser, savePreferences } from '../api';
+import { useLocation, useNavigate } from 'react-router-dom';
+import {
+  apiError,
+  changePassword,
+  clearToken,
+  deleteAccount,
+  exportMyData,
+  fetchPreferences,
+  getStoredUser,
+  savePreferences,
+} from '../api';
 import type { Preferences } from '../api';
 
 const NAV_ITEMS = [
@@ -13,23 +22,19 @@ const NAV_ITEMS = [
 ];
 
 interface Prefs {
-  notifyPractice: boolean;
   notifyReport: boolean;
   defaultMode: 'voice-call' | 'voice' | 'text';
   speechRate: 'standard' | 'slow' | 'fast';
-  coachIntensity: 'medium' | 'quiet' | 'high';
+  coachIntensity: 'low' | 'medium' | 'high';
   recordingConsent: boolean;
-  theme: 'system' | 'light' | 'dark';
 }
 
 const DEFAULT_PREFS: Prefs = {
-  notifyPractice: true,
   notifyReport: true,
   defaultMode: 'voice-call',
   speechRate: 'standard',
   coachIntensity: 'medium',
   recordingConsent: true,
-  theme: 'system',
 };
 
 function Switch({ on, onToggle }: { on: boolean; onToggle?: () => void }) {
@@ -46,15 +51,39 @@ function Switch({ on, onToggle }: { on: boolean; onToggle?: () => void }) {
 
 export default function Settings() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [active, setActive] = useState('account');
   const [prefs, setPrefs] = useState<Prefs | null>(null);
   const user = getStoredUser();
 
+  // 修改密码内联表单
+  const [pwOpen, setPwOpen] = useState(false);
+  const [oldPwd, setOldPwd] = useState('');
+  const [newPwd, setNewPwd] = useState('');
+  const [newPwd2, setNewPwd2] = useState('');
+  const [pwBusy, setPwBusy] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
+
   useEffect(() => {
     fetchPreferences()
-      .then(({ preferences }) => setPrefs({ ...DEFAULT_PREFS, ...(preferences as Partial<Prefs>) }))
+      .then(({ preferences }) => {
+        const merged = { ...DEFAULT_PREFS, ...(preferences as Partial<Prefs>) };
+        // 历史值 quiet 归一为 low
+        if ((merged.coachIntensity as string) === 'quiet') merged.coachIntensity = 'low';
+        setPrefs(merged);
+      })
       .catch((e) => alert(apiError(e, '偏好设置加载失败')));
   }, []);
+
+  // 从其他页面跳入指定区块（如 Profile 的「关于」）
+  useEffect(() => {
+    const scrollTo = (location.state as { scrollTo?: string } | null)?.scrollTo;
+    if (!scrollTo) return;
+    // 等首屏渲染完成后再滚动
+    const t = setTimeout(() => jumpTo(scrollTo), 50);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state]);
 
   // 滚动定位高亮（scroll-spy）
   useEffect(() => {
@@ -87,13 +116,37 @@ export default function Settings() {
     );
   };
 
+  /** 报告通知开关：开启时需先拿到浏览器 Notification 权限 */
+  const toggleNotifyReport = async () => {
+    if (!prefs) return;
+    const next = !prefs.notifyReport;
+    if (next) {
+      if (typeof Notification === 'undefined') {
+        alert('当前浏览器不支持通知，无法开启');
+        return;
+      }
+      if (Notification.permission === 'denied') {
+        alert('浏览器已拒绝通知权限，请先在浏览器站点设置中允许通知');
+        return;
+      }
+      if (Notification.permission === 'default') {
+        const p = await Notification.requestPermission();
+        if (p !== 'granted') {
+          alert('未获得通知权限，报告通知无法开启');
+          return;
+        }
+      }
+    }
+    update('notifyReport', next);
+  };
+
   const handleLogout = () => {
     clearToken();
     navigate('/login');
   };
 
   const handleClearCache = () => {
-    const keep = new Set(['grasp-token', 'grasp-user']);
+    const keep = new Set(['grasp-token', 'grasp-user', 'grasp-prefs']);
     const keys: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
@@ -103,7 +156,69 @@ export default function Settings() {
     alert('缓存已清理');
   };
 
-  const notYet = () => alert('该功能暂未开放');
+  const handleChangePassword = async () => {
+    if (!oldPwd || !newPwd) {
+      alert('请填写旧密码和新密码');
+      return;
+    }
+    if (newPwd.length < 6) {
+      alert('新密码至少 6 位');
+      return;
+    }
+    if (newPwd !== newPwd2) {
+      alert('两次输入的新密码不一致');
+      return;
+    }
+    setPwBusy(true);
+    try {
+      await changePassword(oldPwd, newPwd);
+      alert('密码已修改，请使用新密码重新登录');
+      clearToken();
+      navigate('/login');
+    } catch (e) {
+      alert(apiError(e, '修改失败，请确认旧密码是否正确'));
+    } finally {
+      setPwBusy(false);
+    }
+  };
+
+  const handleExport = async () => {
+    if (exportBusy) return;
+    setExportBusy(true);
+    try {
+      const data = await exportMyData();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `grasp-my-data-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert(apiError(e, '导出失败，请稍后重试'));
+    } finally {
+      setExportBusy(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (
+      !window.confirm(
+        '注销账号将永久删除你的账号及全部练习数据，且无法恢复。\n\n确定要注销吗？'
+      )
+    ) {
+      return;
+    }
+    try {
+      await deleteAccount();
+    } catch (e) {
+      alert(apiError(e, '注销失败，请稍后重试'));
+      return;
+    }
+    localStorage.clear();
+    alert('账号已注销');
+    navigate('/login');
+  };
 
   return (
     <main className="wrap">
@@ -129,10 +244,60 @@ export default function Settings() {
               <span className="lb">用户名</span>
               <span className="vl">{user?.username || user?.name || '—'}</span>
             </div>
-            <div className="setting-row" style={{ cursor: 'pointer' }} onClick={notYet}>
+            <div
+              className="setting-row"
+              style={{ cursor: 'pointer' }}
+              onClick={() => setPwOpen((v) => !v)}
+            >
               <span className="lb">修改密码</span>
               <span className="arrow">›</span>
             </div>
+            {pwOpen && (
+              <div style={{ padding: '4px 0 12px' }}>
+                <div className="field">
+                  <label>旧密码</label>
+                  <input
+                    className="input"
+                    type="password"
+                    value={oldPwd}
+                    onChange={(e) => setOldPwd(e.target.value)}
+                    autoComplete="current-password"
+                  />
+                </div>
+                <div className="field">
+                  <label>新密码</label>
+                  <input
+                    className="input"
+                    type="password"
+                    value={newPwd}
+                    onChange={(e) => setNewPwd(e.target.value)}
+                    autoComplete="new-password"
+                  />
+                </div>
+                <div className="field">
+                  <label>确认新密码</label>
+                  <input
+                    className="input"
+                    type="password"
+                    value={newPwd2}
+                    onChange={(e) => setNewPwd2(e.target.value)}
+                    autoComplete="new-password"
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button
+                    className="btn btn-primary btn-sm"
+                    disabled={pwBusy}
+                    onClick={() => void handleChangePassword()}
+                  >
+                    {pwBusy ? '提交中…' : '确认修改'}
+                  </button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setPwOpen(false)}>
+                    取消
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="setting-row">
               <span className="danger" style={{ cursor: 'pointer' }} onClick={handleLogout}>
                 退出登录
@@ -144,13 +309,15 @@ export default function Settings() {
           <section className="card sec-card" id="notice">
             <h2>通知</h2>
             <div className="setting-row">
-              <span className="lb">练习提醒</span>
-              <Switch on={prefs?.notifyPractice ?? true} onToggle={() => prefs && update('notifyPractice', !prefs.notifyPractice)} />
-            </div>
-            <div className="setting-row">
               <span className="lb">报告生成通知</span>
-              <Switch on={prefs?.notifyReport ?? true} onToggle={() => prefs && update('notifyReport', !prefs.notifyReport)} />
+              <Switch
+                on={prefs?.notifyReport ?? true}
+                onToggle={() => void toggleNotifyReport()}
+              />
             </div>
+            <p className="small muted" style={{ padding: '0 0 4px' }}>
+              开启后，练习报告生成完成时会收到浏览器通知
+            </p>
           </section>
 
           {/* 语音与练习 */}
@@ -188,7 +355,7 @@ export default function Settings() {
                 onChange={(e) => update('coachIntensity', e.target.value as Prefs['coachIntensity'])}
               >
                 <option value="medium">适中</option>
-                <option value="quiet">安静</option>
+                <option value="low">安静</option>
                 <option value="high">高频</option>
               </select>
             </div>
@@ -201,11 +368,19 @@ export default function Settings() {
               <span className="lb">录音与分析授权</span>
               <Switch on={prefs?.recordingConsent ?? true} onToggle={() => prefs && update('recordingConsent', !prefs.recordingConsent)} />
             </div>
-            <div className="setting-row" style={{ cursor: 'pointer' }} onClick={notYet}>
-              <span className="lb">导出我的数据</span>
+            <div
+              className="setting-row"
+              style={{ cursor: 'pointer' }}
+              onClick={() => void handleExport()}
+            >
+              <span className="lb">{exportBusy ? '正在导出…' : '导出我的数据'}</span>
               <span className="arrow">›</span>
             </div>
-            <div className="setting-row" style={{ cursor: 'pointer' }} onClick={notYet}>
+            <div
+              className="setting-row"
+              style={{ cursor: 'pointer' }}
+              onClick={() => void handleDeleteAccount()}
+            >
               <span className="danger">注销账号</span>
             </div>
           </section>
@@ -213,18 +388,6 @@ export default function Settings() {
           {/* 通用 */}
           <section className="card sec-card" id="general">
             <h2>通用</h2>
-            <div className="setting-row">
-              <span className="lb">主题</span>
-              <select
-                className="input"
-                value={prefs?.theme ?? 'system'}
-                onChange={(e) => update('theme', e.target.value as Prefs['theme'])}
-              >
-                <option value="system">跟随系统</option>
-                <option value="light">浅色</option>
-                <option value="dark">深色</option>
-              </select>
-            </div>
             <div className="setting-row" style={{ cursor: 'pointer' }} onClick={handleClearCache}>
               <span className="lb">清除缓存</span>
               <span className="arrow">›</span>
@@ -233,7 +396,11 @@ export default function Settings() {
 
           {/* 关于 */}
           <section className="card about-block" id="about">
-            <a className="logo" href="index.html" style={{ justifyContent: 'center' }}>
+            <a
+              className="logo"
+              style={{ justifyContent: 'center', cursor: 'pointer' }}
+              onClick={() => navigate('/home')}
+            >
               <span className="dot" />
               Grasp
             </a>
@@ -243,10 +410,10 @@ export default function Settings() {
               像实战一样练销售
             </p>
             <div className="links">
-              <a>产品介绍</a>
-              <a>用户协议</a>
-              <a>隐私政策</a>
-              <a>联系客服</a>
+              <a style={{ cursor: 'pointer' }} onClick={() => navigate('/')}>产品介绍</a>
+              <a style={{ cursor: 'pointer' }} onClick={() => navigate('/agreement')}>用户协议</a>
+              <a style={{ cursor: 'pointer' }} onClick={() => navigate('/privacy')}>隐私政策</a>
+              <a href="mailto:support@grasp.chat">联系客服</a>
             </div>
           </section>
         </div>

@@ -11,7 +11,7 @@ export const CATEGORY_RULES = [
 export type CategoryRule = (typeof CATEGORY_RULES)[number];
 
 export function scenarioText(s: Scenario): string {
-  return [s.name, s.personaName ?? '', ...(s.coverageTopics ?? [])].join(' ');
+  return [s.name, s.personaName ?? '', s.description ?? '', ...(s.coverageTopics ?? [])].join(' ');
 }
 
 export function categoryOf(s: Scenario): CategoryRule | null {

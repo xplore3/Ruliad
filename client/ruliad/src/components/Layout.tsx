@@ -1,5 +1,23 @@
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { fetchGrowth } from '../api';
+
+function dayKey(d: Date) {
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+/** 当前连续练习天数（以今天或昨天结尾）；与 Dashboard 的 streaks 逻辑一致 */
+function currentStreak(dateKeys: Set<string>): number {
+  let n = 0;
+  const t = new Date();
+  t.setHours(0, 0, 0, 0);
+  if (!dateKeys.has(dayKey(t))) t.setDate(t.getDate() - 1);
+  while (dateKeys.has(dayKey(t))) {
+    n++;
+    t.setDate(t.getDate() - 1);
+  }
+  return n;
+}
 
 // Tab config matches prototype: 首页 / 构建 / 看板 / 我的
 const TAB_ITEMS = [
@@ -14,6 +32,25 @@ const FULLSCREEN_PATHS = ['/practice', '/call', '/review', '/login'];
 export default function Layout() {
   const location = useLocation();
   const isFullscreen = FULLSCREEN_PATHS.some((p) => location.pathname.startsWith(p));
+  /** 连续练习天数；null = 加载失败/加载中，不展示徽章 */
+  const [streak, setStreak] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (isFullscreen) return;
+    let cancelled = false;
+    fetchGrowth()
+      .then((data) => {
+        if (cancelled) return;
+        const dateKeys = new Set(data.sessions.map((s) => dayKey(new Date(s.at))));
+        setStreak(currentStreak(dateKeys));
+      })
+      .catch(() => {
+        if (!cancelled) setStreak(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isFullscreen, location.pathname]);
 
   useEffect(() => {
     if (isFullscreen) {
@@ -27,13 +64,13 @@ export default function Layout() {
   return (
     <div className="layout-wrapper">
       {/* PC Top Navigation - matches prototype .topnav */}
-      {!isFullscreen && <TopBar />}
+      {!isFullscreen && <TopBar streak={streak} />}
 
       {/* Mobile Top Bar - matches prototype .mtopbar */}
       {!isFullscreen && (
         <div className="mtopbar">
           {getPageTitle(location.pathname)}
-          <span className="right">连续 6 天</span>
+          {streak != null && streak > 0 && <span className="right">连续 {streak} 天</span>}
         </div>
       )}
 
@@ -64,7 +101,7 @@ export default function Layout() {
 }
 
 // ===== Top Bar (matches prototype .topnav) =====
-function TopBar() {
+function TopBar({ streak }: { streak: number | null }) {
   return (
     <nav className="topnav">
       <div className="inner">
@@ -89,10 +126,12 @@ function TopBar() {
 
         {/* Streak + Avatar */}
         <div className="me">
-          <span className="chip gray">
-            <i className="cdot" style={{ background: 'var(--coral)' }} />
-            连续练习 6 天
-          </span>
+          {streak != null && streak > 0 && (
+            <span className="chip gray">
+              <i className="cdot" style={{ background: 'var(--coral)' }} />
+              连续练习 {streak} 天
+            </span>
+          )}
           <NavLink to="/profile" className="avatar av5" style={{ width: 36, height: 36, fontSize: 14 }}>
             我
           </NavLink>
@@ -106,6 +145,7 @@ function TopBar() {
 function getPageTitle(pathname: string): string {
   if (pathname.startsWith('/home')) return 'Grasp';
   if (pathname.startsWith('/build')) return '构建';
+  if (pathname.startsWith('/library')) return '资源库';
   if (pathname.startsWith('/dashboard')) return '能力看板';
   if (pathname.startsWith('/profile')) return '我的';
   if (pathname.startsWith('/practice')) return '练习中';

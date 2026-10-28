@@ -679,7 +679,7 @@ h2.bar::before { content: ''; width: 4px; height: 16px; border-radius: 2px; back
 .call-side .panel { padding: 18px; margin-bottom: 14px; }
 @media (max-width:900px) { .call-side { display: none; } }
 @media (max-width:768px) {
-  body { background: #17191F; }
+  body:has(.call-card.live) { background: #17191F; }
   .call-wrap { padding: 0; display: block; }
   .call-card.live { width: 100%; min-height: calc(100dvh - 52px); border-radius: 0;
     justify-content: center; box-shadow: none; }
@@ -908,9 +908,8 @@ body.no-tab { background: linear-gradient(160deg, #FFF0EE, #F7F7F8 40%); }
 .train-card.disabled { opacity: .55; cursor: not-allowed; }
 .train-card.disabled:hover { transform: none; border-color: #F3F4F6;
   box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 10px 30px -14px rgba(16,24,40,.12); }
-.train-icon { width: 64px; height: 64px; border-radius: 18px; display: flex; align-items: center;
-  justify-content: center; font-size: 32px; margin-bottom: 16px; color: #fff;
-  box-shadow: 0 8px 16px -8px rgba(16,24,40,.35); }
+.train-icon { width: 46px; height: 46px; border-radius: 13px; display: flex; align-items: center;
+  justify-content: center; font-size: 21px; margin-bottom: 16px; }
 .train-card h3 { font-size: 19px; font-weight: 700; letter-spacing: -.01em; margin-bottom: 6px; }
 .train-card .desc { font-size: 13.5px; color: #4B5563; line-height: 1.6; flex: 1;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -924,7 +923,7 @@ body.no-tab { background: linear-gradient(160deg, #FFF0EE, #F7F7F8 40%); }
 @media (max-width:768px) {
   .train-grid { grid-template-columns: 1fr; gap: 12px; }
   .train-card { padding: 16px 14px; min-height: 0; }
-  .train-icon { width: 44px; height: 44px; font-size: 22px; border-radius: 12px; margin-bottom: 10px; }
+  .train-icon { width: 38px; height: 38px; font-size: 18px; border-radius: 11px; margin-bottom: 10px; }
   .train-card h3 { font-size: 15px; }
   .train-card .desc { font-size: 12px; }
   .train-go { padding: 5px 12px; font-size: 12px; }
@@ -943,7 +942,7 @@ body.no-tab { background: linear-gradient(160deg, #FFF0EE, #F7F7F8 40%); }
 .scene-grid .scene-card:hover { transform: translateY(-2px);
   box-shadow: 0 2px 4px rgba(16,24,40,.05), 0 10px 24px -12px rgba(16,24,40,.14); }
 .scene-grid .cover { position: relative; height: 64px; display: flex; align-items: center; justify-content: center;
-  filter: saturate(.72); }
+  border-bottom: 1px solid #F3F4F6; }
 .scene-grid .cover .cat { position: absolute; top: 8px; left: 8px; z-index: 1; background: rgba(255,255,255,.94); }
 .scene-grid .cover .diff { position: absolute; bottom: 8px; right: 8px; z-index: 1; font-size: 11px;
   color: #6B7280; background: rgba(255,255,255,.88); padding: 2px 8px; border-radius: 999px; }
@@ -967,3 +966,46 @@ body.no-tab { background: linear-gradient(160deg, #FFF0EE, #F7F7F8 40%); }
 @media (max-width:768px) {
   .scene-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
 }
+
+/* ===== 资源库管理页 ===== */
+.lib-card { padding: 16px 18px; }
+.lib-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.lib-table-wrap { overflow-x: auto; }
+.lib-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.lib-table th { color: #6B7280; font-weight: 600; white-space: nowrap; padding: 6px 8px; border-bottom: 1px solid #EBEBEF; text-align: left; }
+.lib-table td { padding: 6px 8px; border-bottom: 1px solid #F1F2F4; vertical-align: top; }
+.lib-cell { width: 100%; min-width: 72px; padding: 5px 8px; border: 1px solid #EBEBEF; border-radius: 8px; font-size: 13px; font-family: inherit; background: #fff; color: #1F2329; }
+.lib-cell:focus { outline: none; border-color: #FF6B5B; box-shadow: 0 0 0 3px #FFF0EE; }
+textarea.lib-cell { resize: vertical; line-height: 1.5; }
+tr.lib-row-draft { background: #FFFBF0; }
+tr.lib-row-dirty { background: #F0F7FF; }
+tr.lib-row-deleted { opacity: .45; }
+tr.lib-row-deleted .lib-cell { text-decoration: line-through; pointer-events: none; }
+.lib-err { color: #E85A4A; font-size: 12px; margin-top: 4px; max-width: 180px; }
+.lib-warn { color: #B87A0E; font-size: 12px; margin-top: 4px; max-width: 180px; }
+.lib-overlay { position: fixed; inset: 0; background: rgba(15, 18, 24, .4); display: flex; align-items: center; justify-content: center; z-index: 80; }
+.lib-panel { width: min(720px, 92vw); max-height: 84vh; overflow: auto; padding: 20px 22px; }
+.lib-panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.lib-panel-head h3 { font-size: 16px; }
+.lib-multi { position: relative; min-width: 110px; }
+.lib-multi summary { cursor: pointer; font-size: 12px; color: #4B7BEC; list-style: none; padding: 4px 0; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-multi-list { position: absolute; z-index: 20; background: #fff; border: 1px solid #EBEBEF; border-radius: 10px; padding: 8px 10px; max-height: 200px; overflow: auto; min-width: 170px; box-shadow: 0 10px 28px rgba(15, 18, 24, .12); }
+.lib-multi-list label { display: flex; gap: 6px; align-items: center; font-size: 12px; padding: 3px 0; white-space: nowrap; cursor: pointer; }
+.lib-sub { background: #FAFAFB; border: 1px solid #F1F2F4; border-radius: 12px; padding: 12px 14px; }
+.lib-sub h4 { font-size: 13px; margin-bottom: 8px; }
+
+/* ===== 资源库详情弹窗 ===== */
+.lib-panel-wide { width: min(860px, 94vw); }
+.lib-form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+.lib-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; min-width: 0; }
+.lib-field > span { color: #6B7280; font-size: 12px; }
+.lib-field.wide { grid-column: 1 / -1; }
+.lib-field .input { width: 100%; }
+.lib-fieldset { grid-column: 1 / -1; border: 1px solid #F1F2F4; border-radius: 12px; padding: 12px 14px; background: #FAFAFB; }
+.lib-fieldset > h4 { font-size: 13px; margin-bottom: 10px; }
+.lib-panel-foot { display: flex; align-items: center; gap: 8px; margin-top: 16px; justify-content: flex-end; }
+.lib-hint { font-size: 12px; color: #8A8F98; margin-right: auto; }
+.lib-checks { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; }
+.lib-checks label { display: flex; gap: 5px; align-items: center; cursor: pointer; }
+.lib-participant { border: 1px solid #EBEBEF; border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; background: #fff; }
+@media (max-width: 768px) { .lib-form { grid-template-columns: 1fr; } }

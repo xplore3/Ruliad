@@ -11,7 +11,7 @@ import { createSpeechGateway } from '@grasp-mvp/speech-gateway';
 import { mkEvent } from './events.js';
 import type { RouteContext } from './ctx.js';
 import { requireRoles, tokenFailReason, verifyToken } from './auth.js';
-import { seedHistory } from './seed-history.js';
+import { seedHistory, shouldSeedDemoHistory } from './seed-history.js';
 import { authRoutes } from './routes/auth.js';
 import { usersRoutes } from './routes/users.js';
 import { tasksRoutes } from './routes/tasks.js';
@@ -32,6 +32,7 @@ import { executiveRoutes } from './routes/executive.js';
 import { analyticsRoutes } from './routes/analytics.js';
 import { dataAssetsRoutes } from './routes/data-assets.js';
 import { workshopRoutes } from './routes/workshop.js';
+import { libraryRoutes } from './routes/library.js';
 import { pathsRoutes } from './routes/paths.js';
 import { eventsRoutes } from './routes/events.js';
 import { sandboxRoutes } from './routes/sandbox.js';
@@ -56,10 +57,13 @@ const gateway = createLLMGateway(process.env, {
 
 const speech = createSpeechGateway(process.env, app.log);
 const ctx: RouteContext = { store, gateway, speech };
-app.log.info(
-  `语音对练 provider: ${speech.asr.name}` +
-    (speech.asr.name === 'mock' ? '（Mock：未配置 SPEECH_PROVIDER=aliyun 或 SPEECH_API_KEY 为空，识别/合成均为模拟输出）' : '')
-);
+if (speech.asr.name === 'mock') {
+  app.log.warn(
+    '语音对练 provider: mock（正在使用 Mock provider，识别/合成均为模拟输出；配置 SPEECH_PROVIDER=aliyun 与 SPEECH_API_KEY 可切换真实服务）'
+  );
+} else {
+  app.log.info(`语音对练 provider: ${speech.asr.name}`);
+}
 
 /** 无需登录即可访问的路径（/docs 开头的 swagger 路径全部放行） */
 const PUBLIC_PATHS = new Set([
@@ -93,8 +97,13 @@ async function main() {
       app.log.info(`增量同步：补充 ${missingPersonas.length} 个陪练员（共 ${existingPersonas.length + missingPersonas.length} 个）`);
     }
   }
-  // 演示考核历史：无任何认证记录时灌入（看板开箱有数据；确定性合成，不依赖 LLM）
-  await seedHistory(store);
+  // 演示考核历史：无任何认证记录时灌入（看板开箱有数据；确定性合成，不依赖 LLM）。
+  // 仅 SEED_DEMO_HISTORY=1 或非 production 且未显式设为 0 时执行（生产默认不灌合成数据）
+  if (shouldSeedDemoHistory()) {
+    await seedHistory(store);
+  } else {
+    app.log.info('演示考核历史灌入已跳过（SEED_DEMO_HISTORY 未开启 / 生产环境）');
+  }
 
   await app.register(cors, { origin: true });
   await app.register(multipart, { limits: { fileSize: 500 * 1024 * 1024 } });
@@ -241,6 +250,20 @@ async function main() {
     (a) => {
       a.addHook('preHandler', requireRoles('admin', 'platform'));
       return workshopRoutes(a, ctx);
+    },
+    { prefix: '/api/v1' }
+  );
+  await app.register(
+    (a) => {
+      // 资源库（考题/评分项/金标准）定义本身不敏感：GET 对全员开放（学员端场景详情要展示评估维度），
+      // 写操作仍限 admin/platform
+      a.addHook('preHandler', async (req, reply) => {
+        if (req.method === 'GET') return;
+        if (req.userRole !== 'platform' && req.userRole !== 'admin') {
+          return reply.code(403).send({ error: '无权访问' });
+        }
+      });
+      return libraryRoutes(a, ctx);
     },
     { prefix: '/api/v1' }
   );

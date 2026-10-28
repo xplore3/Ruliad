@@ -73,14 +73,14 @@ export interface Scenario {
   difficulty: number;
   /** 要求学员覆盖的话题点（规则层 coverage 检查） */
   coverageTopics?: string[];
+  /** 场景背景描述（展示 + 编译进角色 prompt；不参与 coverage 字面匹配） */
+  description?: string;
   /** 客户侧一句话设定（如「冷淡型客户，时间只给 8 分钟」） */
   personaTitle?: string;
   /** 训练方法论标签（如「张伟三步破冰法 · L2」） */
   methodology?: string;
   /** 场景来源（如「官方」「企业定制」） */
   source?: string;
-  /** 是否带剧本（实用场景=有剧本；实战训练自由对练=无剧本） */
-  hasScript?: boolean;
   /** 场景类型（缺省视为 practical，兼容存量数据） */
   sceneType?: SceneType;
   /** 剧本（实用场景） */

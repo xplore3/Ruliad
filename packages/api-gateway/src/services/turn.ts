@@ -1,4 +1,4 @@
-import { EventTypes, type QuizQuestion, type Scenario, type Session, type TranscriptTurn } from '@grasp-mvp/core';
+import { EventTypes, type QuizQuestion, type QuizQuestionPublic, type Scenario, type Session, type TranscriptTurn } from '@grasp-mvp/core';
 import { bandFor, checkConsistency, compilePersona, EmotionTracker, PersonaActor } from '@grasp-mvp/role-engine';
 import type { RouteContext } from '../ctx.js';
 import { mkEvent } from '../events.js';
@@ -36,7 +36,7 @@ export async function loadRuntime(ctx: RouteContext, scenario: Scenario) {
     productKB = await ctx.store.getProductKB(personaConfig.tenantId);
   }
 
-  const bundle = compilePersona(personaConfig, elements, productKB);
+  const bundle = compilePersona(personaConfig, elements, productKB, scenario);
   return { personaConfig, bundle, productKB };
 }
 
@@ -47,8 +47,13 @@ arousal: number | null;
 bandKey: string | null;
 remainingSeconds: number;
 timeUp?: boolean;
-/** 本轮触发的待弹出考题 */
-pendingQuizzes?: QuizQuestion[];
+/** 本轮触发的待弹出考题（脱敏视图，不含答案） */
+pendingQuizzes?: QuizQuestionPublic[];
+}
+
+/** 完整考题 → 下发前端的脱敏视图（剥离答案、参考要点、解析与触发条件） */
+function toPublicQuiz(q: QuizQuestion): QuizQuestionPublic {
+return { id: q.id, type: q.type, prompt: q.prompt, options: q.options, score: q.score, required: q.required };
 }
 
 /**
@@ -113,7 +118,6 @@ export async function runTurn(
   const { store, gateway } = ctx;
   const isSystemGreeting = text === SYSTEM_GREETING_TOKEN;
   const displayText = isSystemGreeting ? '（电话接通）' : text;
-  console.log(`[runTurn] ENTER: sessionId=${session.id} scenarioId=${scenario.id} text="${displayText.slice(0, 60)}"`);
 
   const now = new Date().toISOString();
   const traineeTurn: TranscriptTurn = {
@@ -154,7 +158,6 @@ export async function runTurn(
     console.error('[runTurn] persona 运行时加载失败, scenarioId=', scenario.id, 'personaConfigId=', scenario.personaConfigId);
     return null;
   }
-  console.log(`[runTurn] runtime loaded ok: personaConfigId=${runtime.personaConfig.id} personaName=${runtime.personaConfig.name}`);
   const { bundle } = runtime;
 
   // 请求无状态：用上轮 arousal 重建 tracker
@@ -168,21 +171,14 @@ export async function runTurn(
 
   const actor = new PersonaActor(gateway.forTask('actor'));
   const transcriptSoFar = [...session.transcript, traineeTurn];
-  console.log('[runTurn] 调用 LLM actor.reply, sessionId=', session.id, 'seq=', traineeTurn.seq, 'text=', text.slice(0, 80));
-  let replyText = await actor.reply(bundle, band, transcriptSoFar);
-  console.log('[runTurn] LLM 回复成功, reply=', replyText.slice(0, 80));
+  let replyText = await actor.reply(bundle, band, transcriptSoFar, session.coachIntensity);
 
   // 一致性校验：出戏/泄露则带纠正指令重生成一次，仍不通过用兜底文案
-  console.log(`[runTurn] calling judge consistency check #1...`);
   const firstCheck = await checkConsistency(gateway.forTask('judge'), bundle, replyText);
-  console.log(`[runTurn] judge #1 result: pass=${firstCheck.pass} reasons=${JSON.stringify(firstCheck.reasons ?? [])}`);
   if (!firstCheck.pass) {
-    console.log('[runTurn] consistency FAIL → retry with correction instruction');
     const retryBand = { ...band, instruction: band.instruction + CONSISTENCY_CORRECTION };
-      replyText = await actor.reply(bundle, retryBand, transcriptSoFar);
-      console.log(`[runTurn] retry reply="${replyText.slice(0, 80)}"`);
+      replyText = await actor.reply(bundle, retryBand, transcriptSoFar, session.coachIntensity);
       const secondCheck = await checkConsistency(gateway.forTask('judge'), bundle, replyText);
-      console.log(`[runTurn] judge #2 result: pass=${secondCheck.pass}`);
     if (!secondCheck.pass) {
       replyText = CONSISTENCY_FALLBACK;
     }
@@ -237,17 +233,14 @@ payload: { arousal: snapshot.arousal, bandKey: snapshot.bandKey, triggeredBy: sn
 );
 
 // ---- 考题触发检测 ----
-console.log('[runTurn] 开始考题触发检测, sessionId=', session.id);
 const pendingQuizzes = await checkQuizTriggers(ctx, session, scenario, displayText, traineeTurn.seq);
-console.log('[runTurn] 考题触发检测完成, pending=', pendingQuizzes.length);
 
-console.log(`[runTurn] RETURN: replyText="${personaTurn.text.slice(0, 80)}..." arousal=${snapshot.arousal} bandKey=${snapshot.bandKey}`);
 return {
 traineeTurn,
 personaTurn,
 arousal: snapshot.arousal,
 bandKey: snapshot.bandKey,
 remainingSeconds: remainingSeconds({ ...session, startedAt: session.startedAt }, scenario),
-pendingQuizzes: pendingQuizzes.length > 0 ? pendingQuizzes : undefined,
+pendingQuizzes: pendingQuizzes.length > 0 ? pendingQuizzes.map(toPublicQuiz) : undefined,
 };
 }

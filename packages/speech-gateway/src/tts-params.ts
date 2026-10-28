@@ -24,14 +24,21 @@ function round2(x: number): number {
  * 激情模式（excitement>1）目标值固定在自然但高能量的区间：语速 ≤1.15（略快）、音调 ≤1.1（接近正常，仅保留一点明亮度）、
  * 音量 ≤65——音调过高会有"夹子音"，语速过快会听不清，激情主要由元气音色本身和足量音量承担。
  * 非激情模式语速/音调上限为 CosyVoice 参数上限 2.0。
+ * rate 为调用方显式指定的语速倍率（0.5~2.0）：在情绪推导语速基础上等比缩放，结果仍钳制在 0.5~2。
  */
-export function arousalToTTSParams(arousal: number | undefined, excitement = 1): TTSVoiceParams {
+export function arousalToTTSParams(
+  arousal: number | undefined,
+  excitement = 1,
+  rate?: number
+): TTSVoiceParams {
   const a = clamp01(arousal ?? 0.3);
   const t = Math.max(0, (a - 0.4) / 0.6) * Math.max(1, excitement);
   const passion = excitement > 1;
+  const r = rate !== undefined && Number.isFinite(rate) ? Math.min(2, Math.max(0.5, rate)) : 1;
   return {
-    speechRate: round2(Math.min(passion ? 1.15 : 2, 1 + t * 0.35)),
+    speechRate: round2(Math.min(passion ? 1.15 : 2, Math.max(0.5, (1 + t * 0.35) * r))),
     pitchRate: round2(Math.min(passion ? 1.1 : 2, 1 + t * 0.2)),
     volume: Math.min(passion ? 65 : 100, Math.round(50 + t * 10)),
+
   };
 }

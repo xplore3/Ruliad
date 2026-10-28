@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   fetchScenarios,
   createScenario,
@@ -211,6 +212,7 @@ function avatarFor(id: string): string {
 
 export default function Build() {
   const isAdmin = getStoredUser()?.role === 'admin';
+  const navigate = useNavigate();
 
   const [activeTab, setActiveTab] = useState<'list' | 'editor'>('list');
   const [activeStep, setActiveStep] = useState<EditorStep>('base');
@@ -490,7 +492,7 @@ export default function Build() {
       ...EMPTY_FORM,
       name: scenario.name,
       category: CATEGORIES.some((c) => c.key === scenario.methodology) ? scenario.methodology! : EMPTY_FORM.category,
-      description: scenario.coverageTopics?.[0] ?? '',
+      description: scenario.description ?? '',
       difficulty: scenario.difficulty || 1,
       duration: scenario.durationMinutes || 5,
       sceneType: scenario.sceneType ?? 'practical',
@@ -515,7 +517,7 @@ export default function Build() {
   const handleDuplicate = async (scenario: Scenario) => {
     if (!isAdmin) return;
     try {
-      const { scenario: created } = await createScenario({
+      const created = await createScenario({
         name: `${scenario.name}（副本）`,
         personaConfigId: scenario.personaConfigId,
         skillPointIds: skillIdsFromNames(scenario.skillPointNames),
@@ -599,17 +601,24 @@ export default function Build() {
     const passScore = Number.isFinite(parsed) && parsed > 0 ? Math.min(100, Math.round(parsed)) : 60;
     /** 多值文本（换行/分号分隔）拆成数组 */
     const splitLines = (s: string) => s.split(/[\n；;]/).map((x) => x.trim()).filter(Boolean);
-    // 实战训练为无剧本自由对练：不保存剧本，并清空已有剧本
+    // 我方目标作为评估准绳并入 script.purpose（judge/教练提示均引用）；禁止事项并入考核点。
+    // 实战训练（drill）为无剧本自由对练：不保存剧本流程类字段，但保留目标/禁止事项作为评估依据
+    const goalText = form.goal.trim();
+    const doNotText = form.doNot.trim();
+    const assessmentPoints = splitLines(form.scriptAssessmentPoints);
+    if (doNotText) assessmentPoints.push(`禁止：${doNotText}`);
     const scriptPayload =
       form.sceneType === 'practical'
         ? {
             executionOrder: form.scriptExecutionOrder.trim() || undefined,
-            purpose: form.scriptPurpose.trim() || undefined,
+            purpose: form.scriptPurpose.trim() || goalText || undefined,
             topics: splitLines(form.scriptTopics),
             customerQuestions: splitLines(form.scriptCustomerQuestions),
-            assessmentPoints: splitLines(form.scriptAssessmentPoints),
+            assessmentPoints,
           }
-        : null;
+        : goalText || doNotText
+          ? { purpose: goalText || undefined, assessmentPoints }
+          : null;
     const participantsPayload = form.participants
       .filter((p) => p.name.trim())
       .map((p) => ({
@@ -638,7 +647,10 @@ export default function Build() {
           passScore,
           durationMinutes: form.duration,
           difficulty: form.difficulty,
-          coverageTopics: form.description.trim() ? [form.description.trim()] : [],
+          // 场景描述走独立 description 字段；coverageTopics 是规则层字面匹配的话题点，
+          // 编辑器不提供维护入口，清空以避免旧数据把整段描述当话题导致 coverage-miss 误报
+          coverageTopics: [],
+          description: form.description.trim() || null,
           methodology: form.category,
           source: '自建',
           sceneType: form.sceneType,
@@ -646,16 +658,16 @@ export default function Build() {
           participants: participantsPayload,
         });
       } else {
-        const { persona } = await createPersonaConfig(personaPayload);
+        const persona = await createPersonaConfig(personaPayload);
         personaConfigId = persona.id;
-        const { scenario } = await createScenario({
+        const scenario = await createScenario({
           name: form.name.trim(),
           personaConfigId: persona.id,
           skillPointIds: form.skillPointIds,
           passScore,
           durationMinutes: form.duration,
           difficulty: form.difficulty,
-          coverageTopics: form.description.trim() ? [form.description.trim()] : [],
+          description: form.description.trim() || undefined,
           methodology: form.category,
           source: '自建',
           sceneType: form.sceneType,
@@ -749,9 +761,16 @@ export default function Build() {
         <section className="section">
           <div className="sec-head">
             <h2><span>🛠️</span> 我的场景</h2>
-            <button onClick={() => { handleReset(); setEditorMode('voice'); setActiveTab('editor'); }} className="btn btn-primary">
-              ＋ 新建场景
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {isAdmin && (
+                <button className="btn btn-ghost" onClick={() => navigate('/library')}>
+                  🗂 资源库管理
+                </button>
+              )}
+              <button onClick={() => { handleReset(); setEditorMode('voice'); setActiveTab('editor'); }} className="btn btn-primary">
+                ＋ 新建场景
+              </button>
+            </div>
           </div>
           {listLoading ? (
             <div className="empty">
@@ -776,7 +795,8 @@ export default function Build() {
                     <div className="sbody">
                       <h3>{scenario.name}</h3>
                       <p className="desc">
-                        {scenario.coverageTopics?.join('；') ||
+                        {scenario.description ||
+                          scenario.coverageTopics?.join('；') ||
                           [scenario.personaName, scenario.personaTitle].filter(Boolean).join(' · ') ||
                           '暂无描述'}
                       </p>
@@ -1143,7 +1163,7 @@ export default function Build() {
                     <div className="row2">
                       <div className="field">
                         <label>名称 / 角色</label>
-                        <input type="text" value={p.name} onChange={(e) => updateParticipant(idx, { name: e.target.value })} className="input" placeholder="如：孟建国（门诊主任）" maxLength={30} />
+                        <input type="text" value={p.name} onChange={(e) => updateParticipant(idx, { name: e.target.value })} className="input" placeholder="如：孟建国（学生家长）" maxLength={30} />
                       </div>
                       <div className="field">
                         <label>参与目的</label>

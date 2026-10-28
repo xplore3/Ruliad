@@ -17,6 +17,10 @@ interface PersonaBody {
   voiceProfile?: Record<string, unknown>;
 }
 
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((x) => typeof x === 'string');
+}
+
 /** 校验角色配置请求体；返回错误消息，null 表示通过 */
 function validatePersonaBody(body: PersonaBody): string | null {
   if (!body.name?.trim()) return 'name 必填';
@@ -89,16 +93,16 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
       durationMinutes: number;
       difficulty?: number;
       coverageTopics?: string[];
+      description?: string;
       productKBId?: string;
       methodology?: string;
       source?: string;
-      hasScript?: boolean;
       sceneType?: SceneType;
       script?: ScenarioScript;
       participants?: ScenarioParticipant[];
     };
   }>('/scenarios', { preHandler: requireRoles('admin') }, async (request, reply) => {
-    const { name, personaConfigId, skillPointIds, passScore, durationMinutes, difficulty, coverageTopics, productKBId, methodology, source, hasScript, sceneType, script, participants } =
+    const { name, personaConfigId, skillPointIds, passScore, durationMinutes, difficulty, coverageTopics, description, productKBId, methodology, source, sceneType, script, participants } =
       request.body ?? {};
     if (!name || !personaConfigId || !Array.isArray(skillPointIds) || skillPointIds.length === 0) {
       return reply.code(400).send({ error: 'name / personaConfigId / skillPointIds 必填' });
@@ -109,11 +113,22 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     if (typeof passScore !== 'number' || typeof durationMinutes !== 'number') {
       return reply.code(400).send({ error: 'passScore / durationMinutes 必须为数字' });
     }
+    if (difficulty !== undefined && typeof difficulty !== 'number') {
+      return reply.code(400).send({ error: 'difficulty 必须为数字' });
+    }
+    if (coverageTopics !== undefined && !isStringArray(coverageTopics)) {
+      return reply.code(400).send({ error: 'coverageTopics 必须为字符串数组' });
+    }
     const persona = await store.getPersonaConfig(personaConfigId);
     if (!persona) return reply.code(400).send({ error: 'personaConfigId 不存在' });
+    if (persona.tenantId !== request.tenantId) {
+      return reply.code(400).send({ error: 'personaConfigId 不属于本租户' });
+    }
     for (const spId of skillPointIds) {
-      if (!(await store.getSkillPoint(spId))) {
-        return reply.code(400).send({ error: `技能点不存在: ${spId}` });
+      const sp = await store.getSkillPoint(spId);
+      if (!sp) return reply.code(400).send({ error: `技能点不存在: ${spId}` });
+      if (sp.tenantId !== request.tenantId) {
+        return reply.code(400).send({ error: `技能点不属于本租户: ${spId}` });
       }
     }
 
@@ -128,10 +143,9 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
       durationMinutes,
       difficulty: difficulty ?? 1,
       coverageTopics,
+      description,
       methodology,
       source,
-      // 未显式指定时按场景类型同步：实战训练=无剧本，实用场景=有剧本
-      hasScript: hasScript ?? (sceneType ?? 'practical') !== 'drill',
       sceneType,
       script,
       participants,
@@ -151,10 +165,10 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
       durationMinutes?: number;
       difficulty?: number;
       coverageTopics?: string[];
+      description?: string | null;
       productKBId?: string | null;
       methodology?: string;
       source?: string;
-      hasScript?: boolean;
       sceneType?: SceneType;
       script?: ScenarioScript | null;
       participants?: ScenarioParticipant[] | null;
@@ -170,6 +184,9 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     if (body.personaConfigId !== undefined) {
       const persona = await store.getPersonaConfig(body.personaConfigId);
       if (!persona) return reply.code(400).send({ error: 'personaConfigId 不存在' });
+      if (persona.tenantId !== request.tenantId) {
+        return reply.code(400).send({ error: 'personaConfigId 不属于本租户' });
+      }
       scenario.personaConfigId = body.personaConfigId;
     }
     if (body.skillPointIds !== undefined) {
@@ -177,8 +194,10 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
         return reply.code(400).send({ error: 'skillPointIds 必须为非空数组' });
       }
       for (const spId of body.skillPointIds) {
-        if (!(await store.getSkillPoint(spId))) {
-          return reply.code(400).send({ error: `技能点不存在: ${spId}` });
+        const sp = await store.getSkillPoint(spId);
+        if (!sp) return reply.code(400).send({ error: `技能点不存在: ${spId}` });
+        if (sp.tenantId !== request.tenantId) {
+          return reply.code(400).send({ error: `技能点不属于本租户: ${spId}` });
         }
       }
       scenario.skillPointIds = body.skillPointIds;
@@ -195,19 +214,27 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
       }
       scenario.durationMinutes = body.durationMinutes;
     }
-    if (body.difficulty !== undefined) scenario.difficulty = body.difficulty;
-    if (body.coverageTopics !== undefined) scenario.coverageTopics = body.coverageTopics;
+    if (body.difficulty !== undefined) {
+      if (typeof body.difficulty !== 'number') {
+        return reply.code(400).send({ error: 'difficulty 必须为数字' });
+      }
+      scenario.difficulty = body.difficulty;
+    }
+    if (body.coverageTopics !== undefined) {
+      if (!isStringArray(body.coverageTopics)) {
+        return reply.code(400).send({ error: 'coverageTopics 必须为字符串数组' });
+      }
+      scenario.coverageTopics = body.coverageTopics;
+    }
+    if (body.description !== undefined) scenario.description = body.description ?? undefined;
     if (body.productKBId !== undefined) scenario.productKBId = body.productKBId || undefined;
     if (body.methodology !== undefined) scenario.methodology = body.methodology;
     if (body.source !== undefined) scenario.source = body.source;
-    if (body.hasScript !== undefined) scenario.hasScript = body.hasScript;
     if (body.sceneType !== undefined) {
       if (body.sceneType !== 'drill' && body.sceneType !== 'practical') {
         return reply.code(400).send({ error: "sceneType 仅支持 'drill' | 'practical'" });
       }
       scenario.sceneType = body.sceneType;
-      // 场景类型变化且未显式传 hasScript 时同步：实战训练=无剧本
-      if (body.hasScript === undefined) scenario.hasScript = body.sceneType !== 'drill';
     }
     if (body.script !== undefined) scenario.script = body.script ?? undefined;
     if (body.participants !== undefined) scenario.participants = body.participants ?? undefined;
@@ -283,26 +310,50 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
         return reply.code(404).send({ error: '角色不存在' });
       }
       const body = request.body ?? {};
-      const error = validatePersonaBody(body);
-      if (error) return reply.code(400).send({ error });
+      // 部分更新（patch 语义）：只校验出现的字段，未传字段保留原值，
+      // 避免管理端只传部分字段时清空 elementIds/age/knowledgeBoundary 等
+      if (body.name !== undefined && !body.name.trim()) {
+        return reply.code(400).send({ error: 'name 不能为空' });
+      }
+      if (body.background !== undefined && !body.background.trim()) {
+        return reply.code(400).send({ error: 'background 不能为空' });
+      }
+      if (body.age !== undefined && (!Number.isFinite(body.age) || body.age <= 0)) {
+        return reply.code(400).send({ error: 'age 必须为正数' });
+      }
+      if (body.behaviorBands !== undefined) {
+        const bandError = validatePersonaBody({
+          name: 'x',
+          background: 'x',
+          behaviorBands: body.behaviorBands,
+        });
+        if (bandError) return reply.code(400).send({ error: bandError });
+      }
+      if (body.elementIds !== undefined && !Array.isArray(body.elementIds)) {
+        return reply.code(400).send({ error: 'elementIds 必须为数组' });
+      }
       const elementError = await checkElementIds(body.elementIds ?? [], request.tenantId);
       if (elementError) return reply.code(400).send({ error: elementError });
       const persona: PersonaConfig = {
         ...existing,
-        name: body.name!.trim(),
-        background: body.background!.trim(),
-        age: body.age,
-        occupation: body.occupation?.trim() || undefined,
-      elementIds: body.elementIds ?? [],
-      productKBId: body.productKBId !== undefined ? (body.productKBId || undefined) : existing.productKBId,
-      behaviorBands: body.behaviorBands!,
-      knowledgeBoundary: {
-        mustNotKnow: body.knowledgeBoundary?.mustNotKnow ?? [],
-        loadedKnowledge: body.knowledgeBoundary?.loadedKnowledge ?? [],
-      },
-      voiceProfile: body.voiceProfile ?? existing.voiceProfile,
-      version: existing.version + 1,
-    };
+        name: body.name?.trim() ?? existing.name,
+        background: body.background?.trim() ?? existing.background,
+        age: body.age ?? existing.age,
+        occupation:
+          body.occupation !== undefined ? body.occupation.trim() || undefined : existing.occupation,
+        elementIds: body.elementIds ?? existing.elementIds,
+        productKBId: body.productKBId !== undefined ? (body.productKBId || undefined) : existing.productKBId,
+        behaviorBands: body.behaviorBands ?? existing.behaviorBands,
+        knowledgeBoundary: body.knowledgeBoundary
+          ? {
+              mustNotKnow: body.knowledgeBoundary.mustNotKnow ?? existing.knowledgeBoundary.mustNotKnow,
+              loadedKnowledge:
+                body.knowledgeBoundary.loadedKnowledge ?? existing.knowledgeBoundary.loadedKnowledge,
+            }
+          : existing.knowledgeBoundary,
+        voiceProfile: body.voiceProfile ?? existing.voiceProfile,
+        version: existing.version + 1,
+      };
     await store.savePersonaConfig(persona);
     return persona;
     }

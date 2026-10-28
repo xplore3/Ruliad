@@ -6,6 +6,8 @@
  *    tts_cancelled/turn_complete/listening/error/stopped）
  */
 
+import { getCachedPreferences, getPreferredSpeechRate } from './api';
+
 // ---------- 麦克风采集 ----------
 
 const TARGET_SAMPLE_RATE = 16000;
@@ -39,6 +41,10 @@ export class PcmRecorder {
 
   async start(): Promise<void> {
     if (this.running) return;
+    // 隐私设置：录音与分析授权关闭时拒绝启动（Practice/Call 均经此入口）
+    if (getCachedPreferences().recordingConsent === false) {
+      throw new Error('录音与分析授权已关闭，请在「设置 - 隐私」中开启后再练习');
+    }
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
     });
@@ -149,13 +155,19 @@ export class TtsPlayer {
   private ctx: AudioContext | null = null;
   private queue: AudioBuffer[] = [];
   private playing = false;
+  /** 暂停中：音频仍解码入队但不播放，恢复后从队列继续 */
+  private paused = false;
   private currentSource: AudioBufferSourceNode | null = null;
+  /** 当前播放段的缓冲（暂停时回退队首用） */
+  private currentBuffer: AudioBuffer | null = null;
   /** 流式 tts_chunk 按 seq 累积 */
   private chunkBuffers = new Map<number, string[]>();
   /** 解码中的音频段数（入队前的异步间隙也算占用，防止误判空闲） */
   private decoding = 0;
   /** stopAll 代数：打断后丢弃在途解码结果，避免旧音频插队播放 */
   private generation = 0;
+  /** 解码任务串行链：并发 decodeAudioData 完成顺序不定，后到的短句会插队先播 */
+  private decodeTail: Promise<void> = Promise.resolve();
 
   get isPlaying() {
     return this.playing;
@@ -174,7 +186,8 @@ export class TtsPlayer {
 
   /** 非流式：整段音频（wav base64）直接入队 */
   enqueue(audioBase64: string) {
-    void this.decodeAndQueue(audioBase64);
+    const bytes = Uint8Array.from(atob(audioBase64), (c) => c.charCodeAt(0));
+    this.enqueueBytes(bytes);
   }
 
   /** 流式：tts_chunk 分片，isFinal 时拼接成完整 wav 入队 */
@@ -193,17 +206,17 @@ export class TtsPlayer {
       merged.set(b, offset);
       offset += b.length;
     }
-    void this.decodeBytesAndQueue(merged);
+    this.enqueueBytes(merged);
   }
 
-  private async decodeAndQueue(audioBase64: string) {
-    const bytes = Uint8Array.from(atob(audioBase64), (c) => c.charCodeAt(0));
-    await this.decodeBytesAndQueue(bytes);
-  }
-
-  private async decodeBytesAndQueue(bytes: Uint8Array) {
+  /** 解码任务挂到串行链尾部：保证入队顺序与到达顺序一致 */
+  private enqueueBytes(bytes: Uint8Array) {
     this.decoding++;
     const gen = this.generation;
+    this.decodeTail = this.decodeTail.then(() => this.decodeOne(bytes, gen));
+  }
+
+  private async decodeOne(bytes: Uint8Array, gen: number) {
     try {
       const ctx = this.ensureCtx();
       const copy = new Uint8Array(bytes.byteLength);
@@ -222,11 +235,12 @@ export class TtsPlayer {
   }
 
   private async playNext(): Promise<void> {
+    if (this.paused) return;
     const buf = this.queue.shift();
     if (!buf) {
       this.playing = false;
       // 还有句子在解码：不是真正空闲，等解码完成后再判断
-      if (this.decoding === 0) this.onIdle?.();
+      if (this.decoding === 0 && !this.paused) this.onIdle?.();
       return;
     }
     this.playing = true;
@@ -235,11 +249,39 @@ export class TtsPlayer {
     src.buffer = buf;
     src.connect(ctx.destination);
     this.currentSource = src;
+    this.currentBuffer = buf;
     src.onended = () => {
-      if (this.currentSource === src) this.currentSource = null;
+      if (this.currentSource === src) {
+        this.currentSource = null;
+        this.currentBuffer = null;
+      }
       void this.playNext();
     };
     src.start();
+  }
+
+  /** 暂停播放：当前一句回退到队首（恢复后重播该句），保留队列；暂停期间到达的音频照常入队但不出声 */
+  pause() {
+    this.paused = true;
+    if (this.currentSource) {
+      try {
+        this.currentSource.stop();
+      } catch {
+        /* 已停止 */
+      }
+      this.currentSource = null;
+      // 当前句未播完：放回队首，恢复后从头重播，避免整句被跳过
+      if (this.currentBuffer) this.queue.unshift(this.currentBuffer);
+      this.currentBuffer = null;
+    }
+    this.playing = false;
+  }
+
+  /** 恢复播放：从队列继续播暂停期间累积的音频 */
+  resumePlayback() {
+    if (!this.paused) return;
+    this.paused = false;
+    if (!this.playing && this.queue.length > 0) void this.playNext();
   }
 
   /** 打断：清空队列并停止当前播放 */
@@ -253,6 +295,7 @@ export class TtsPlayer {
       /* 已停止 */
     }
     this.currentSource = null;
+    this.currentBuffer = null;
     this.playing = false;
   }
 
@@ -270,6 +313,8 @@ export class TtsPlayer {
 
 // ---------- 语音 WebSocket ----------
 
+import type { QuizQuestion } from './types';
+
 export interface VoiceServerEvent {
   type: string;
   text?: string;
@@ -283,6 +328,7 @@ export interface VoiceServerEvent {
     personaTurn: { seq: number; speaker: string; text: string; at: string };
     remainingSeconds: number;
     timeUp?: boolean;
+    pendingQuizzes?: QuizQuestion[];
   };
   emotion?: { arousal: number | null; bandKey: string | null };
 }
@@ -325,7 +371,10 @@ export class VoiceSocket {
   }
 
   send(msg: Record<string, unknown>) {
-    if (this.isOpen) this.ws!.send(JSON.stringify(msg));
+    if (!this.isOpen) return;
+    // start 消息自动带上设置页的默认语速偏好（TTS rate），调用方无需改动
+    const payload = msg.type === 'start' ? { rate: getPreferredSpeechRate(), ...msg } : msg;
+    this.ws!.send(JSON.stringify(payload));
   }
 
   close() {

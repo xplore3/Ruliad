@@ -1,6 +1,7 @@
 import type {
   LLMGateway,
   LLMProvider,
+  Scenario,
   ScoreItemDef,
   ScoreItemResult,
   Session,
@@ -14,16 +15,25 @@ interface JudgeParsed {
   betterScript: string;
 }
 
-/** 组装 judge prompt：评分项定义 + 档位 JSON + 带 seq 的转写 */
-function buildJudgePrompt(def: ScoreItemDef, session: Session): string {
+/** 组装 judge prompt：评分项定义 + 档位 JSON + 场景考核点 + 带 seq 的转写 */
+function buildJudgePrompt(def: ScoreItemDef, session: Session, scenario?: Scenario): string {
   const transcriptLines = session.transcript
     .filter((t) => t.speaker !== 'coach')
     .map((t) => `[${t.seq}] ${t.speaker === 'trainee' ? '学员' : '客户'}：${t.text}`)
     .join('\n');
+  const scenarioLines: string[] = [];
+  if (scenario) {
+    scenarioLines.push(`练习场景：${scenario.name}`);
+    if (scenario.script?.purpose) scenarioLines.push(`剧本目的：${scenario.script.purpose}`);
+    if (scenario.script?.assessmentPoints?.length) {
+      scenarioLines.push(`本场主要考核点：${scenario.script.assessmentPoints.join('；')}`);
+    }
+  }
   return [
     def.judgePrompt,
     `评分项：${def.name}`,
     `行为锚定：${def.behaviorAnchor}`,
+    ...scenarioLines,
     `可选档位（JSON）：${JSON.stringify(def.levels)}`,
     '对话记录：',
     transcriptLines,
@@ -76,9 +86,10 @@ async function runJudge(
 export async function judgeItem(
   def: ScoreItemDef,
   session: Session,
-  gateway: LLMGateway
+  gateway: LLMGateway,
+  scenario?: Scenario
 ): Promise<ScoreItemResult> {
-  const prompt = buildJudgePrompt(def, session);
+  const prompt = buildJudgePrompt(def, session, scenario);
   const primary = await runJudge(gateway.forTask('judge'), prompt, def);
   const secondary = await runJudge(gateway.forTask('judge_secondary'), prompt, def);
 

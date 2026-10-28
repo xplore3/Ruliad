@@ -153,7 +153,12 @@ export default function Login() {
 
         <div className="agree" onClick={() => setAgreed((v) => !v)}>
           <span className="box">{agreed ? '✓' : ''}</span>
-          <span>我已阅读并同意<a>《用户协议》</a>和<a>《隐私政策》</a></span>
+          <span>
+            我已阅读并同意
+            <a href="/agreement" target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>《用户协议》</a>
+            和
+            <a href="/privacy" target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>《隐私政策》</a>
+          </span>
         </div>
 
         {error && <p style={{ fontSize: 12, color: '#E85C62', margin: '4px 0 10px' }}>{error}</p>}
@@ -162,15 +167,6 @@ export default function Login() {
           {loading ? '登录中…' : '登录 / 注册'}
         </a>
 
-        <div className="or">其他方式</div>
-        <div className="social">
-          <a onClick={() => setError('微信登录暂未开放')}><span className="sbtn wx">微</span>微信</a>
-          <a onClick={() => setError('Apple 登录暂未开放')}><span className="sbtn apple">
-            <svg viewBox="0 0 24 24" className="w-5 h-5" fill="currentColor">
-              <path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8.98-.2 1.92-.86 3.24-.77 1.58.13 2.77.75 3.55 1.9-3.27 1.96-2.5 6.27.53 7.5-.6 1.57-1.37 3.13-2.4 3.54ZM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25Z" />
-            </svg>
-          </span>Apple</a>
-        </div>
         {authMode === 'code' ? (
           <a className="pwd-link" onClick={() => { setAuthMode('pwd'); setError(''); }}>密码登录 ›</a>
         ) : (

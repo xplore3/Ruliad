@@ -1,11 +1,15 @@
 import type { RuleViolation, ScoreReport, Session } from '@grasp-mvp/core';
 
 /** 合规红线词（一票否决） */
-const REDLINE_PATTERN = /保证收益|一定赔|肯定赚|稳赚|保本/;
+const REDLINE_PATTERN = /保证提分|包过|百分百考上名校|考不上全额退款|绝对有效果|一夜逆袭/;
 /** 口头禅/填充词 */
 const FILLER_WORDS = ['其实', '那个', '就是说', '然后', '嗯'];
 /** 口头禅总次数阈值 */
 const FILLER_TOTAL_THRESHOLD = 10;
+/** 停顿判定阈值：学员应答前静默超过该毫秒数记为一次明显停顿 */
+const PAUSE_THRESHOLD_MS = 3000;
+/** 估算单字说话耗时（毫秒）：约 240 字/分钟，用于从轮次间隔中扣除上一轮说话时长 */
+const MS_PER_CHAR = 250;
 
 function countOccurrences(text: string, word: string): number {
   let count = 0;
@@ -95,8 +99,50 @@ export function runRuleChecks(
     });
   }
 
+  // ---- 状态指标：发言占比 / 语速 / 停顿（均由转写文本与时间戳推算） ----
+  const charsOf = (speaker: Session['transcript'][number]['speaker']) =>
+    session.transcript
+      .filter((t) => t.speaker === speaker)
+      .reduce((sum, t) => sum + t.text.length, 0);
+  const traineeChars = charsOf('trainee');
+  const totalChars = traineeChars + charsOf('persona');
+  const talkRatio = totalChars > 0 ? traineeChars / totalChars : 0;
+
+  // 对话时间窗：首轮到末轮的时间戳（缺失时回退会话起止），扣除累计暂停
+  const firstAt = Date.parse(session.transcript[0]?.at ?? session.startedAt);
+  const lastAt = Date.parse(
+    session.transcript[session.transcript.length - 1]?.at ?? session.endedAt ?? session.startedAt
+  );
+  const activeMs =
+    Number.isFinite(firstAt) && Number.isFinite(lastAt)
+      ? Math.max(0, lastAt - firstAt - (session.pausedMs ?? 0))
+      : 0;
+  // 双方按同一语速说话 → 学员语速 ≈ 时间窗内总字数 / 时长
+  const avgSpeechRate = activeMs > 0 ? Math.round(totalChars / (activeMs / 60000)) : 0;
+
+  // 停顿：学员轮开始前，距上一轮的时间间隔扣除上一轮说话时长后仍超阈值
+  let pauseCount = 0;
+  for (let i = 1; i < session.transcript.length; i++) {
+    const prev = session.transcript[i - 1];
+    const curr = session.transcript[i];
+    if (curr.speaker !== 'trainee') continue;
+    const gapMs = Date.parse(curr.at) - Date.parse(prev.at);
+    if (!Number.isFinite(gapMs)) continue;
+    if (gapMs - prev.text.length * MS_PER_CHAR > PAUSE_THRESHOLD_MS) {
+      pauseCount++;
+    }
+  }
+
   return {
     violations,
-    stats: { interruptions, fillerCounts, coverageHits, coverageMisses },
+    stats: {
+      interruptions,
+      fillerCounts,
+      coverageHits,
+      coverageMisses,
+      talkRatio,
+      avgSpeechRate,
+      pauseCount,
+    },
   };
 }

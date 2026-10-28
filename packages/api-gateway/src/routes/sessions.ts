@@ -19,8 +19,9 @@ const MIN_DURATION_SECONDS = 30;
 
 /**
  * 结束会话并评分：end 端点与监考自动交卷共用。
- * 场景缺失时返回 null（调用方按 500 处理）；评分、bestScore、reviewDueAt、
- * UserSkillState、cert 签发、事件行为与原 end 端点完全一致。
+ * 场景已删除时无法评分，会话标记 abandoned 并返回 skippedReport；
+ * 评分异常时会话回滚为 active，允许调用方重试。
+ * 评分、bestScore、reviewDueAt、UserSkillState、cert 签发、事件行为与原 end 端点完全一致。
  *
  * 当学员发言轮次过少或对练时长过短时，跳过评分报告，会话标记为 abandoned。
  */
@@ -31,8 +32,24 @@ async function finalizeSession(session: Session, ctx: RouteContext, log?: Fastif
 
   const scenario = await store.getScenario(session.scenarioId);
   if (!scenario) {
-    log?.warn({ sessionId: session.id, scenarioId: session.scenarioId }, '结束会话：场景缺失，评分中止');
-    return null;
+    // 场景已被删除：无法评分，将活跃会话标记 abandoned，避免永远卡 active 的僵尸会话
+    log?.warn({ sessionId: session.id, scenarioId: session.scenarioId }, '结束会话：场景已删除，标记 abandoned');
+    const endedAt = new Date().toISOString();
+    await store.updateSession(session.id, { status: 'abandoned', endedAt });
+    void store.appendEvent(
+      mkEvent(EventTypes.SESSION_COMPLETED, {
+        tenantId: session.tenantId,
+        sessionId: session.id,
+        userId: session.userId,
+        payload: {
+          scenarioId: session.scenarioId,
+          mode: session.mode,
+          skipped: true,
+          reason: 'scenario_deleted',
+        },
+      })
+    );
+    return { sessionId: session.id, skippedReport: true, reason: 'scenario_deleted' };
   }
 
   const endedAt = new Date().toISOString();
@@ -70,23 +87,33 @@ async function finalizeSession(session: Session, ctx: RouteContext, log?: Fastif
   const completed: Session = { ...session, status: 'completed', endedAt };
   await store.updateSession(session.id, { status: 'completed', endedAt });
 
-  const defs = await store.listScoreItemDefs(session.tenantId);
-  // 有录像关键帧时附带视频表现评审（无视觉模型/评审失败时自动跳过，不影响文字评分）
-  const framesStart = Date.now();
-  const videoFrames = completed.videoFrames?.length
-    ? await readFramesAsDataUrls(completed.id, completed.videoFrames.length)
-    : undefined;
-  log?.info(
-    { sessionId: session.id, scoreItems: defs.length, videoFrames: videoFrames?.length ?? 0, ms: Date.now() - framesStart },
-    '结束会话：评分前准备完成（评分项定义 + 视频关键帧）'
-  );
+  let report: Awaited<ReturnType<typeof scoreSession>>;
+  try {
+    const defs = await store.listScoreItemDefs(session.tenantId);
+    const skillPoints = await store.listSkillPoints(session.tenantId);
+    const skillPointNames = Object.fromEntries(skillPoints.map((sp) => [sp.id, sp.name]));
+    // 有录像关键帧时附带视频表现评审（无视觉模型/评审失败时自动跳过，不影响文字评分）
+    const framesStart = Date.now();
+    const videoFrames = completed.videoFrames?.length
+      ? await readFramesAsDataUrls(completed.id, completed.videoFrames.length)
+      : undefined;
+    log?.info(
+      { sessionId: session.id, scoreItems: defs.length, videoFrames: videoFrames?.length ?? 0, ms: Date.now() - framesStart },
+      '结束会话：评分前准备完成（评分项定义 + 视频关键帧）'
+    );
 
-  const scoringStart = Date.now();
-  const report = await scoreSession(completed, scenario, defs, gateway, { videoFrames, log });
-  log?.info(
-    { sessionId: session.id, reportId: report.id, totalScore: report.totalScore, passed: report.passed, ms: Date.now() - scoringStart },
-    '结束会话：评分完成'
-  );
+    const scoringStart = Date.now();
+    report = await scoreSession(completed, scenario, defs, gateway, { videoFrames, log, skillPointNames });
+    log?.info(
+      { sessionId: session.id, reportId: report.id, totalScore: report.totalScore, passed: report.passed, ms: Date.now() - scoringStart },
+      '结束会话：评分完成'
+    );
+  } catch (err) {
+    // 评分异常：回滚会话为 active，允许重新 end 重试；
+    // 否则会话停在 completed 但无报告，复盘页永久 404 且无法补救
+    await store.updateSession(session.id, { status: 'active' });
+    throw err;
+  }
   await store.saveScoreReport(report);
   log?.info({ sessionId: session.id, reportId: report.id }, '结束会话：评分报告已落库');
 
@@ -179,14 +206,26 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
   const { store, gateway } = ctx;
 
   // 创建对练会话（含 persona 开场白）
-  app.post<{ Body: { scenarioId: string; mode?: 'practice' | 'exam'; examWindowId?: string } }>(
+  app.post<{
+    Body: {
+      scenarioId: string;
+      mode?: 'practice' | 'exam';
+      examWindowId?: string;
+      coachIntensity?: 'low' | 'medium' | 'high';
+    };
+  }>(
     '/sessions',
     async (request, reply) => {
-      const { scenarioId, mode = 'practice', examWindowId } = request.body ?? {};
+      const { scenarioId, mode = 'practice', examWindowId, coachIntensity } = request.body ?? {};
       if (!scenarioId) return reply.code(400).send({ error: 'scenarioId 必填' });
+      if (coachIntensity !== undefined && !['low', 'medium', 'high'].includes(coachIntensity)) {
+        return reply.code(400).send({ error: 'coachIntensity 只能是 low / medium / high' });
+      }
 
       const scenario = await store.getScenario(scenarioId);
-      if (!scenario) return reply.code(404).send({ error: '场景不存在' });
+      if (!scenario || scenario.tenantId !== request.tenantId) {
+        return reply.code(404).send({ error: '场景不存在' });
+      }
 
       // 考核模式：窗口校验 + 补考冷却
       if (mode === 'exam') {
@@ -209,7 +248,7 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
         if (maxAttempts !== undefined) {
           const attempts = (
             await store.listSessions({ userId: request.userId, examWindowId })
-          ).filter((s) => s.scenarioId === scenarioId).length;
+          ).filter((s) => s.scenarioId === scenarioId && s.status !== 'abandoned').length;
           if (attempts >= maxAttempts) {
             return reply.code(409).send({ error: '该场景考核次数已用完' });
           }
@@ -234,7 +273,7 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
 
       const actor = new PersonaActor(gateway.forTask('actor'));
       const initialBand = bandFor(bundle.dynamics.baseArousal, bundle.behaviorBands);
-      const openingText = await actor.reply(bundle, initialBand, []);
+      const openingText = await actor.reply(bundle, initialBand, [], coachIntensity);
 
       const prevCompleted = (await store.listSessions({ userId: request.userId, scenarioId }))
         .filter((s) => s.status === 'completed')
@@ -262,6 +301,7 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
         hintsUsed: 0,
         prevSessionId: prevCompleted?.id,
         examWindowId: mode === 'exam' ? examWindowId : undefined,
+        coachIntensity,
         startedAt: now,
       };
       await store.createSession(session);
@@ -271,7 +311,8 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
         ...existingTask,
         userId: request.userId,
         scenarioId,
-        status: 'in_progress',
+        // 已 passed 的任务开新练习不回退状态（防止 abandoned 局把通过状态冲掉）
+        status: existingTask?.status === 'passed' ? 'passed' : 'in_progress',
         lastSessionId: session.id,
       });
 
@@ -296,7 +337,8 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
         scenario: {
           name: scenario.name,
           durationMinutes: scenario.durationMinutes,
-          hasScript: scenario.hasScript,
+          coverageTopics: scenario.coverageTopics,
+          description: scenario.description,
           sceneType: scenario.sceneType,
           script: scenario.script,
           participants: scenario.participants,
@@ -309,7 +351,9 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
   // 会话详情 + 剩余时间（含 persona/场景信息，供刷新页面后恢复对练）
   app.get<{ Params: { id: string } }>('/sessions/:id', async (request, reply) => {
     const session = await store.getSession(request.params.id);
-    if (!session) return reply.code(404).send({ error: '会话不存在' });
+    if (!session || session.userId !== request.userId) {
+      return reply.code(404).send({ error: '会话不存在' });
+    }
     const scenario = await store.getScenario(session.scenarioId);
     const personaConfig = scenario
       ? await store.getPersonaConfig(scenario.personaConfigId)
@@ -330,7 +374,7 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
             name: scenario.name,
             durationMinutes: scenario.durationMinutes,
             coverageTopics: scenario.coverageTopics,
-            hasScript: scenario.hasScript,
+            description: scenario.description,
             sceneType: scenario.sceneType,
             script: scenario.script,
             participants: scenario.participants,
@@ -345,14 +389,16 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
     '/sessions/:id/turns',
     async (request, reply) => {
       const session = await store.getSession(request.params.id);
-      if (!session) return reply.code(404).send({ error: '会话不存在' });
+      if (!session || session.userId !== request.userId) {
+      return reply.code(404).send({ error: '会话不存在' });
+    }
       if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
       if (session.pausedAt) return reply.code(409).send({ error: '会话已暂停，请先继续' });
       const text = request.body?.text?.trim();
       if (!text) return reply.code(400).send({ error: 'text 必填' });
 
       const scenario = await store.getScenario(session.scenarioId);
-      if (!scenario) return reply.code(500).send({ error: '场景缺失' });
+      if (!scenario) return reply.code(404).send({ error: '场景已被删除' });
 
       try {
         const result = await runTurn(ctx, session, scenario, text);
@@ -368,19 +414,49 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
   // 教练提示（仅 practice，最多 3 次）
   app.post<{ Params: { id: string } }>('/sessions/:id/hint', async (request, reply) => {
     const session = await store.getSession(request.params.id);
-    if (!session) return reply.code(404).send({ error: '会话不存在' });
+    if (!session || session.userId !== request.userId) {
+      return reply.code(404).send({ error: '会话不存在' });
+    }
     if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
     if (session.pausedAt) return reply.code(409).send({ error: '会话已暂停，请先继续' });
     if (session.mode !== 'practice') return reply.code(400).send({ error: '仅 practice 模式可用提示' });
     if (session.hintsUsed >= MAX_HINTS) return reply.code(409).send({ error: '提示次数已用完' });
 
+    const scenario = await store.getScenario(session.scenarioId);
     const transcriptText = session.transcript
       .map((t) => `[${t.seq}] ${t.speaker === 'trainee' ? '学员' : t.speaker === 'persona' ? '客户' : '教练'}：${t.text}`)
       .join('\n');
+
+    const scenarioLines: string[] = [];
+    if (scenario) {
+      scenarioLines.push(`本场场景：${scenario.name}`);
+      if (scenario.methodology) scenarioLines.push(`销售方法论：${scenario.methodology}`);
+      if (scenario.script?.purpose) scenarioLines.push(`本场目标：${scenario.script.purpose}`);
+      if (scenario.script?.assessmentPoints && scenario.script.assessmentPoints.length > 0) {
+        scenarioLines.push(`主要考核点：${scenario.script.assessmentPoints.join('、')}`);
+      }
+      const topics = scenario.coverageTopics ?? [];
+      if (topics.length > 0) {
+        const traineeAll = session.transcript
+          .filter((t) => t.speaker === 'trainee')
+          .map((t) => t.text)
+          .join('\n');
+        const hits = topics.filter((t) => traineeAll.includes(t));
+        const misses = topics.filter((t) => !traineeAll.includes(t));
+        if (hits.length > 0) scenarioLines.push(`话题已覆盖：${hits.join('、')}`);
+        if (misses.length > 0) scenarioLines.push(`话题未覆盖：${misses.join('、')}（建议优先往未覆盖话题引导）`);
+      }
+    }
+
     const result = await gateway.forTask('judge').chat([
       {
         role: 'user',
-        content: `你是销售教练。根据以下对话，给学员一句不超过40字的下一步话术建议：\n${transcriptText}`,
+        content: [
+          '你是销售教练。结合本场场景配置与以下对话，给学员一句不超过40字的下一步话术建议。',
+          ...scenarioLines,
+          '',
+          transcriptText,
+        ].join('\n'),
       },
     ]);
 
@@ -415,10 +491,12 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
     '/sessions/:id/opening',
     async (request, reply) => {
       const session = await store.getSession(request.params.id);
-      if (!session) return reply.code(404).send({ error: '会话不存在' });
+      if (!session || session.userId !== request.userId) {
+      return reply.code(404).send({ error: '会话不存在' });
+    }
       if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
       const scenario = await store.getScenario(session.scenarioId);
-      if (!scenario) return reply.code(500).send({ error: '场景缺失' });
+      if (!scenario) return reply.code(404).send({ error: '场景已被删除' });
       const personaConfig = await store.getPersonaConfig(scenario.personaConfigId);
       if (!personaConfig) return reply.code(500).send({ error: '场景对应的 persona 配置缺失' });
 
@@ -430,8 +508,10 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
             content: [
               '你是销售培训 AI 教练。一场销售对练即将开始，请对学员说一段开场白（不超过 80 字）：',
               '先打招呼，再简要介绍本场练习内容与规则（场景目标、限时、对方人设），最后问学员"准备好了吗？"。',
-              `场景：${scenario.name}`,
+              `场景：${scenario.name}${scenario.personaTitle ? `（${scenario.personaTitle}）` : ''}`,
               `限时：${scenario.durationMinutes} 分钟`,
+              ...(scenario.script?.purpose ? [`本场目标：${scenario.script.purpose}`] : []),
+              ...(scenario.script?.executionOrder ? [`剧本流程：${scenario.script.executionOrder}`] : []),
               `对方：${personaConfig.name}${personaConfig.occupation ? `，${personaConfig.occupation}` : ''}。背景：${personaConfig.background}`,
               '只输出开场白本身，不要加任何解释或引号。',
             ].join('\n'),
@@ -464,7 +544,9 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
   // 暂停会话：冻结倒计时与对话（考核模式不允许暂停）
   app.post<{ Params: { id: string } }>('/sessions/:id/pause', async (request, reply) => {
     const session = await store.getSession(request.params.id);
-    if (!session) return reply.code(404).send({ error: '会话不存在' });
+    if (!session || session.userId !== request.userId) {
+      return reply.code(404).send({ error: '会话不存在' });
+    }
     if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
     if (session.mode === 'exam') return reply.code(400).send({ error: '考核模式不支持暂停' });
     if (session.pausedAt) return reply.code(409).send({ error: '会话已处于暂停中' });
@@ -483,7 +565,9 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
   // 继续会话：累计暂停时长并解冻
   app.post<{ Params: { id: string } }>('/sessions/:id/resume', async (request, reply) => {
     const session = await store.getSession(request.params.id);
-    if (!session) return reply.code(404).send({ error: '会话不存在' });
+    if (!session || session.userId !== request.userId) {
+      return reply.code(404).send({ error: '会话不存在' });
+    }
     if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
     if (!session.pausedAt) return reply.code(409).send({ error: '会话未在暂停中' });
 
@@ -500,7 +584,9 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
     '/sessions/:id/quiz-answer',
     async (request, reply) => {
       const session = await store.getSession(request.params.id);
-      if (!session) return reply.code(404).send({ error: '会话不存在' });
+      if (!session || session.userId !== request.userId) {
+      return reply.code(404).send({ error: '会话不存在' });
+    }
       if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
       const { quizId, answer } = request.body ?? {};
       if (!quizId) return reply.code(400).send({ error: 'quizId 必填' });
@@ -548,6 +634,7 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
         answer,
         correct,
         score: earnedScore,
+        maxScore: quiz.score,
         atTurnSeq,
         answeredAt: new Date().toISOString(),
       };
@@ -568,7 +655,9 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
     '/sessions/:id/proctor-events',
     async (request, reply) => {
       const session = await store.getSession(request.params.id);
-      if (!session) return reply.code(404).send({ error: '会话不存在' });
+      if (!session || session.userId !== request.userId) {
+      return reply.code(404).send({ error: '会话不存在' });
+    }
       if (session.mode !== 'exam') {
         return reply.code(400).send({ error: '仅 exam 模式会话接受监考事件' });
       }
@@ -605,7 +694,9 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
   // 结束会话并评分
   app.post<{ Params: { id: string } }>('/sessions/:id/end', async (request, reply) => {
     const session = await store.getSession(request.params.id);
-    if (!session) return reply.code(404).send({ error: '会话不存在' });
+    if (!session || session.userId !== request.userId) {
+      return reply.code(404).send({ error: '会话不存在' });
+    }
     if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
 
     request.log.info(
@@ -617,10 +708,10 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
       if (!result) return reply.code(500).send({ error: '场景缺失' });
       return result;
     } catch (err) {
-      // 注意：此时会话已标记 completed 但报告未落库，复盘页会 404
+      // finalizeSession 内部已把会话回滚为 active，学员可重新 end 重试
       request.log.error(
         { sessionId: session.id, err },
-        'POST /sessions/:id/end：评分异常（会话已 completed 但报告未生成）'
+        'POST /sessions/:id/end：评分异常（会话已回滚为 active，可重试）'
       );
       return reply.code(500).send({ error: err instanceof Error ? err.message : '评分失败' });
     }

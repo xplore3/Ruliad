@@ -2,6 +2,7 @@ import type {
   Appeal,
   CalibrationEvent,
   CertRecord,
+  CustomerQuestion,
   DataConsent,
   DomainEvent,
   Element,
@@ -122,6 +123,13 @@ export interface Store {
   getScoreReportBySession(sessionId: string): Promise<ScoreReport | undefined>;
   listScoreItemDefs(tenantId: string, skillPointId?: string): Promise<ScoreItemDef[]>;
   upsertScoreItemDef(def: ScoreItemDef): Promise<void>;
+  deleteScoreItemDef(id: string): Promise<void>;
+
+  // ---- 客户提问问题库 ----
+  getCustomerQuestion(id: string): Promise<CustomerQuestion | undefined>;
+  listCustomerQuestions(tenantId: string, category?: string): Promise<CustomerQuestion[]>;
+  saveCustomerQuestion(q: CustomerQuestion): Promise<void>;
+  deleteCustomerQuestion(id: string): Promise<void>;
 
   // ---- 申诉 ----
   createAppeal(appeal: Appeal): Promise<void>;
@@ -150,6 +158,7 @@ export interface Store {
   listDataConsents(tenantId: string): Promise<DataConsent[]>;
   listGoldenCases(): Promise<GoldenCase[]>;
   saveGoldenCase(goldenCase: GoldenCase): Promise<void>;
+  deleteGoldenCase(id: string): Promise<void>;
   saveRegressionRun(run: RegressionRun): Promise<void>;
   listRegressionRuns(): Promise<RegressionRun[]>;
 
@@ -157,6 +166,11 @@ export interface Store {
   listQuizQuestions(tenantId: string, scenarioId?: string): Promise<QuizQuestion[]>;
   saveQuizQuestion(q: QuizQuestion): Promise<void>;
   deleteQuizQuestion(id: string): Promise<void>;
+
+  // ---- 账号注销 ----
+  deleteUser(id: string): Promise<void>;
+  /** 删除用户全部关联数据：会话/评分报告/申诉/认证记录/技能状态/场景任务/事件 */
+  deleteUserData(userId: string): Promise<void>;
 
   // ---- 事件流 ----
   appendEvent(event: DomainEvent): Promise<void>;

@@ -131,6 +131,17 @@ model ScenarioTask {
   @@index([userId, status])
 }
 
+// ---------------- 客户提问问题库 ----------------
+
+model CustomerQuestion {
+  id       String @id @default(uuid())
+  tenantId String
+  category String @default("")
+  data     String
+
+  @@index([tenantId])
+}
+
 // ---------------- 会话与评分 ----------------
 
 model Session {

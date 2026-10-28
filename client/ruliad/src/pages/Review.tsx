@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiError, createSession, fetchReview } from '../api';
 import type { ReviewData, ScoreItem } from '../types';
@@ -30,6 +30,20 @@ export default function Review() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showTranscript, setShowTranscript] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [toastMsg, setToastMsg] = useState('');
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
+  const toast = (msg: string) => {
+    setToastMsg(msg);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToastMsg(''), 3000);
+  };
 
   useEffect(() => {
     if (!sessionId) return;
@@ -133,9 +147,9 @@ export default function Review() {
     {
       label: '语速',
       value: speechRate > 0 ? String(speechRate) : '—',
-      unit: 'WPM',
-      feedback: speechRate > 0 ? (speechRate > 180 ? '偏快，注意停顿 ⚠' : speechRate < 110 ? '偏慢 ⚠' : '语速适中 ✓') : '暂无数据',
-      ok: speechRate > 0 ? speechRate >= 110 && speechRate <= 180 : true,
+      unit: '字/分',
+      feedback: speechRate > 0 ? (speechRate > 260 ? '偏快，注意停顿 ⚠' : speechRate < 140 ? '偏慢 ⚠' : '语速适中 ✓') : '暂无数据',
+      ok: speechRate > 0 ? speechRate >= 140 && speechRate <= 260 : true,
     },
     {
       label: '倾听占比',
@@ -167,6 +181,28 @@ export default function Review() {
     fmtDateTime(session.startedAt),
     durationMin != null ? `用时 ${durationMin} 分钟` : null,
   ].filter(Boolean).join(' · ');
+
+  /** 分享报告：优先系统分享（navigator.share），不支持则复制摘要+链接到剪贴板 */
+  const handleShare = async () => {
+    const url = window.location.href;
+    const title = 'Grasp 练习报告';
+    const text = `我在 Grasp 完成了「${scenario?.name ?? '销售练习'}」，本次得分 ${score} 分${report.passed ? '，已通过' : '，未通过'}（及格线 ${scenario?.passScore ?? '-'} 分）。`;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title, text, url });
+        return;
+      } catch (err) {
+        // 用户主动取消不降级；其他错误走剪贴板兜底
+        if ((err as Error).name === 'AbortError') return;
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(`${title}\n${text}\n${url}`);
+      toast('已复制报告摘要和链接，去粘贴分享吧');
+    } catch {
+      toast('复制失败，请手动复制浏览器地址栏链接');
+    }
+  };
 
   return (
     <div className="md:!pb-0">
@@ -296,7 +332,7 @@ export default function Review() {
                 {creating ? '创建中…' : '再练一次'}
               </button>
             )}
-            <button className="btn btn-ghost btn-sm" onClick={() => alert('分享功能暂未开放')}>分享报告</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => void handleShare()}>分享报告</button>
           </div>
         </div>
 
@@ -321,6 +357,12 @@ export default function Review() {
           </div>
         )}
       </main>
+
+      {toastMsg && (
+        <div style={{ position: 'fixed', left: '50%', bottom: '48px', transform: 'translateX(-50%)', background: 'rgba(23,25,31,.92)', color: '#F7F7FA', padding: '10px 18px', borderRadius: '999px', fontSize: '13.5px', zIndex: 100, boxShadow: '0 6px 24px rgba(0,0,0,.3)' }}>
+          {toastMsg}
+        </div>
+      )}
     </div>
   );
 }

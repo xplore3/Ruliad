@@ -98,7 +98,7 @@ export async function tasksRoutes(app: FastifyInstance, ctx: RouteContext): Prom
 
         return {
           scenarioId: t.scenarioId,
-          scenarioName: scenario?.name ?? t.scenarioId,
+          scenarioName: scenario?.name ?? '（场景已删除）',
           durationMinutes: scenario?.durationMinutes ?? null,
           difficulty: scenario?.difficulty ?? null,
           status: t.status,

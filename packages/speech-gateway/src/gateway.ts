@@ -4,7 +4,10 @@ import { OpenAITTSProvider } from './providers/openai.js';
 import type { SpeechGateway, TTSProvider } from './types.js';
 
 /** 行内 logger：server.ts 传入 app.log；未传入时退到 stdout */
-type DiagLogger = { info?: (obj: Record<string, unknown>, msg: string) => void };
+type DiagLogger = {
+  info?: (obj: Record<string, unknown>, msg: string) => void;
+  warn?: (obj: Record<string, unknown>, msg: string) => void;
+};
 
 /**
  * 创建语音网关：
@@ -51,7 +54,12 @@ export function createSpeechGateway(
     asr = aliyun;
     aliyunTTS = aliyun;
   } else {
-    console.log(`[SpeechGateway][diag] → ASR selected: mock (providerKey="${providerKey}")`);
+    const reason = providerKey !== 'aliyun' ? 'SPEECH_PROVIDER≠aliyun' : 'SPEECH_API_KEY 为空';
+    console.warn(`[SpeechGateway][WARN] → selected: mock (providerKey="${providerKey}", apiKey=${apiKey ? 'set' : 'empty'}, reason: ${reason})`);
+    logger?.warn?.(
+      { providerKey, reason },
+      '语音网关：正在使用 Mock provider（识别/合成均为模拟输出）。配置 SPEECH_PROVIDER=aliyun 与 SPEECH_API_KEY（或 DASHSCOPE_API_KEY）可切换真实服务'
+    );
     const mock = new MockSpeechProvider();
     return { asr: mock, tts: pickTTS(env, mock) };
   }
@@ -78,4 +86,5 @@ function pickTTS(env: NodeJS.ProcessEnv, fallback: TTSProvider): TTSProvider {
     });
   }
   return fallback;
+
 }

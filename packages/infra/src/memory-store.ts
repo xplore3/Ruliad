@@ -2,6 +2,7 @@ import type {
   Appeal,
   CalibrationEvent,
   CertRecord,
+  CustomerQuestion,
   DataConsent,
   DomainEvent,
   Element,
@@ -47,6 +48,7 @@ export class MemoryStore implements Store {
   private sessions = new Map<string, Session>();
   private scoreReports = new Map<string, ScoreReport>();
   private scoreItemDefs = new Map<string, ScoreItemDef>();
+  private customerQuestions = new Map<string, CustomerQuestion>();
   private appeals = new Map<string, Appeal>();
   private examWindows = new Map<string, ExamWindow>();
   private certRecords: CertRecord[] = [];
@@ -212,6 +214,25 @@ private events: DomainEvent[] = [];
   async upsertScoreItemDef(def: ScoreItemDef) {
     this.scoreItemDefs.set(def.id, def);
   }
+  async deleteScoreItemDef(id: string) {
+    this.scoreItemDefs.delete(id);
+  }
+
+  // ---- 客户提问问题库 ----
+  async getCustomerQuestion(id: string) {
+    return this.customerQuestions.get(id);
+  }
+  async listCustomerQuestions(tenantId: string, category?: string) {
+    return [...this.customerQuestions.values()].filter(
+      (q) => q.tenantId === tenantId && (!category || q.category === category)
+    );
+  }
+  async saveCustomerQuestion(q: CustomerQuestion) {
+    this.customerQuestions.set(q.id, q);
+  }
+  async deleteCustomerQuestion(id: string) {
+    this.customerQuestions.delete(id);
+  }
 
   // ---- 申诉 ----
   async createAppeal(appeal: Appeal) {
@@ -291,6 +312,9 @@ return this.productKBs.get(id);
   async saveGoldenCase(goldenCase: GoldenCase) {
     this.goldenCases.set(goldenCase.id, goldenCase);
   }
+  async deleteGoldenCase(id: string) {
+    this.goldenCases.delete(id);
+  }
   async saveRegressionRun(run: RegressionRun) {
     this.regressionRuns.push(run);
   }
@@ -310,6 +334,33 @@ this.quizQuestions.set(q.id, q);
 async deleteQuizQuestion(id: string) {
 this.quizQuestions.delete(id);
 }
+
+  // ---- 账号注销 ----
+  async deleteUser(id: string) {
+    this.users.delete(id);
+  }
+  async deleteUserData(userId: string) {
+    const sessionIds = new Set(
+      [...this.sessions.values()].filter((s) => s.userId === userId).map((s) => s.id)
+    );
+    for (const sid of sessionIds) {
+      this.sessions.delete(sid);
+      this.scoreReports.delete(sid); // scoreReports 以 sessionId 为键
+    }
+    for (const [id, a] of this.appeals) {
+      if (a.userId === userId) this.appeals.delete(id);
+    }
+    this.certRecords = this.certRecords.filter((c) => c.userId !== userId);
+    for (const key of [...this.userSkillStates.keys()]) {
+      if (key.startsWith(`${userId}:`)) this.userSkillStates.delete(key);
+    }
+    for (const key of [...this.scenarioTasks.keys()]) {
+      if (key.startsWith(`${userId}:`)) this.scenarioTasks.delete(key);
+    }
+    this.events = this.events.filter(
+      (e) => e.userId !== userId && !(e.sessionId && sessionIds.has(e.sessionId))
+    );
+  }
 
   // ---- 事件流 ----
   async appendEvent(event: DomainEvent) {
