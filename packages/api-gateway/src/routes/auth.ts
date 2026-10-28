@@ -120,40 +120,41 @@ export async function authRoutes(app: FastifyInstance, ctx: RouteContext): Promi
       });
     }
 
-    // 调用腾讯云短信服务发送验证码
+    // 开发模式：跳过真实发送（如果没有客户端或配置不完整）
     const client = getSmsClient();
-    if (client) {
-      const cfg = getSmsConfig();
-      if (!cfg.signName || !cfg.templateId || !cfg.sdkAppId) {
-        app.log.warn('[SMS] 腾讯云短信配置不完整（需 SMS_SIGN_NAME / SMS_TEMPLATE_CODE / TENCENT_SMS_SDK_APP_ID），验证码仅记录日志');
-      } else {
-        try {
-          const result = await client.sendSms({
-            phoneNumbers: [phone],
-            smsSdkAppId: cfg.sdkAppId,
-            signName: cfg.signName,
-            templateId: cfg.templateId,
-            templateParams: [code, '5'],
-          });
-          const status = result.SendStatusSet?.[0];
-          if (status && status.Code === 'Ok') {
-            return reply.code(200).send({ success: true, message: '验证码已发送' });
-          }
-          app.log.error(`[腾讯云短信失败] ${JSON.stringify(result.SendStatusSet)} ${JSON.stringify(result.Error)}`);
-          return reply.code(500).send({ error: '短信发送失败，请稍后重试' });
-        } catch (err) {
-          app.log.error(`[短信异常] ${err instanceof Error ? err.message : String(err)}`);
-          return reply.code(500).send({ error: '短信服务异常，请稍后重试' });
-        }
-      }
-    } else {
-      app.log.warn('[SMS] 未配置 TENCENT_CLOUD_SECRET_ID / TENCENT_CLOUD_SECRET_KEY');
+    const cfg = getSmsConfig();
+    const smsConfigured = !!(client && cfg.signName && cfg.templateId && cfg.sdkAppId);
+
+    if (!smsConfigured) {
+      // 短信服务未完全配置：明确返回，避免网关超时
+      const reason = !client
+        ? '未配置 TENCENT_CLOUD_SECRET_ID / TENCENT_CLOUD_SECRET_KEY'
+        : '短信配置不完整（需 SMS_SIGN_NAME / SMS_TEMPLATE_CODE / TENCENT_SMS_SDK_APP_ID）';
+      app.log.warn(`[SMS] ${reason}，验证码无法送达（${phone}）`);
+      return reply.code(503).send({
+        error: '短信服务未配置，暂时无法发送验证码，请联系管理员',
+      });
     }
 
-    // 走到这里说明短信未真正发出（未配置腾讯云 SMS 或配置不完整），且未开启 SMS_DEV_ECHO：
-    // 验证码无法送达用户，明确 503 告警，绝不在响应里回显验证码明文
-    app.log.warn(`[SMS] 短信服务不可用且 SMS_DEV_ECHO 未开启，验证码无法送达（${phone}）。请配置腾讯云 SMS 或设置 SMS_DEV_ECHO=1（仅开发）`);
-    return reply.code(503).send({ error: '短信服务未配置，暂时无法发送验证码，请联系管理员' });
+    // 调用腾讯云短信服务发送验证码
+    try {
+      const result = await client.sendSms({
+        phoneNumbers: [phone],
+        smsSdkAppId: cfg.sdkAppId,
+        signName: cfg.signName,
+        templateId: cfg.templateId,
+        templateParams: [code, '5'],
+      });
+      const status = result.SendStatusSet?.[0];
+      if (status && status.Code === 'Ok') {
+        return reply.code(200).send({ success: true, message: '验证码已发送' });
+      }
+      app.log.error(`[腾讯云短信失败] ${JSON.stringify(result.SendStatusSet)} ${JSON.stringify(result.Error)}`);
+      return reply.code(500).send({ error: '短信发送失败，请稍后重试' });
+    } catch (err) {
+      app.log.error(`[短信异常] ${err instanceof Error ? err.message : String(err)}`);
+      return reply.code(500).send({ error: '短信服务异常，请稍后重试' });
+    }
   });
 
   // ====== 验证码登录/注册（一体） ======

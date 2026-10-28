@@ -45,9 +45,26 @@ export class PcmRecorder {
     if (getCachedPreferences().recordingConsent === false) {
       throw new Error('录音与分析授权已关闭，请在「设置 - 隐私」中开启后再练习');
     }
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
-    });
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error('当前访问方式不支持麦克风：请用 localhost 或 https 地址打开页面');
+    }
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+      });
+    } catch (err) {
+      const name = err instanceof DOMException ? err.name : '';
+      if (name === 'NotAllowedError') {
+        throw new Error('麦克风权限被拒绝：点击浏览器地址栏左侧的锁形图标，将麦克风设为「允许」后刷新重试');
+      }
+      if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+        throw new Error('未检测到麦克风设备，请连接麦克风后重试');
+      }
+      if (name === 'NotReadableError') {
+        throw new Error('麦克风被其他应用占用，请关闭占用程序后重试');
+      }
+      throw err;
+    }
     this.ctx = new AudioContext();
     const workletUrl = URL.createObjectURL(
       new Blob([WORKLET_CODE], { type: 'application/javascript' })

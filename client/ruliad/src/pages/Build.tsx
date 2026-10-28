@@ -415,8 +415,8 @@ export default function Build() {
         1000
       );
       setAi((prev) => ({ ...prev, recording: true, seconds: 0, level: 0, transcript: null, result: null }));
-    } catch {
-      setNotice('无法访问麦克风，请检查浏览器权限');
+    } catch (err) {
+      setNotice(err instanceof Error && err.message ? err.message : '无法访问麦克风，请检查浏览器权限');
     }
   };
 

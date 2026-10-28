@@ -539,12 +539,12 @@ export default function Practice() {
 
   /**
    * 自动聆听：RMS 音量检测说话开始，连续静音约 1.3s 判停，最大 15s 兜底。
-   * resolve：micError=true 表示麦克风不可用；audio=null 表示被外部中断（阶段切换/进 live）。
+   * resolve：micError=true 表示麦克风不可用（micErrorMsg 为具体原因）；audio=null 表示被外部中断（阶段切换/进 live）。
    */
   const autoListen = () =>
-    new Promise<{ audio: ArrayBuffer | null; micError: boolean }>((resolve) => {
+    new Promise<{ audio: ArrayBuffer | null; micError: boolean; micErrorMsg?: string }>((resolve) => {
       let settled = false;
-      const finish = (audio: ArrayBuffer | null, micError = false) => {
+      const finish = (audio: ArrayBuffer | null, micError = false, micErrorMsg = '') => {
         if (settled) return;
         settled = true;
         guidanceCancelRef.current = null;
@@ -554,7 +554,7 @@ export default function Practice() {
         }
         guidanceRecRef.current?.stop();
         guidanceRecRef.current = null;
-        resolve({ audio, micError });
+        resolve({ audio, micError, micErrorMsg });
       };
       guidanceCancelRef.current = () => finish(null);
 
@@ -587,7 +587,9 @@ export default function Practice() {
             VAD_MAX_RECORD_MS
           );
         })
-        .catch(() => finish(null, true));
+        .catch((err) =>
+          finish(null, true, err instanceof Error && err.message ? err.message : '麦克风不可用，请检查浏览器授权后刷新重试')
+        );
     });
 
   // ===== 新手指引：资格提问 =====
@@ -619,13 +621,13 @@ export default function Practice() {
   const autoAnswerQualify = async (q: 1 | 2) => {
     if (!sessionId || phaseRef.current !== 'qualify' || statusRef.current === 'paused') return;
     setQualifyStage('recording');
-    const { audio, micError } = await autoListen();
+    const { audio, micError, micErrorMsg } = await autoListen();
     if (phaseRef.current !== 'qualify' || (!audio && !micError)) return;
     // 聆听期间可能被暂停（autoListen 被中断返回空音频，此处再兜一次）
     if ((statusRef.current as PracticeStatus) === 'paused') return;
     if (micError) {
       setQualifyStage('error');
-      setQualifyHint('麦克风不可用，请检查浏览器授权后刷新重试');
+      setQualifyHint(micErrorMsg || '麦克风不可用，请检查浏览器授权后刷新重试');
       return;
     }
     setQualifyStage('uploading');
@@ -746,11 +748,11 @@ export default function Practice() {
   const autoAnswerGuideChoice = async () => {
     if (!sessionId || phaseRef.current !== 'guide' || statusRef.current === 'paused') return;
     setGuideRec('recording');
-    const { audio, micError } = await autoListen();
+    const { audio, micError, micErrorMsg } = await autoListen();
     if (phaseRef.current !== 'guide' || (!audio && !micError)) return;
     setGuideRec('idle');
     if (micError) {
-      setGuideHint('麦克风不可用，请检查浏览器授权；也可点击下方按钮选择');
+      setGuideHint(`${micErrorMsg || '麦克风不可用，请检查浏览器授权'}；也可点击下方按钮选择`);
       return;
     }
     setGuideRec('uploading');
@@ -894,8 +896,8 @@ export default function Practice() {
     setPartialText('');
     try {
       await recorder.start();
-    } catch {
-      setErrorMsg('麦克风不可用，请检查授权，或切换到文字模式');
+    } catch (err) {
+      setErrorMsg(err instanceof Error && err.message ? err.message : '麦克风不可用，请检查授权，或切换到文字模式');
       return;
     }
     socket.send({ type: 'start' });
@@ -1380,9 +1382,14 @@ export default function Practice() {
                       <span className="pulse-dot !w-4 !h-4" />
                     )}
                     <div className="turn-banner">🎙 轮到你了</div>
+                    {isRecording && (
+                      <div className="px-6 max-w-[560px] min-h-[22px] text-center text-[15px] font-semibold text-[#F7F7FA]">
+                        {partialText ? `我：${partialText}…` : '正在聆听，识别中…'}
+                      </div>
+                    )}
                     <div className="text-[13px] font-medium opacity-75">
                       {isRecording
-                        ? '正在聆听… 说完后点一次麦克风结束本轮'
+                        ? '说完后点一次麦克风结束本轮'
                         : isVoice
                           ? wsReady
                             ? autoMic ? '即将自动开麦，也可以点击麦克风' : '点击麦克风开始说话'
