@@ -62,6 +62,28 @@
   .textin{display:flex;gap:8px;width:100%;max-width:520px}
   .textin .input{flex:1;background:var(--bg);border-color:transparent}
 
+  /* 暂停遮罩 */
+  .screen .paused-mask{position:absolute;inset:0;background:rgba(20,22,28,.62);display:none;
+    flex-direction:column;align-items:center;justify-content:center;gap:8px;color:#fff;z-index:5}
+  .screen .paused-mask .ic{font-size:34px}
+  .screen .paused-mask .tx{font-size:14px;font-weight:600;letter-spacing:2px}
+  .screen.paused .paused-mask{display:flex}
+  .screen.paused .thinking i{animation-play-state:paused}
+  .rbtn.active{background:var(--coral);border-color:var(--coral);color:#fff}
+
+  /* 设置弹层 */
+  .settings-wrap{position:relative}
+  .settings-pop{position:absolute;bottom:54px;left:50%;transform:translateX(-50%);width:230px;
+    background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.14);
+    padding:10px;z-index:20;display:none;flex-direction:column;gap:4px}
+  .settings-pop.open{display:flex}
+  .settings-pop .sp-title{font-size:12px;font-weight:700;color:var(--text-2);padding:2px 6px 6px}
+  .settings-pop .sp-item{display:flex;align-items:center;gap:8px;width:100%;border:none;background:none;
+    font-size:13px;color:var(--text);padding:8px 6px;border-radius:8px;cursor:pointer;text-align:left}
+  .settings-pop .sp-item:hover{background:var(--bg)}
+  .settings-mask{position:fixed;inset:0;z-index:15;display:none}
+  .settings-mask.open{display:block}
+
   .goal-m{display:none}
   @media (max-width:1000px){ .layout{grid-template-columns:220px 1fr} .side-r{display:none} }
   @media (max-width:768px){
@@ -133,14 +155,15 @@
         <div class="statusbar gray">💡 教练提示：试着先确认对方的预算范围，再谈价值<span style="margin-left:auto;cursor:pointer">收起 ×</span></div>
       </div>
 
-      <div class="screen">
+      <div class="screen" id="screen">
         <div class="tile">
           <div class="avatar av1"><img src="assets/avatars/man-3.jpg" alt="王建国"></div>
           <div class="who">🎙<span>王建国 · 采购总监</span></div>
         </div>
         <div class="thinking"><i></i><i></i><i></i><i></i><i></i></div>
-        <div class="timer">06:24</div>
+        <div class="timer" id="timer">06:24</div>
         <div class="me-tag">销售小陈（我）</div>
+        <div class="paused-mask"><span class="ic">⏸</span><span class="tx">已暂停</span></div>
       </div>
 
       <div class="curline">嗯……这个说法有点意思。那你把响应时效写进合同里，敢不敢？
@@ -151,19 +174,27 @@
         <div class="row round">
           <button class="rbtn" title="重播">↺</button>
           <button class="rbtn" title="字幕">CC</button>
-          <button class="rbtn primary" title="继续">➜</button>
-          <button class="rbtn" title="暂停">⏸</button>
-          <button class="rbtn stop" title="停止">⏹</button>
-          <button class="rbtn" title="设置">⚙</button>
+          <button class="rbtn primary" id="btnContinue" title="继续">➜</button>
+          <button class="rbtn" id="btnPause" title="暂停">⏸</button>
+          <button class="rbtn stop" id="btnStop" title="停止">⏹</button>
+          <div class="settings-wrap">
+            <button class="rbtn" id="btnSettings" title="设置">⚙</button>
+            <div class="settings-mask" id="settingsMask"></div>
+            <div class="settings-pop" id="settingsPop">
+              <div class="sp-title">练习设置</div>
+              <button class="sp-item" id="btnModeSwitch">⌨ 切换到文本输入</button>
+              <label class="sp-item"><input type="checkbox" id="autoMic"> 轮到我时自动开麦</label>
+            </div>
+          </div>
         </div>
-        <div class="microw">
+        <div class="microw" id="microw">
           <button class="mic pulse">🎙</button>
           <div>
             <div style="font-weight:700;font-size:14px">按住或点击说话（默认语音）</div>
-            <div class="mic-hint">实时转写中… 说错可重录 <a style="color:var(--coral);font-weight:600;margin-left:8px;cursor:pointer">⌨ 切换文本输入</a></div>
+            <div class="mic-hint">实时转写中… 说错可重录 <a id="linkTextMode" style="color:var(--coral);font-weight:600;margin-left:8px;cursor:pointer">⌨ 切换文本输入</a></div>
           </div>
         </div>
-        <div class="textin">
+        <div class="textin" id="textin">
           <input class="input" placeholder="切换文本输入后在这里打字回复…">
           <button class="btn primary sm">发送</button>
         </div>
@@ -199,6 +230,87 @@
   <a href="dashboard.html"><span class="ic">📊</span>看板</a>
   <a href="records.html"><span class="ic">👤</span>我的</a>
 </div></nav>
+
+<script>
+(function () {
+  var screen = document.getElementById('screen');
+  var timerEl = document.getElementById('timer');
+  var btnPause = document.getElementById('btnPause');
+  var btnContinue = document.getElementById('btnContinue');
+  var btnStop = document.getElementById('btnStop');
+  var btnSettings = document.getElementById('btnSettings');
+  var settingsPop = document.getElementById('settingsPop');
+  var settingsMask = document.getElementById('settingsMask');
+  var btnModeSwitch = document.getElementById('btnModeSwitch');
+  var linkTextMode = document.getElementById('linkTextMode');
+  var microw = document.getElementById('microw');
+  var textin = document.getElementById('textin');
+  var autoMic = document.getElementById('autoMic');
+
+  // ===== 倒计时（暂停时冻结） =====
+  var parts = timerEl.textContent.split(':');
+  var remaining = parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+  var paused = false;
+
+  function renderTimer() {
+    var m = Math.floor(remaining / 60), s = remaining % 60;
+    timerEl.textContent = (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+  }
+  setInterval(function () {
+    if (paused || remaining <= 0) return;
+    remaining--;
+    renderTimer();
+  }, 1000);
+
+  // ===== 暂停 / 继续 =====
+  function setPaused(v) {
+    paused = v;
+    screen.classList.toggle('paused', v);
+    btnPause.textContent = v ? '▶' : '⏸';
+    btnPause.title = v ? '继续' : '暂停';
+    btnPause.classList.toggle('active', v);
+  }
+  btnPause.addEventListener('click', function () { setPaused(!paused); });
+  btnContinue.addEventListener('click', function () { if (paused) setPaused(false); });
+
+  // ===== 停止：结束并跳转评分页 =====
+  btnStop.addEventListener('click', function () {
+    if (confirm('确定结束本场练习并生成评分吗？')) {
+      location.href = 'review.html';
+    }
+  });
+
+  // ===== 设置弹层 =====
+  function toggleSettings(open) {
+    settingsPop.classList.toggle('open', open);
+    settingsMask.classList.toggle('open', open);
+  }
+  btnSettings.addEventListener('click', function () {
+    toggleSettings(!settingsPop.classList.contains('open'));
+  });
+  settingsMask.addEventListener('click', function () { toggleSettings(false); });
+
+  // 语音 / 文本输入切换
+  var textMode = false;
+  function setTextMode(v) {
+    textMode = v;
+    microw.style.display = v ? 'none' : 'flex';
+    btnModeSwitch.textContent = v ? '🎙 切换到语音输入' : '⌨ 切换到文本输入';
+    if (v) { var input = textin.querySelector('.input'); if (input) input.focus(); }
+  }
+  btnModeSwitch.addEventListener('click', function () {
+    toggleSettings(false);
+    setTextMode(!textMode);
+  });
+  linkTextMode.addEventListener('click', function () { setTextMode(true); });
+
+  // 自动开麦偏好（本地保存）
+  autoMic.checked = localStorage.getItem('grasp-auto-mic') === '1';
+  autoMic.addEventListener('change', function () {
+    localStorage.setItem('grasp-auto-mic', autoMic.checked ? '1' : '0');
+  });
+})();
+</script>
 
 </body>
 </html>

@@ -8,6 +8,7 @@ import {
   pauseSession,
   resumeSession,
   fetchOpening,
+  markLiveStart,
   qualifyAnswer,
   fetchDemo,
   demoChoice,
@@ -18,7 +19,8 @@ import {
   type DemoLine,
 } from '../api';
 import { PcmRecorder, TtsPlayer, VoiceSocket, type VoiceServerEvent } from '../voice';
-import type { TranscriptTurn } from '../types';
+import QuizModal from '../components/QuizModal';
+import type { QuizQuestion, TranscriptTurn } from '../types';
 
 type PracticeStatus =
   | 'loading'
@@ -113,6 +115,9 @@ export default function Practice() {
   const [guideText, setGuideText] = useState('');
   const [guideHint, setGuideHint] = useState('');
 
+  // ===== 随场考题（对练中触发，逐题弹窗作答） =====
+  const [quizQueue, setQuizQueue] = useState<QuizQuestion[]>([]);
+
   const statusRef = useRef<PracticeStatus>('loading');
   const phaseRef = useRef<Phase>('boot');
   const timeUpRef = useRef(false);
@@ -145,6 +150,8 @@ export default function Practice() {
   const guidePlayGenRef = useRef(0);
   /** 示范播放代数：重播/进入练习时使在途播放循环失效 */
   const demoTokenRef = useRef(0);
+  /** 本场已选择「稍后再答」的考题 id（避免每轮重复弹出） */
+  const dismissedQuizIdsRef = useRef<Set<string>>(new Set());
 
   const me = getStoredUser();
 
@@ -169,6 +176,21 @@ export default function Practice() {
       timeUpRef.current = true;
       setTimeUp(true);
     }
+  };
+
+  /** 收集本轮触发的考题：过滤已在队列与已跳过的，逐题弹窗 */
+  const enqueueQuizzes = (quizzes?: QuizQuestion[]) => {
+    if (!quizzes || quizzes.length === 0) return;
+    setQuizQueue((prev) => {
+      const known = new Set(prev.map((q) => q.id));
+      const fresh = quizzes.filter((q) => !known.has(q.id) && !dismissedQuizIdsRef.current.has(q.id));
+      return fresh.length > 0 ? [...prev, ...fresh] : prev;
+    });
+  };
+
+  const dismissQuiz = (quiz: QuizQuestion) => {
+    dismissedQuizIdsRef.current.add(quiz.id);
+    setQuizQueue((prev) => prev.filter((q) => q.id !== quiz.id));
   };
 
   // ===== 会话恢复 =====
@@ -252,7 +274,13 @@ export default function Practice() {
 
     const player = new TtsPlayer();
     player.onIdle = () => {
-      if (introClipRef.current === 'persona') introClipRef.current = null;
+      if (introClipRef.current === 'persona') {
+        introClipRef.current = null;
+        if (introTimerRef.current) {
+          clearTimeout(introTimerRef.current);
+          introTimerRef.current = null;
+        }
+      }
       // 回合音频未全部到达（turn_complete 未收到）时，解码/播放间隙的空闲不算数
       if (statusRef.current === 'speaking' && turnAudioDoneRef.current) afterAiDone();
     };
@@ -294,6 +322,10 @@ export default function Practice() {
       recorderRef.current = null;
       player.dispose();
       playerRef.current = null;
+      if (introTimerRef.current) {
+        clearTimeout(introTimerRef.current);
+        introTimerRef.current = null;
+      }
       // 新手指引在途的录音/播放一并清理
       demoTokenRef.current += 1;
       guidePlayGenRef.current += 1;
@@ -346,23 +378,45 @@ export default function Practice() {
     return () => window.removeEventListener('pointerdown', resumeAudio);
   }, [phase]);
 
+  /**
+   * 开场白看门狗：正常由播放器 onIdle 推进；仅在流程卡死（未暂停、播放器已空闲但状态没推进）
+   * 时兜底推进。音频仍在播放/缓冲时只继续等待，绝不掐断在播音频。
+   */
+  const armIntroWatchdog = () => {
+    if (introTimerRef.current) clearTimeout(introTimerRef.current);
+    introTimerRef.current = setTimeout(() => {
+      introTimerRef.current = null;
+      if (introClipRef.current !== 'persona' || statusRef.current === 'paused') return;
+      if (playerRef.current?.busy) {
+        // 仍在播放/解码：尝试恢复被挂起的音频上下文，然后继续等播完
+        playerRef.current.resume();
+        armIntroWatchdog();
+        return;
+      }
+      introClipRef.current = null;
+      if (statusRef.current === 'speaking') afterAiDone();
+    }, PERSONA_FALLBACK_MS);
+  };
+
   // ===== 进入正式对练（原「我准备好了」的开场逻辑） =====
   const startLive = () => {
     stopGuidanceMedia();
     setPhaseBoth('live');
+    // 通知服务端从此刻起倒计时（开场/新手指引不消耗时长）；失败时回退为按会话创建时间计时
+    if (sessionId) {
+      markLiveStart(sessionId)
+        .then((res) => {
+          if (typeof res.remainingSeconds === 'number') setRemaining(Math.max(0, res.remainingSeconds));
+        })
+        .catch(() => { /* 不影响本地流程 */ });
+    }
     if (isVoice && personaAudioRef.current && playerRef.current) {
       introClipRef.current = 'persona';
       // 开场白音频已全量拿到（单段），播完即轮到用户
       turnAudioDoneRef.current = true;
       setStatusBoth('speaking');
       playerRef.current.enqueue(personaAudioRef.current);
-      introTimerRef.current = setTimeout(() => {
-        if (introClipRef.current === 'persona') {
-          introClipRef.current = null;
-          playerRef.current?.stopAll();
-          if (statusRef.current === 'speaking') afterAiDone();
-        }
-      }, PERSONA_FALLBACK_MS);
+      armIntroWatchdog();
     } else {
       setStatusBoth(timeUpRef.current ? 'time_up' : 'user_turn');
     }
@@ -426,8 +480,23 @@ export default function Practice() {
             src.connect(ctx.destination);
             guideSrcRef.current = src;
             src.onended = finish;
-            // 播放兜底：onended 未触发时按音频时长 +2s 强制结束
-            timer = setTimeout(finish, (buf.duration + 2) * 1000);
+            // 播放兜底：onended 未触发时按音频时长 +2s 检查。
+            // AudioContext 被挂起时不发声也不触发 onended：先尝试恢复并继续等，
+            // 避免在静音中直接跳到下一句；重试多次仍挂起才放行，保证流程不卡死。
+            let retries = 0;
+            const armWatchdog = () => {
+              timer = setTimeout(() => {
+                if (settled) return;
+                if (ctx.state === 'suspended' && retries < 3) {
+                  retries += 1;
+                  void ctx.resume();
+                  armWatchdog();
+                  return;
+                }
+                finish();
+              }, (buf.duration + 2) * 1000);
+            };
+            armWatchdog();
             src.start();
           })
           .catch(finish);
@@ -541,17 +610,19 @@ export default function Practice() {
     } catch {
       /* 提问音频失败不影响回答 */
     }
-    if (phaseRef.current !== 'qualify') return;
+    if (phaseRef.current !== 'qualify' || statusRef.current === 'paused') return;
     // 问题播完自动开麦聆听
     await autoAnswerQualify(q);
   };
 
   /** 资格提问的全自动语音回答：自动录音 → VAD 判停 → 上传识别 → 自动进入下一环节 */
   const autoAnswerQualify = async (q: 1 | 2) => {
-    if (!sessionId || phaseRef.current !== 'qualify') return;
+    if (!sessionId || phaseRef.current !== 'qualify' || statusRef.current === 'paused') return;
     setQualifyStage('recording');
     const { audio, micError } = await autoListen();
     if (phaseRef.current !== 'qualify' || (!audio && !micError)) return;
+    // 聆听期间可能被暂停（autoListen 被中断返回空音频，此处再兜一次）
+    if ((statusRef.current as PracticeStatus) === 'paused') return;
     if (micError) {
       setQualifyStage('error');
       setQualifyHint('麦克风不可用，请检查浏览器授权后刷新重试');
@@ -654,19 +725,26 @@ export default function Practice() {
     }
   };
 
-  /** 示范播完：教练询问下一步，随后自动聆听 */
+  /** 示范播完：教练语音+文字询问下一步，随后自动聆听 */
   const askGuideChoice = async () => {
     if (!sessionId) return;
     setDemoStage('ask');
     setGuideText('');
     setGuideHint('');
     guideRetryRef.current = 0;
+    try {
+      const clip = await ttsClip(sessionId, GUIDE_CHOICE_QUESTION, 'coach');
+      await playClip(clip.audioBase64);
+    } catch {
+      /* 提问音频失败不影响回答 */
+    }
+    if (phaseRef.current !== 'guide' || statusRef.current === 'paused') return;
     await autoAnswerGuideChoice();
   };
 
   /** 示范选择的全自动语音回答：自动录音 → VAD 判停 → 上传识别 → 自动执行选择 */
   const autoAnswerGuideChoice = async () => {
-    if (!sessionId || phaseRef.current !== 'guide') return;
+    if (!sessionId || phaseRef.current !== 'guide' || statusRef.current === 'paused') return;
     setGuideRec('recording');
     const { audio, micError } = await autoListen();
     if (phaseRef.current !== 'guide' || (!audio && !micError)) return;
@@ -729,11 +807,12 @@ export default function Practice() {
         if (!paused) setStatusBoth('speaking');
         break;
       case 'tts_sentence':
-        if (!paused && ev.audio) playerRef.current?.enqueue(ev.audio);
+        // 暂停中也可入队：TtsPlayer 暂停时只缓冲不出声，恢复后接着播
+        if (ev.audio) playerRef.current?.enqueue(ev.audio);
         if (!paused) setStatusBoth('speaking');
         break;
       case 'tts_chunk':
-        if (!paused && ev.audio && typeof ev.seq === 'number') {
+        if (ev.audio && typeof ev.seq === 'number') {
           playerRef.current?.enqueueChunk(ev.seq, ev.audio, !!ev.isFinal);
         }
         break;
@@ -754,6 +833,7 @@ export default function Practice() {
           });
           setReplyText(t.personaTurn.text);
           applyTurnMeta(t.remainingSeconds, t.timeUp);
+          enqueueQuizzes(t.pendingQuizzes);
         }
         if (ev.emotion?.bandKey) setBandKey(ev.emotion.bandKey);
         // 音频全部到达且播放器真正空闲（播完）才轮到用户；否则等 onIdle
@@ -783,7 +863,9 @@ export default function Practice() {
       setReplyText(res.personaTurn.text);
       if (res.bandKey) setBandKey(res.bandKey);
       applyTurnMeta(res.remainingSeconds, res.timeUp);
-      setStatusBoth(res.timeUp ? 'time_up' : 'user_turn');
+      enqueueQuizzes(res.pendingQuizzes);
+      // 等待响应期间被暂停：只落对话记录，不解除暂停态
+      if ((statusRef.current as PracticeStatus) !== 'paused') setStatusBoth(res.timeUp ? 'time_up' : 'user_turn');
     } catch (err) {
       const statusCode = (err as { response?: { status?: number } })?.response?.status;
       if (statusCode === 409) {
@@ -791,7 +873,7 @@ export default function Practice() {
         setStatusBoth('ended');
       } else {
         setErrorMsg(apiError(err));
-        setStatusBoth('user_turn');
+        if ((statusRef.current as PracticeStatus) !== 'paused') setStatusBoth('user_turn');
       }
     }
   };
@@ -821,14 +903,15 @@ export default function Practice() {
     setStatusBoth('user_turn');
   };
 
-  // ===== 轮到你时自动开麦（语音模式，可在设置中关闭） =====
+  // ===== 轮到你时自动开麦（语音模式，可在设置中关闭；考题弹窗期间不抢麦） =====
   useEffect(() => {
     if (!isVoice || phase !== 'live' || status !== 'user_turn' || timeUp) return;
     if (!wsReady || isRecording || !autoMic) return;
+    if (quizQueue.length > 0) return; // 先答考题，答完再开麦
     if (playerRef.current?.busy) return; // 对方音频没播完，绝不抢麦
     void startRecording();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isVoice, phase, status, timeUp, wsReady, isRecording, autoMic]);
+  }, [isVoice, phase, status, timeUp, wsReady, isRecording, autoMic, quizQueue.length]);
 
   // ===== 语音模式：点击麦克风开始/结束一轮 =====
   const handleMicClick = async () => {
@@ -859,24 +942,40 @@ export default function Practice() {
       try {
         const res = await resumeSession(sessionId);
         if (typeof res.remainingSeconds === 'number') setRemaining(Math.max(0, res.remainingSeconds));
-        setStatusBoth(timeUpRef.current ? 'time_up' : 'user_turn');
+        const p = phaseRef.current;
+        if (p === 'live') {
+          playerRef.current?.resumePlayback();
+          setStatusBoth(
+            timeUpRef.current ? 'time_up' : playerRef.current?.busy ? 'speaking' : 'user_turn'
+          );
+        } else {
+          // 开场/指引阶段：恢复到该阶段当前步骤
+          setStatusBoth('loading');
+          if (p === 'qualify') void askQualifyQuestion(qualifyQ);
+          else if (p === 'guide') {
+            if (demoStage === 'ask') void askGuideChoice();
+            else void beginGuide(demoVersion);
+          }
+          // ready_wait：回到「我准备好了」界面即可，无需额外动作
+        }
       } catch (err) {
         setErrorMsg(apiError(err, '继续失败，请重试'));
       }
       return;
     }
 
-    if (phaseRef.current !== 'live') return;
-    if (['loading', 'failed', 'ended', 'evaluating', 'time_up'].includes(statusRef.current)) return;
+    if (phaseRef.current === 'boot') return;
+    if (['failed', 'ended', 'evaluating', 'time_up'].includes(statusRef.current)) return;
 
-    // 冻结本地一切收发：录音停止、ASR/TTS 轮次取消、播放器清空
+    // 冻结本地一切收发：录音停止、ASR/TTS 轮次取消、播放器暂停、指引阶段媒体中断
     if (isRecording) {
       recorderRef.current?.stop();
       setIsRecording(false);
       setMicLevel(0);
     }
     socketRef.current?.send({ type: 'interrupt' });
-    playerRef.current?.stopAll();
+    playerRef.current?.pause();
+    stopGuidanceMedia();
     setPartialText('');
 
     try {
@@ -885,7 +984,7 @@ export default function Practice() {
       setStatusBoth('paused');
     } catch (err) {
       setErrorMsg(apiError(err, '暂停失败，请重试'));
-      setStatusBoth('user_turn');
+      setStatusBoth(phaseRef.current === 'live' ? 'user_turn' : 'loading');
     }
   };
 
@@ -920,6 +1019,7 @@ export default function Practice() {
       setIsRecording(false);
     }
     playerRef.current?.stopAll();
+    stopGuidanceMedia();
     setStatusBoth('evaluating');
     try {
       await endSession(sessionId);
@@ -946,9 +1046,9 @@ export default function Practice() {
   const inLive = phase === 'live';
   const inputDisabled = !inLive || status !== 'user_turn' || timeUp;
   const canStop =
-    inLive && status !== 'loading' && status !== 'failed' && status !== 'ended' && status !== 'evaluating';
+    phase !== 'boot' && !(inLive && status === 'loading') && status !== 'failed' && status !== 'ended' && status !== 'evaluating';
   const canPause =
-    inLive && !['loading', 'failed', 'ended', 'evaluating', 'time_up'].includes(status);
+    phase !== 'boot' && !['failed', 'ended', 'evaluating', 'time_up'].includes(status);
   const micDisabled =
     !inLive ||
     !wsReady ||
@@ -1042,17 +1142,17 @@ export default function Practice() {
               {phase === 'boot' && (
                 <div className="statusbar statusbar-gray">正在初始化练习<span className="dots"><i /><i /><i /></span></div>
               )}
-              {phase === 'ready_wait' && (
+              {phase === 'ready_wait' && status !== 'paused' && (
                 <div className="statusbar statusbar-coral">
                   <span className="pulse-dot" />准备好了吗？点击「我准备好了」开始对练
                 </div>
               )}
-              {phase === 'qualify' && (
+              {phase === 'qualify' && status !== 'paused' && (
                 <div className="statusbar statusbar-blue">
                   🎓 新手指引 · 教练提问（第 {qualifyQ} / 2 题），请用语音回答，倒计时已冻结
                 </div>
               )}
-              {phase === 'guide' && (
+              {phase === 'guide' && status !== 'paused' && (
                 <div className="statusbar statusbar-blue">
                   📖 新手指引 · 示范对话{demoStage === 'ask' ? '已播完' : '播放中'}，倒计时已冻结
                 </div>
@@ -1076,7 +1176,7 @@ export default function Practice() {
                   )}
                 </div>
               )}
-              {inLive && status === 'paused' && (
+              {status === 'paused' && (
                 <div className="statusbar statusbar-gray">⏸ 已暂停，倒计时已冻结 — 点击下方 ▶ 继续</div>
               )}
               {inLive && timeUp && status !== 'evaluating' && status !== 'ended' && (
@@ -1125,12 +1225,12 @@ export default function Practice() {
                     <div className="text-[13.5px] font-medium opacity-85">会话准备中…</div>
                   </div>
                 )}
-                {phase === 'ready_wait' && (
+                {phase === 'ready_wait' && status !== 'paused' && (
                   <div className="flex flex-col items-center gap-5 px-6 max-w-[560px]">
                     <button className="ready-btn" onClick={handleReady}>▶ 我准备好了</button>
                   </div>
                 )}
-                {phase === 'qualify' && (
+                {phase === 'qualify' && status !== 'paused' && (
                   <div className="flex flex-col items-center gap-5 px-6 max-w-[560px]">
                     <div className="text-[13px] font-semibold opacity-75">资格提问 · 第 {qualifyQ} / 2 题</div>
                     {qualifyStage === 'recording' && (
@@ -1156,12 +1256,19 @@ export default function Practice() {
                     {qualifyText && <div className="text-[12.5px] font-medium opacity-60">{qualifyText}</div>}
                   </div>
                 )}
-                {phase === 'guide' && (
+                {phase === 'guide' && status !== 'paused' && (
                   <div className="flex flex-col items-center gap-4 px-6 py-14 w-full max-w-[620px]">
                     {demoStage === 'loading' && (
                       <>
                         <div className="think5"><i /><i /><i /><i /><i /></div>
                         <div className="text-[13.5px] font-medium opacity-85">正在生成示范对话…</div>
+                        <button
+                          className="btn btn-sm"
+                          style={{ background: 'rgba(255,255,255,.14)', color: '#fff' }}
+                          onClick={startLive}
+                        >
+                          ⏭ 跳过示范，直接开始
+                        </button>
                       </>
                     )}
                     {demoStage === 'playing' && (
@@ -1195,10 +1302,18 @@ export default function Practice() {
                         {demoLines.length > 0 && (
                           <div className="text-[12px] font-medium opacity-60 tabular-nums">{demoIndex + 1} / {demoLines.length}</div>
                         )}
+                        <button
+                          className="btn btn-sm"
+                          style={{ background: 'rgba(255,255,255,.14)', color: '#fff' }}
+                          onClick={startLive}
+                        >
+                          ⏭ 跳过示范，直接开始
+                        </button>
                       </div>
                     )}
                     {demoStage === 'ask' && (
                       <div className="flex flex-col items-center gap-3">
+                        <div className="text-[14px] font-semibold opacity-90">🎓 {GUIDE_CHOICE_QUESTION}</div>
                         {guideRec === 'recording' && (
                           <>
                             <div className="flex items-end gap-[5px] h-9">
@@ -1276,7 +1391,7 @@ export default function Practice() {
                     </div>
                   </div>
                 )}
-                {inLive && status === 'paused' && (
+                {status === 'paused' && (
                   <div className="paused-banner">
                     <div className="paused-icon">⏸</div>
                     <div className="text-[15px] font-semibold">已暂停</div>
@@ -1476,6 +1591,16 @@ export default function Practice() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ===== 随场考题弹窗（对练中触发，逐题作答） ===== */}
+      {phase === 'live' && quizQueue.length > 0 && (
+        <QuizModal
+          sessionId={sessionId}
+          quiz={quizQueue[0]}
+          onDone={() => setQuizQueue((prev) => prev.slice(1))}
+          onSkip={quizQueue[0].required ? undefined : () => dismissQuiz(quizQueue[0])}
+        />
       )}
     </div>
   );

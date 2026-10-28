@@ -127,6 +127,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
         personaTurn: result.personaTurn,
         remainingSeconds: result.remainingSeconds,
         timeUp: result.timeUp,
+        pendingQuizzes: result.pendingQuizzes,
       },
       emotion: { arousal: result.arousal, bandKey: result.bandKey },
     };
@@ -146,7 +147,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
 
   // 开场白/文字模式回复的服务端 TTS：按 persona 音色合成任意文本（与 voice-turn 回复同一声音）；
   // voiceRole 为 coach/sales/narrator/child 时用指引模式固定音色（示范对话各角色区分）
-  app.post<{ Params: { id: string }; Body: { text?: string; arousal?: number; excitement?: number; voiceRole?: VoiceRole } }>(
+  app.post<{ Params: { id: string }; Body: { text?: string; arousal?: number; excitement?: number; voiceRole?: VoiceRole; rate?: number } }>(
     '/sessions/:id/tts',
     async (request, reply) => {
       const session = await store.getSession(request.params.id);
@@ -158,6 +159,10 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
       if (!['persona', 'coach', 'sales', 'narrator', 'child'].includes(voiceRole)) {
         return reply.code(400).send({ error: 'voiceRole 只能是 persona / coach / sales / narrator / child' });
       }
+      const rate = request.body?.rate;
+      if (rate !== undefined && (typeof rate !== 'number' || !Number.isFinite(rate) || rate < 0.5 || rate > 2)) {
+        return reply.code(400).send({ error: 'rate 只能是 0.5~2.0 的数字' });
+      }
       const scenario = await store.getScenario(session.scenarioId);
       if (!scenario) return reply.code(500).send({ error: '场景缺失' });
       const voice =
@@ -168,6 +173,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
         voice,
         arousal: request.body?.arousal,
         excitement: request.body?.excitement,
+        rate,
       });
       return { audioBase64: tts.audio.toString('base64'), audioFormat: tts.format };
     }
@@ -269,12 +275,20 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
           const sentences = splitSentences(replyText);
           for (let seq = 0; seq < sentences.length; seq++) {
             if (myRound !== round) return; // 被打断
-            const tts = await speech.tts.synthesize(sentences[seq], {
-              arousal: result.arousal ?? undefined,
-              voice,
-            });
-            if (myRound !== round) return;
-            send({ type: 'tts_sentence', seq, audio: tts.audio.toString('base64'), format: tts.format });
+            try {
+              const tts = await speech.tts.synthesize(sentences[seq], {
+                arousal: result.arousal ?? undefined,
+                voice,
+              });
+              if (myRound !== round) return;
+              send({ type: 'tts_sentence', seq, audio: tts.audio.toString('base64'), format: tts.format });
+            } catch (ttsErr) {
+              // 单句合成失败：跳过该句继续后续句子，避免整轮回复剩余部分全部丢失
+              req.log.warn(
+                { sessionId, seq, sentence: sentences[seq].slice(0, 30), err: ttsErr instanceof Error ? ttsErr.message : String(ttsErr) },
+                'voice 单句 TTS 合成失败，跳过该句'
+              );
+            }
           }
           ttsPlaying = false;
           send({ type: 'tts_end' });
@@ -285,6 +299,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
               personaTurn: result.personaTurn,
               remainingSeconds: result.remainingSeconds,
               timeUp: result.timeUp,
+              pendingQuizzes: result.pendingQuizzes,
             },
             emotion: { arousal: result.arousal, bandKey: result.bandKey },
           });
@@ -540,20 +555,29 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
             } catch (streamErr) {
               console.warn(`[VoiceCall][greeting] stream FAILED, fallback to synthesize: ${streamErr instanceof Error ? streamErr.message : String(streamErr)}`);
               if (myRound !== round || ttsAborted || closed) return;
-              const tts = await speech.tts.synthesize(sentence, {
-                arousal: result.arousal ?? undefined,
-                voice,
-              });
-              console.log(`[VoiceCall][greeting] fallback synthesize done: bytes=${tts.audio.length}`);
-              if (myRound !== round || ttsAborted || closed) return;
-              send({
-                type: 'tts_chunk',
-                seq,
-                audio: tts.audio.toString('base64'),
-                format: tts.format,
-                isFinal: true,
-              });
-              seq++;
+              try {
+                const tts = await speech.tts.synthesize(sentence, {
+                  arousal: result.arousal ?? undefined,
+                  voice,
+                });
+                console.log(`[VoiceCall][greeting] fallback synthesize done: bytes=${tts.audio.length}`);
+                if (myRound !== round || ttsAborted || closed) return;
+                send({
+                  type: 'tts_chunk',
+                  seq,
+                  audio: tts.audio.toString('base64'),
+                  format: tts.format,
+                  isFinal: true,
+                });
+                seq++;
+              } catch (fallbackErr) {
+                // 单句合成失败：跳过该句继续后续句子，避免整轮回复剩余部分丢失
+                req.log.warn(
+                  { sessionId, seq, err: fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr) },
+                  'voice-call 开场白单句 TTS 合成失败，跳过该句'
+                );
+                seq++;
+              }
             }
           }
 
@@ -567,6 +591,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
               personaTurn: result.personaTurn,
               remainingSeconds: result.remainingSeconds,
               timeUp: result.timeUp,
+              pendingQuizzes: result.pendingQuizzes,
             },
             emotion: { arousal: result.arousal, bandKey: result.bandKey },
           });
@@ -745,19 +770,28 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
             } catch {
               // 流式失败：回退非流式
               if (myRound !== round || ttsAborted || closed) return;
-              const tts = await speech.tts.synthesize(sentence, {
-                arousal: result.arousal ?? undefined,
-                voice,
-              });
-              if (myRound !== round || ttsAborted || closed) return;
-              send({
-                type: 'tts_chunk',
-                seq,
-                audio: tts.audio.toString('base64'),
-                format: tts.format,
-                isFinal: true,
-              });
-              seq++;
+              try {
+                const tts = await speech.tts.synthesize(sentence, {
+                  arousal: result.arousal ?? undefined,
+                  voice,
+                });
+                if (myRound !== round || ttsAborted || closed) return;
+                send({
+                  type: 'tts_chunk',
+                  seq,
+                  audio: tts.audio.toString('base64'),
+                  format: tts.format,
+                  isFinal: true,
+                });
+                seq++;
+              } catch (fallbackErr) {
+                // 单句合成失败：跳过该句继续后续句子，避免整轮回复剩余部分丢失
+                req.log.warn(
+                  { sessionId, seq, err: fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr) },
+                  'voice-call 单句 TTS 合成失败，跳过该句'
+                );
+                seq++;
+              }
             }
           }
 
@@ -771,6 +805,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
               personaTurn: result.personaTurn,
               remainingSeconds: result.remainingSeconds,
               timeUp: result.timeUp,
+              pendingQuizzes: result.pendingQuizzes,
             },
             emotion: { arousal: result.arousal, bandKey: result.bandKey },
           });
@@ -812,20 +847,14 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
             console.log(`[VoiceCall][trace] audio #${audioMsgCount}: ${data.length}bytes isTTS=${ttsPlaying} isList=${listening} isProc=${processing} asrStream=${!!asrStream}`);
           }
           // 二进制音频块：PCM16 LE 16kHz mono
-          // TTS 播放中收到音频 = 用户开口说话 → 打断 TTS
-          if (ttsPlaying && !listening && !processing) {
-            cancelAll();
-            send({ type: 'tts_cancelled' });
-            send({ type: 'listening' });
-            // 这块音频也要送入 ASR
-          }
-
+          // TTS 播放中：检测到明显语音能量才视为用户插话打断；低能量噪声/回声直接忽略，
+          // 否则持续推流的首块音频（甚至扬声器回声）会立刻掐断 TTS
           if (ttsPlaying) {
-            // TTS 播放中：检测到语音能量则打断
             const rms = pcmRMS(data);
             if (rms > VAD_THRESHOLD * 2) {
               cancelAll();
               send({ type: 'tts_cancelled' });
+              // 打断的这块音频含有效语音，继续走下面的 ASR 流程
             } else {
               return; // 忽略低能量噪声
             }

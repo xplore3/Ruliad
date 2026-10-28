@@ -10,6 +10,7 @@ import type {
 } from '@grasp-mvp/core';
 import { judgeItem } from './judge.js';
 import { runRuleChecks } from './rules.js';
+import { generateSummary } from './summary.js';
 import { judgeVideo } from './video-judge.js';
 
 function weightedAverage(items: Array<{ score: number; weight: number }>): number {
@@ -25,6 +26,8 @@ export interface ScoreOptions {
   videoFrames?: string[];
   /** 评分过程诊断日志（各阶段耗时与逐项结果）；与 Fastify logger 结构兼容 */
   log?: ScoreLogger;
+  /** 技能点 id → 名称映射（用于报告中的 skillPointName）；缺省回退为 id */
+  skillPointNames?: Record<string, string>;
 }
 
 /** 评分过程日志器最小接口 */
@@ -63,7 +66,7 @@ export async function scoreSession(
   const items: ScoreItemResult[] = [];
   for (const [i, def] of relevantDefs.entries()) {
     const itemStart = Date.now();
-    const item = await judgeItem(def, session, gateway);
+    const item = await judgeItem(def, session, gateway, scenario);
     log?.info(
       {
         sessionId: session.id,
@@ -91,7 +94,7 @@ export async function scoreSession(
   }
   const skillScores: SkillScore[] = [...bySkill.entries()].map(([skillPointId, group]) => ({
     skillPointId,
-    skillPointName: skillPointId,
+    skillPointName: options.skillPointNames?.[skillPointId] ?? skillPointId,
     score: Math.round(
       weightedAverage(group.map((i) => ({ score: i.score, weight: weightOf.get(i.itemId) ?? 1 })))
     ),
@@ -129,10 +132,21 @@ export async function scoreSession(
   const quizScore: QuizScore | undefined = quizResults.length > 0
     ? {
         earned: quizResults.reduce((sum, r) => sum + r.score, 0),
-        total: quizResults.reduce((sum, r) => sum + (r.score > 0 ? r.score : 0), 0),
+        // total 取各题满分之和；旧数据无 maxScore 快照时回退用得分（答对时得分即满分）
+        total: quizResults.reduce((sum, r) => sum + (r.maxScore ?? r.score), 0),
         results: quizResults.map((r) => ({ quizId: r.quizId, correct: r.correct, score: r.score })),
       }
     : undefined;
+
+  // ---- 教练总结：LLM 优先生成，失败回退模板，保证报告始终带 summary ----
+  const fillerTotal = Object.values(stats.fillerCounts).reduce((sum, n) => sum + n, 0);
+  const summary = await generateSummary(session, scenario, gateway, {
+    totalScore,
+    passed,
+    fatalViolation,
+    items,
+    fillerTotal,
+  });
 
   log?.info(
     {
@@ -158,6 +172,7 @@ export async function scoreSession(
     ruleStats: stats,
     videoReview: videoReview ?? undefined,
     quizScore,
+    summary,
     createdAt: new Date().toISOString(),
   };
 }

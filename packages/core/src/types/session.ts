@@ -53,6 +53,10 @@ export interface Session {
   pausedMs?: number;
   /** AI 教练开场白缓存（首次生成后复用） */
   coachOpening?: string;
+  /** 教练强度（创建会话时可选）：高强度 persona 更频繁追问/施压 */
+  coachIntensity?: 'low' | 'medium' | 'high';
+  /** 进入正式对练（live）的时间（ISO）；倒计时以此为起点，开场/新手指引阶段不计时 */
+  liveStartedAt?: string;
   startedAt: string;
   endedAt?: string;
 }

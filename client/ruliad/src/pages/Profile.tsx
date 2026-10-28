@@ -103,7 +103,7 @@ export default function Profile() {
           <button className="btn ghost sm" onClick={() => navigate('/settings')}>
             设置
           </button>
-          <button className="btn ghost sm" onClick={() => navigate('/settings#about')}>
+          <button className="btn ghost sm" onClick={() => navigate('/settings', { state: { scrollTo: 'about' } })}>
             关于
           </button>
         </div>
@@ -230,7 +230,7 @@ export default function Profile() {
           <a href="#" onClick={(e) => { e.preventDefault(); navigate('/settings'); }}>
             <span className="ic">⚙️</span>设置<span className="arrow">›</span>
           </a>
-          <a href="#" onClick={(e) => { e.preventDefault(); navigate('/settings#about'); }}>
+          <a href="#" onClick={(e) => { e.preventDefault(); navigate('/settings', { state: { scrollTo: 'about' } }); }}>
             <span className="ic">ℹ️</span>关于<span className="arrow">›</span>
           </a>
         </div>

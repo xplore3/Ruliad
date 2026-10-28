@@ -23,8 +23,8 @@ export interface GatewayOptions {
 
 /**
  * 包装诊断日志：记录每次 LLM 调用的开始/完成/失败与耗时。
- * 若日志中只有「LLM 调用开始」而无「完成/失败」，说明底层 fetch 挂起
- * （OpenAICompatibleProvider 的 fetch 无超时，网络异常时会永久挂起）。
+ * 若日志中只有「LLM 调用开始」而无「完成/失败」，说明底层请求挂起或耗时过长
+ * （OpenAICompatibleProvider 已有超时保护：默认 60s，LLM_TIMEOUT_MS 可覆盖）。
  */
 function wrapDiagLogging(
   provider: LLMProvider,
@@ -162,6 +162,9 @@ export function createLLMGateway(
   if (options.logger?.info) options.logger.info(llmDiag, 'LLM Gateway env 诊断');
 
   const main = resolveMainConnection(env);
+  // 请求超时：默认 60s（provider 内默认值），LLM_TIMEOUT_MS 可覆盖（非法值忽略）
+  const parsedTimeout = Number(env.LLM_TIMEOUT_MS);
+  const timeoutMs = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : undefined;
   if (main) {
     console.log(`[LLMGateway][diag] → selected: real provider (baseUrl=${main.baseUrl}, model=${main.model}, key=${main.apiKey.slice(0, 6)}...)`);
     if (options.logger?.info) options.logger.info({ baseUrl: main.baseUrl, model: main.model, keyPrefix: main.apiKey.slice(0, 6) }, 'LLM Gateway: 使用真实 provider');
@@ -173,6 +176,7 @@ export function createLLMGateway(
         apiKey: main.apiKey,
         baseUrl,
         model: model ?? fallbackModel,
+        timeoutMs,
       });
 
     providers.set('actor', mainProvider(env.LLM_MODEL_ACTOR));
@@ -189,6 +193,7 @@ export function createLLMGateway(
           apiKey: env.LLM_SECONDARY_API_KEY,
           baseUrl: env.LLM_SECONDARY_BASE_URL ?? baseUrl,
           model: env.LLM_MODEL_JUDGE_SECONDARY ?? env.LLM_MODEL ?? main.model,
+          timeoutMs,
         })
       );
     } else if (env.LLM_MODEL_JUDGE_SECONDARY) {
@@ -197,8 +202,13 @@ export function createLLMGateway(
       providers.set('judge_secondary', providers.get('judge')!);
     }
   } else {
-    console.log('[LLMGateway][diag] → selected: mock (LLM_PROVIDER 未配置 或 对应 API_KEY 为空；文字对话将无法真正调用大模型)');
-    if (options.logger?.warn) options.logger.warn({}, 'LLM Gateway: 回退 Mock，文字对话不会真正调用大模型');
+    console.warn('[LLMGateway][WARN] → selected: mock (LLM_PROVIDER 未配置 或 对应 API_KEY 为空；文字对话将无法真正调用大模型)');
+    if (options.logger?.warn) {
+      options.logger.warn(
+        {},
+        'LLM Gateway: 正在使用 Mock provider，文字对话/评分不会真正调用大模型。配置 LLM_PROVIDER 与对应 <PREFIX>_API_KEY（如 DEEPSEEK_API_KEY），或传统 LLM_API_KEY，可切换真实服务'
+      );
+    }
     const mock = new MockLLMProvider();
     for (const task of tasks) providers.set(task, mock);
   }

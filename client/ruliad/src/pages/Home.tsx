@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchScenarios, fetchMySessions, fetchExamWindows, createSession, apiError, getStoredUser } from '../api';
+import { fetchScenarios, fetchMySessions, fetchExamWindows, fetchPreferences, createSession, apiError, getStoredUser } from '../api';
 import type { MySessionRecord } from '../api';
 import type { ExamWindow, Scenario } from '../types';
 import { CATEGORY_RULES, categoryOf, matchCategory } from '../lib/categories';
@@ -52,14 +52,14 @@ const CATEGORIES = [
   ...CATEGORY_RULES.map((r) => ({ label: r.label, value: r.label, color: r.color })),
 ];
 
-/** 封面预设：按场景 id hash 选取渐变与 emoji */
+/** 封面预设：按场景 id hash 选取浅色渐变与 emoji */
 const COVERS = [
-  { g: 'linear-gradient(135deg, #FF6B5B 0%, #F5A623 100%)', em: '📞' },
-  { g: 'linear-gradient(135deg, #4B7BEC 0%, #7B61FF 100%)', em: '💬' },
-  { g: 'linear-gradient(135deg, #F5A623 0%, #E85C62 100%)', em: '🤝' },
-  { g: 'linear-gradient(135deg, #2FAE7B 0%, #4B7BEC 100%)', em: '👋' },
-  { g: 'linear-gradient(135deg, #7B61FF 0%, #E85C62 100%)', em: '🎯' },
-  { g: 'linear-gradient(135deg, #2FAE7B 0%, #F5A623 100%)', em: '🚀' },
+  { g: 'linear-gradient(135deg, #FFF1EE 0%, #FDF5E9 100%)', em: '📞' },
+  { g: 'linear-gradient(135deg, #EDF3FE 0%, #F3EFFF 100%)', em: '💬' },
+  { g: 'linear-gradient(135deg, #FCF3E2 0%, #FCEEEB 100%)', em: '🤝' },
+  { g: 'linear-gradient(135deg, #E8F6F0 0%, #EDF3FE 100%)', em: '👋' },
+  { g: 'linear-gradient(135deg, #F1EEFC 0%, #FBEEEF 100%)', em: '🎯' },
+  { g: 'linear-gradient(135deg, #E9F5EF 0%, #FAF2E1 100%)', em: '🚀' },
 ];
 
 function hashId(id: string): number {
@@ -97,6 +97,8 @@ export default function Home() {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [records, setRecords] = useState<MySessionRecord[]>([]);
   const [examWindows, setExamWindows] = useState<ExamWindow[]>([]);
+  /** 设置页的「默认模式」偏好（voice-call=实时通话 / voice=轮次语音 / text=文字），拉取失败回退轮次语音 */
+  const [defaultMode, setDefaultMode] = useState<'voice-call' | 'voice' | 'text'>('voice');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeCategory, setActiveCategory] = useState('');
@@ -129,14 +131,18 @@ export default function Home() {
     }
   };
 
-  /** 实用场景 - 练习（有剧本，由场景 hasScript 决定） */
-  const startPractice = async (scenarioId: string) => {
+  /** 实用场景 - 练习（按场景类别跳转：电话销售类进实时通话页，其余按「设置 → 默认模式」偏好进练习页） */
+  const startPractice = async (scene: Scenario) => {
     if (startingId) return;
-    setStartingId(scenarioId);
+    setStartingId(scene.id);
     setStartError('');
     try {
-      const data = await createSession(scenarioId, 'practice');
-      navigate(`/practice/${data.session.id}?mode=voice`);
+      const data = await createSession(scene.id, 'practice');
+      if (categoryOf(scene)?.label === '电话销售') {
+        navigate(`/call?sessionId=${data.session.id}`);
+      } else {
+        navigate(`/practice/${data.session.id}?mode=${defaultMode === 'text' ? 'text' : 'voice'}`);
+      }
     } catch (err) {
       setStartError(apiError(err, '创建会话失败，请稍后重试'));
       setStartingId(null);
@@ -152,7 +158,11 @@ export default function Home() {
     setStartError('');
     try {
       const data = await createSession(scene.id, 'exam', window.id);
-      navigate(`/practice/${data.session.id}?mode=voice`);
+      if (defaultMode === 'voice-call') {
+        navigate(`/call?sessionId=${data.session.id}`);
+      } else {
+        navigate(`/practice/${data.session.id}?mode=${defaultMode}`);
+      }
     } catch (err) {
       setStartError(apiError(err, '创建考核会话失败，请稍后重试'));
       setStartingId(null);
@@ -166,11 +176,14 @@ export default function Home() {
       fetchScenarios(),
       fetchMySessions().catch(() => ({ records: [] as MySessionRecord[] })),
       fetchExamWindows().catch(() => ({ windows: [] as ExamWindow[] })),
+      fetchPreferences().catch(() => ({ preferences: {} })),
     ])
-      .then(([s, r, w]) => {
+      .then(([s, r, w, p]) => {
         setScenarios(s.scenarios);
         setRecords(r.records);
         setExamWindows(w.windows);
+        const mode = (p.preferences as { defaultMode?: string }).defaultMode;
+        if (mode === 'voice-call' || mode === 'voice' || mode === 'text') setDefaultMode(mode);
       })
       .catch((err) => setError(apiError(err, '场景加载失败，请稍后重试')))
       .finally(() => setLoading(false));
@@ -227,13 +240,13 @@ export default function Home() {
                   className={`card train-card${available && !startingId ? '' : ' disabled'}`}
                   onClick={() => startTraining(mod)}
                 >
-                  <div className="train-icon" style={{ background: mod.color }}>
+                  <div className="train-icon" style={{ background: `${mod.color}14`, color: mod.color }}>
                     {mod.icon}
                   </div>
                   <h3>{mod.label}</h3>
                   <p className="desc">{available ? mod.desc : '该类别暂无可用场景'}</p>
                   <div className="train-meta">
-                    <span className="train-go" style={{ background: mod.color }}>
+                    <span className="train-go" style={{ background: `${mod.color}12`, color: mod.color }}>
                       {starting ? '创建会话中…' : mod.entry === 'call' ? '发起通话 →' : '开始练习 →'}
                     </span>
                   </div>
@@ -289,12 +302,26 @@ export default function Home() {
                   >
                     {/* 封面 */}
                     <div className="cover" style={{ background: cover.g }}>
-                      <span style={{ fontSize: 26, lineHeight: 1 }}>{cover.em}</span>
+                      <span
+                        style={{
+                          fontSize: 17,
+                          lineHeight: 1,
+                          width: 34,
+                          height: 34,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          background: 'rgba(255,255,255,.72)',
+                          borderRadius: 10,
+                        }}
+                      >
+                        {cover.em}
+                      </span>
                       <span className="chip cat">
                         <i className="cdot" style={{ background: cat?.color ?? '#8A8F98' }} />
                         {cat?.label ?? '综合场景'}
                       </span>
-                      {scene.hasScript && <span className="scripted">有剧本</span>}
+                      {(scene.sceneType ?? 'practical') !== 'drill' && <span className="scripted">有剧本</span>}
                       <span className="diff">{difficultyLabel(scene.difficulty)} · 约 {scene.durationMinutes} 分钟</span>
                       {score != null && <span className="practiced">已练习 · {score} 分</span>}
                     </div>
@@ -324,7 +351,7 @@ export default function Home() {
                         <button
                           className="btn btn-soft btn-sm"
                           disabled={startingId !== null}
-                          onClick={() => startPractice(scene.id)}
+                          onClick={() => startPractice(scene)}
                         >
                           {busy ? '创建会话中…' : '练习'}
                         </button>

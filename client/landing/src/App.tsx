@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 
 /* ── 色板常量 ── */
 const C = {
@@ -28,38 +28,32 @@ const NAV_ITEMS: NavItem[] = [
     label: '产品',
     href: '#products',
     children: [
-      { label: 'AI陪练', href: '#products' },
-      { label: '辅导与能力画像', href: '#products' },
-      { label: '推演沙盘', href: '#products' },
+      { label: 'AI陪练', href: '#product-practice' },
+      { label: '辅导与能力画像', href: '#product-coaching' },
+      { label: '推演沙盘', href: '#product-sandbox' },
     ],
   },
   {
     label: '解决方案',
     href: '#solutions',
     children: [
-      { label: '企业', href: '#solutions' },
-      { label: '线下门店', href: '#solutions' },
-      { label: '事业单位', href: '#solutions' },
+      { label: '企业', href: '#sol-enterprise' },
+      { label: '线下门店', href: '#sol-store' },
+      { label: '事业单位', href: '#sol-gov' },
     ],
   },
   {
     label: '技术',
     href: '#tech',
     children: [
-      { label: '认知工程', href: '#tech' },
-      { label: '主体性计算', href: '#tech' },
-      { label: '博弈主体建模引擎', href: '#tech' },
+      { label: '认知工程', href: '#tech-cognitive' },
+      { label: '主体性计算', href: '#tech-agency' },
     ],
   },
   {
     label: '资源',
     href: '#evidence',
-    children: [
-      { label: '白皮书', href: '#evidence' },
-      { label: '案例', href: '#evidence' },
-      { label: 'ROI测算工具', href: '#evidence' },
-      { label: '社媒', href: '#evidence' },
-    ],
+    children: [{ label: '社媒', href: '#about' }],
   },
   { label: '关于我们', href: '#about' },
 ];
@@ -109,6 +103,7 @@ const SPECTRUM = [
  * ────────────────────────────────────────────── */
 const TRAINING_LAYERS = [
   {
+    id: 'product-sandbox',
     name: '推演沙盘',
     oneLiner: '把大客户攻坚和年度规划搬进沙盘',
     features: '多回合博弈 · 多筹码管理 · AI竞对 + AI客户',
@@ -122,6 +117,7 @@ const TRAINING_LAYERS = [
     ),
   },
   {
+    id: 'product-coaching',
     name: '辅导',
     oneLiner: '让能力变化看得见、说得清',
     features: '多维能力画像 · 经理干预建议 · 效果归因',
@@ -134,6 +130,7 @@ const TRAINING_LAYERS = [
     ),
   },
   {
+    id: 'product-practice',
     name: '陪练',
     oneLiner: '在能施压的AI客户面前，磨练几次',
     features: '对抗性对话 · 语音/文字 · 长记忆 · 角色一致性',
@@ -161,26 +158,32 @@ const DATA_CARDS = [
  * ────────────────────────────────────────────── */
 const SOLUTIONS = [
   {
+    id: 'sol-enterprise',
     tag: '企业',
     title: '销售组织的能力标准化',
     points: ['销冠能力复制', '新人上手周期缩短', '大客户攻坚推演'],
     cta: '了解企业方案 →',
+    ctaHref: 'mailto:support@grasp.chat?subject=咨询企业方案',
     color: C.accent,
     image: '/images/sol-enterprise.svg',
   },
   {
+    id: 'sol-store',
     tag: '线下门店',
     title: '店员当天能用的销售训练',
     points: ['5分钟一局', '游戏化', '手机即练'],
     cta: '了解门店方案 →',
+    ctaHref: 'mailto:support@grasp.chat?subject=咨询门店方案',
     color: C.mint,
     image: '/images/sol-store.svg',
   },
   {
+    id: 'sol-gov',
     tag: '事业单位',
     title: '合规可控的政务与党建实训',
     points: ['窗口沟通陪练', '党建流程推演', '私有化部署'],
     cta: '了解政务方案 →',
+    ctaHref: 'mailto:support@grasp.chat?subject=咨询政务方案',
     color: C.textMain,
     image: '/images/sol-gov.svg',
   },
@@ -247,11 +250,20 @@ function NavDropdown({ item }: { item: NavItem }) {
       onMouseLeave={() => setOpen(false)}
     >
       <button
+        type="button"
+        aria-haspopup="true"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-1 text-sm transition"
         style={{ color: open ? C.textMain : C.textSub }}
       >
         {item.label}
-        <svg viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          className="h-3.5 w-3.5 transition-transform"
+          style={{ transform: open ? 'rotate(180deg)' : 'none' }}
+        >
           <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </button>
@@ -266,6 +278,7 @@ function NavDropdown({ item }: { item: NavItem }) {
               href={child.href}
               className="block px-4 py-2 text-sm transition hover:bg-white/5"
               style={{ color: C.textSub }}
+              onClick={() => setOpen(false)}
               onMouseEnter={(e) => { e.currentTarget.style.color = C.accent; }}
               onMouseLeave={(e) => { e.currentTarget.style.color = C.textSub; }}
             >
@@ -274,6 +287,66 @@ function NavDropdown({ item }: { item: NavItem }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ── 移动端导航分组（可点击展开子项） ── */
+function MobileNavGroup({ item, onNavigate }: { item: NavItem; onNavigate: () => void }) {
+  const [open, setOpen] = useState(false);
+  if (!item.children) {
+    return (
+      <a
+        href={item.href}
+        className="block py-2 text-sm"
+        style={{ color: C.textSub }}
+        onClick={onNavigate}
+      >
+        {item.label}
+      </a>
+    );
+  }
+  return (
+    <div>
+      <div className="flex items-center justify-between">
+        <a
+          href={item.href}
+          className="block py-2 text-sm"
+          style={{ color: C.textSub }}
+          onClick={onNavigate}
+        >
+          {item.label}
+        </a>
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-label={`展开${item.label}子菜单`}
+          onClick={() => setOpen((v) => !v)}
+          className="p-2"
+          style={{ color: C.textDim }}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            className="h-4 w-4 transition-transform"
+            style={{ transform: open ? 'rotate(180deg)' : 'none' }}
+          >
+            <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      </div>
+      {open &&
+        item.children.map((child) => (
+          <a
+            key={child.label}
+            href={child.href}
+            className="block py-2 pl-4 text-sm"
+            style={{ color: C.textDim }}
+            onClick={onNavigate}
+          >
+            {child.label}
+          </a>
+        ))}
     </div>
   );
 }
@@ -467,15 +540,11 @@ export default function App() {
         {mobileMenuOpen && (
           <div className="border-t border-white/5 px-6 py-4 lg:hidden" style={{ backgroundColor: C.ink850 }}>
             {NAV_ITEMS.map((item) => (
-              <a
+              <MobileNavGroup
                 key={item.label}
-                href={item.href}
-                className="block py-2 text-sm"
-                style={{ color: C.textSub }}
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                {item.label}
-              </a>
+                item={item}
+                onNavigate={() => setMobileMenuOpen(false)}
+              />
             ))}
           </div>
         )}
@@ -626,7 +695,8 @@ export default function App() {
             {[...TRAINING_LAYERS].reverse().map((layer) => (
               <div
                 key={layer.name}
-                className="group relative overflow-hidden rounded-2xl border border-white/8 p-6 transition md:p-8"
+                id={layer.id}
+                className="group relative scroll-mt-24 overflow-hidden rounded-2xl border border-white/8 p-6 transition md:p-8"
                 style={{ backgroundColor: C.ink850 }}
                 onMouseEnter={(e) => { e.currentTarget.style.borderColor = `${C.accent}40`; }}
                 onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; }}
@@ -670,7 +740,9 @@ export default function App() {
               客户画像｜实时通话｜认知可视化｜实时指导｜专家校准｜推演沙盘｜主体性博弈
             </p>
             <a
-              href="#products"
+              href="https://train.grasp.chat"
+              target="_blank"
+              rel="noopener noreferrer"
               className="mt-4 inline-flex items-center gap-1 text-sm font-semibold transition"
               style={{ color: C.accent }}
               onMouseEnter={(e) => (e.currentTarget.style.color = C.accentLight)}
@@ -694,7 +766,8 @@ export default function App() {
           <div className="mt-14 grid gap-6 lg:grid-cols-2">
             {/* 认知工程 */}
             <div
-              className="relative overflow-hidden rounded-2xl border border-white/8 p-8"
+              id="tech-cognitive"
+              className="relative scroll-mt-24 overflow-hidden rounded-2xl border border-white/8 p-8"
               style={{ backgroundColor: C.ink850 }}
             >
               <img
@@ -743,7 +816,8 @@ export default function App() {
 
             {/* 主体性计算 */}
             <div
-              className="relative overflow-hidden rounded-2xl border border-white/8 p-8"
+              id="tech-agency"
+              className="relative scroll-mt-24 overflow-hidden rounded-2xl border border-white/8 p-8"
               style={{ backgroundColor: C.ink850 }}
             >
               <img
@@ -793,13 +867,13 @@ export default function App() {
               认知工程是方法，主体性计算是底座，Humanware是框架
             </p>
             <a
-              href="#evidence"
+              href="mailto:support@grasp.chat?subject=获取技术白皮书"
               className="mt-4 inline-flex items-center gap-1 text-sm font-semibold transition"
               style={{ color: C.accent }}
               onMouseEnter={(e) => (e.currentTarget.style.color = C.accentLight)}
               onMouseLeave={(e) => (e.currentTarget.style.color = C.accent)}
             >
-              阅读技术白皮书 →
+              联系获取技术白皮书 →
             </a>
           </div>
         </div>
@@ -842,7 +916,7 @@ export default function App() {
 
           <div className="mt-8 text-center">
             <a
-              href="#cta"
+              href="#tech"
               className="inline-flex items-center gap-1 text-sm font-semibold transition"
               style={{ color: C.accent }}
               onMouseEnter={(e) => (e.currentTarget.style.color = C.accentLight)}
@@ -867,7 +941,8 @@ export default function App() {
             {SOLUTIONS.map((sol) => (
               <div
                 key={sol.tag}
-                className="group overflow-hidden rounded-2xl border border-white/8 transition"
+                id={sol.id}
+                className="group scroll-mt-24 overflow-hidden rounded-2xl border border-white/8 transition"
                 style={{ backgroundColor: C.ink850 }}
                 onMouseEnter={(e) => { e.currentTarget.style.borderColor = `${sol.color}30`; e.currentTarget.style.transform = 'translateY(-4px)'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; e.currentTarget.style.transform = 'translateY(0)'; }}
@@ -902,7 +977,7 @@ export default function App() {
                   ))}
                 </ul>
                 <a
-                  href="#cta"
+                  href={sol.ctaHref}
                   className="mt-6 inline-flex text-sm font-semibold transition"
                   style={{ color: sol.color }}
                 >
@@ -961,7 +1036,7 @@ export default function App() {
           </h2>
           <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
             <a
-              href="#cta"
+              href="mailto:support@grasp.chat?subject=预约产品演示"
               className="group inline-flex items-center gap-2 rounded-full px-8 py-4 text-base font-bold shadow-lg transition hover:scale-105"
               style={{ backgroundColor: C.accent, color: C.ink950, boxShadow: '0 10px 30px rgba(232,92,98,0.2)' }}
               onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = C.accentLight; }}
@@ -973,11 +1048,11 @@ export default function App() {
               </svg>
             </a>
             <a
-              href="#cta"
+              href="mailto:support@grasp.chat?subject=获取行业场景清单"
               className="inline-flex items-center gap-2 rounded-full border border-white/15 px-8 py-4 text-base font-semibold transition hover:border-white/30"
               style={{ backgroundColor: 'rgba(255,255,255,0.05)', color: C.textMain }}
             >
-              下载行业场景清单（PDF）
+              联系获取行业场景清单
             </a>
           </div>
         </div>
@@ -1027,10 +1102,10 @@ export default function App() {
                   { label: '小红书', img: '/xiaohongshu_qrcode.jpg' },
                   { label: '抖音', img: '/douyin_qrcode.jpg' },
                 ].map((s) => (
-                  <a key={s.label} href="#" className="block">
+                  <div key={s.label}>
                     <img src={s.img} alt={s.label} className="h-16 w-16 rounded-lg" />
                     <span className="mt-1 block text-center text-xs" style={{ color: C.textDim }}>{s.label}</span>
-                  </a>
+                  </div>
                 ))}
               </div>
             </div>
@@ -1039,8 +1114,8 @@ export default function App() {
           <div className="mt-10 flex flex-col items-center justify-between gap-4 border-t border-white/5 pt-6 text-xs md:flex-row" style={{ color: C.textDim }}>
             <span>©2026 Grasp · AI驱动的能力训练平台</span>
             <div className="flex gap-4">
-              <a href="#" className="transition hover:text-white">隐私政策</a>
-              <a href="#" className="transition hover:text-white">服务条款</a>
+              <a href="https://train.grasp.chat/privacy" target="_blank" rel="noopener noreferrer" className="transition hover:text-white">隐私政策</a>
+              <a href="https://train.grasp.chat/agreement" target="_blank" rel="noopener noreferrer" className="transition hover:text-white">服务条款</a>
               <span>京ICP备2025130300号-6</span>
             </div>
           </div>

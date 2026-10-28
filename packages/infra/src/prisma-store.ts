@@ -4,6 +4,7 @@ import type {
   Appeal,
   CalibrationEvent,
   CertRecord,
+  CustomerQuestion,
   DataConsent,
   DomainEvent,
   Element,
@@ -33,6 +34,13 @@ import type { AppealFilter, CertFilter, SeedData, SessionFilter, Store } from '.
 /** 去掉 undefined 值（Prisma Json 字段不接受 undefined） */
 function sanitize<T>(obj: T): T {
   return JSON.parse(JSON.stringify(obj));
+}
+
+/** 兼容清理：旧数据 JSON blob 中可能残留已删除的字段，读出时剥离 */
+function stripLegacyScenario(s: Scenario): Scenario {
+  const o = { ...s } as Record<string, unknown>;
+  delete o.hasScript;
+  return o as unknown as Scenario;
 }
 
 function pick(obj: Record<string, unknown>, keys: string[]) {
@@ -121,6 +129,7 @@ export class PrismaStore implements Store {
   private sessions;
   private scoreReports;
   private scoreItemDefs;
+  private customerQuestions;
   private appeals;
   private examWindows;
   private certRecords;
@@ -149,6 +158,7 @@ private domainEvents;
     this.sessions = docTable<Session>(this.prisma.session, ['id', 'tenantId', 'userId', 'scenarioId', 'mode', 'status', 'examWindowId', 'startedAt', 'endedAt']);
     this.scoreReports = docTable<ScoreReport>(this.prisma.scoreReport, ['id', 'sessionId', 'totalScore', 'passed', 'createdAt']);
     this.scoreItemDefs = docTable<ScoreItemDef>(this.prisma.scoreItemDef, ['id', 'tenantId', 'skillPointId', 'name', 'layer']);
+    this.customerQuestions = docTable<CustomerQuestion>(this.prisma.customerQuestion, ['id', 'tenantId', 'category']);
     this.appeals = docTable<Appeal>(this.prisma.appeal, ['id', 'sessionId', 'userId', 'status', 'createdAt']);
     this.examWindows = docTable<ExamWindow>(this.prisma.examWindow, ['id', 'tenantId', 'name', 'status', 'startsAt', 'endsAt']);
     this.certRecords = docTable<CertRecord>(this.prisma.certRecord, ['id', 'tenantId', 'userId', 'examWindowId', 'passed']);
@@ -236,11 +246,13 @@ this.domainEvents = docTable<DomainEvent>(this.prisma.domainEvent, ['id', 'type'
   listSkillPoints(tenantId: string) {
     return this.skillPoints.list({ tenantId });
   }
-  getScenario(id: string) {
-    return this.scenarios.get(id);
+  async getScenario(id: string) {
+    const s = await this.scenarios.get(id);
+    return s ? stripLegacyScenario(s) : s;
   }
-  listScenarios(tenantId: string) {
-    return this.scenarios.list({ tenantId });
+  async listScenarios(tenantId: string) {
+    const rows = await this.scenarios.list({ tenantId });
+    return rows.map(stripLegacyScenario);
   }
   saveScenario(scenario: Scenario) {
     return this.scenarios.upsertById(scenario);
@@ -311,6 +323,23 @@ this.domainEvents = docTable<DomainEvent>(this.prisma.domainEvent, ['id', 'type'
   }
   upsertScoreItemDef(def: ScoreItemDef) {
     return this.scoreItemDefs.upsertById(def);
+  }
+  deleteScoreItemDef(id: string) {
+    return this.scoreItemDefs.delete(id);
+  }
+
+  // ---- 客户提问问题库 ----
+  getCustomerQuestion(id: string) {
+    return this.customerQuestions.get(id);
+  }
+  listCustomerQuestions(tenantId: string, category?: string) {
+    return this.customerQuestions.list({ tenantId, ...(category ? { category } : {}) });
+  }
+  saveCustomerQuestion(q: CustomerQuestion) {
+    return this.customerQuestions.upsertById(q);
+  }
+  deleteCustomerQuestion(id: string) {
+    return this.customerQuestions.delete(id);
   }
 
   // ---- 申诉 ----
@@ -398,6 +427,9 @@ return this.productKBs.get(id);
   saveGoldenCase(goldenCase: GoldenCase) {
     return this.goldenCases.upsertById(goldenCase);
   }
+  deleteGoldenCase(id: string) {
+    return this.goldenCases.delete(id);
+  }
   saveRegressionRun(run: RegressionRun) {
     return this.regressionRuns.create(run);
   }
@@ -417,6 +449,25 @@ return this.quizQuestions.upsertById(q);
 async deleteQuizQuestion(id: string) {
 await this.quizQuestions.delete(id);
 }
+
+  // ---- 账号注销 ----
+  deleteUser(id: string) {
+    return this.users.delete(id);
+  }
+  async deleteUserData(userId: string) {
+    const sessions = await this.prisma.session.findMany({ where: { userId }, select: { id: true } });
+    const sessionIds = sessions.map((s: { id: string }) => s.id);
+    // 评分报告以 sessionId 关联，先按会话集合删除
+    await this.prisma.scoreReport.deleteMany({ where: { sessionId: { in: sessionIds } } });
+    await this.prisma.session.deleteMany({ where: { userId } });
+    await this.prisma.appeal.deleteMany({ where: { userId } });
+    await this.prisma.certRecord.deleteMany({ where: { userId } });
+    await this.prisma.userSkillState.deleteMany({ where: { userId } });
+    await this.prisma.scenarioTask.deleteMany({ where: { userId } });
+    await this.prisma.domainEvent.deleteMany({
+      where: { OR: [{ userId }, { sessionId: { in: sessionIds } }] },
+    });
+  }
 
   // ---- 事件流 ----
   appendEvent(event: DomainEvent) {

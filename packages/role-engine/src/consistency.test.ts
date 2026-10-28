@@ -19,7 +19,7 @@ const bundle: PersonaRuntimeBundle = {
   systemPrompt: '你是王建国。',
   behaviorBands: [],
   knowledgeBoundary: {
-    mustNotKnow: ['学员所在保险公司的内部核赔流程'],
+    mustNotKnow: ['学员所在培训机构的内部提成政策'],
     loadedKnowledge: [],
   },
   dynamics: { triggers: [], decayPerTurn: 0.1, baseArousal: 0.3 },
@@ -27,11 +27,11 @@ const bundle: PersonaRuntimeBundle = {
 
 describe('ruleCheck', () => {
   it('正常回复通过', () => {
-    expect(ruleCheck('理赔的事你放心，出了问题肯定管。')).toEqual([]);
+    expect(ruleCheck('课时费的事你放心，报名后肯定有效果。')).toEqual([]);
   });
 
   it('命中 AI 自曝关键词', () => {
-    const reasons = ruleCheck('其实我是AI，没法真的买保险。');
+    const reasons = ruleCheck('其实我是AI，没法真的给孩子上课。');
     expect(reasons).toHaveLength(1);
     expect(reasons[0]).toContain('AI 身份泄露');
   });

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { fetchScenarios, createSession, apiError } from '../api';
+import { fetchScenarios, createSession, listScoreItems, apiError } from '../api';
 import type { Scenario } from '../types';
 import { categoryOf } from '../lib/categories';
 
@@ -18,6 +18,8 @@ export default function ScenarioDetail() {
   const [loadError, setLoadError] = useState('');
   const [starting, setStarting] = useState<StartTarget | null>(null);
   const [startError, setStartError] = useState('');
+  /** 各评估维度的真实权重百分比（与 skills 同序）；null = 无评分项数据，不展示权重 */
+  const [skillWeights, setSkillWeights] = useState<number[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -40,6 +42,39 @@ export default function ScenarioDetail() {
       cancelled = true;
     };
   }, [id]);
+
+  // 按技能点取评分项定义，汇总各维度权重并归一化为百分比（评分引擎按 weight 加权平均）
+  useEffect(() => {
+    if (!scenario) return;
+    const ids = scenario.skillPointIds ?? [];
+    const names = scenario.skillPointNames ?? [];
+    if (ids.length === 0 || names.length === 0) {
+      setSkillWeights(null);
+      return;
+    }
+    let cancelled = false;
+    Promise.all(ids.map((spId) => listScoreItems(spId).catch(() => ({ items: [] }))))
+      .then((results) => {
+        if (cancelled) return;
+        const sums = results.map((r) => r.items.reduce((s, it) => s + (it.weight || 0), 0));
+        const total = sums.reduce((a, b) => a + b, 0);
+        if (total <= 0) {
+          setSkillWeights(null);
+          return;
+        }
+        const percents = names.map((_, i) => ((sums[i] ?? 0) / total) * 100);
+        const rounded = percents.slice(0, -1).map((v) => Math.round(v));
+        // 末位吃舍入误差，凑满 100
+        rounded.push(Math.max(0, 100 - rounded.reduce((a, b) => a + b, 0)));
+        setSkillWeights(rounded);
+      })
+      .catch(() => {
+        if (!cancelled) setSkillWeights(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [scenario]);
 
   const startSession = async (target: StartTarget) => {
     if (!id || starting) return;
@@ -87,8 +122,6 @@ export default function ScenarioDetail() {
   infoRows.push({ label: '及格分', value: `${scenario.successCriteria.passScore} 分` });
   if (scenario.source) infoRows.push({ label: '来源', value: scenario.source });
   if (scenario.practiceCount != null) infoRows.push({ label: '练习人次', value: `${scenario.practiceCount}` });
-
-  const baseWeight = skills.length > 0 ? Math.floor(100 / skills.length) : 0;
 
   return (
     <div className="px-4 py-4 pb-8">
@@ -168,9 +201,9 @@ export default function ScenarioDetail() {
               <div key={name} className="flex items-center gap-3 px-3 py-2.5 bg-dark-panel rounded-xl">
                 <div className="w-1.5 h-1.5 rounded-full bg-coral" />
                 <span className="text-xs text-text-primary flex-1">{name}</span>
-                <span className="text-[11px] text-text-tertiary">
-                  {i === skills.length - 1 ? 100 - baseWeight * (skills.length - 1) : baseWeight}%
-                </span>
+                {skillWeights && (
+                  <span className="text-[11px] text-text-tertiary">{skillWeights[i]}%</span>
+                )}
               </div>
             ))}
           </div>

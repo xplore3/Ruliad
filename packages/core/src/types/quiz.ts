@@ -45,6 +45,16 @@ export interface QuizQuestion {
   required: boolean;
 }
 
+/** 下发给前端的考题视图：剥离正确答案、参考要点、解析与触发条件 */
+export interface QuizQuestionPublic {
+  id: string;
+  type: QuizType;
+  prompt: string;
+  options?: { id: string; label: string }[];
+  score: number;
+  required: boolean;
+}
+
 /** 单次答题记录（运行时落 Session） */
 export interface QuizResult {
   quizId: string;
@@ -52,6 +62,8 @@ export interface QuizResult {
   answer: string[];
   correct: boolean;
   score: number;
+  /** 该题满分（答题时快照，用于汇总 total） */
+  maxScore?: number;
   /** 答题时所在对话轮次 seq */
   atTurnSeq: number;
   answeredAt: string;

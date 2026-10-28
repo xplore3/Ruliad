@@ -46,6 +46,49 @@ export async function usersRoutes(app: FastifyInstance, ctx: RouteContext): Prom
     return { preferences: body };
   });
 
+  // 导出当前用户全部数据（个人信息/会话/评分报告/申诉/认证/技能状态/场景任务/偏好），JSON 附件下载
+  app.get('/users/me/export', async (request, reply) => {
+    const user = await store.getUser(request.userId);
+    if (!user) return reply.code(404).send({ error: '用户不存在' });
+    const sessions = await store.listSessions({ userId: user.id });
+    const scoreReports = [];
+    for (const s of sessions) {
+      const report = await store.getScoreReportBySession(s.id);
+      if (report) scoreReports.push(report);
+    }
+    const [appeals, certRecords, userSkillStates, scenarioTasks] = await Promise.all([
+      store.listAppeals({ userId: user.id }),
+      store.listCertRecords({ userId: user.id }),
+      store.listUserSkillStates(user.id),
+      store.listScenarioTasks(user.id),
+    ]);
+    const { passwordHash: _passwordHash, ...publicInfo } = user;
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      user: publicInfo,
+      sessions,
+      scoreReports,
+      appeals,
+      certRecords,
+      userSkillStates,
+      scenarioTasks,
+      preferences: user.preferences ?? {},
+    };
+    return reply
+      .header('Content-Disposition', 'attachment; filename="grasp-data-export.json"')
+      .type('application/json; charset=utf-8')
+      .send(JSON.stringify(payload, null, 2));
+  });
+
+  // 注销当前账号：删除用户及其全部关联数据（会话/报告/申诉/认证/技能状态/任务/事件）
+  app.delete('/users/me', async (request, reply) => {
+    const user = await store.getUser(request.userId);
+    if (!user) return reply.code(404).send({ error: '用户不存在' });
+    await store.deleteUserData(user.id);
+    await store.deleteUser(user.id);
+    return reply.code(204).send();
+  });
+
   // 用户列表（admin 专属），支持 ?role= 过滤；输出剔除 passwordHash
   app.get<{ Querystring: { role?: string } }>(
     '/users',

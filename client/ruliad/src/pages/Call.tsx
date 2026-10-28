@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams, Navigate } from 'react-router-dom';
-import { fetchSession, endSession, apiError, voiceWsUrl } from '../api';
+import { fetchSession, endSession, requestHint, pauseSession, resumeSession, apiError, voiceWsUrl } from '../api';
 import { PcmRecorder, TtsPlayer, VoiceSocket } from '../voice';
 import type { VoiceServerEvent } from '../voice';
-import type { SessionCreated, TranscriptTurn } from '../types';
+import QuizModal from '../components/QuizModal';
+import type { QuizQuestion, SessionCreated, TranscriptTurn } from '../types';
 
 type CallPhase = 'dialing' | 'ringing' | 'connected' | 'ended';
 type LiveStatus = 'connecting' | 'listening' | 'recognizing' | 'thinking' | 'speaking';
@@ -27,8 +28,6 @@ interface ReplayItem {
   name: string;
   text: string;
 }
-
-const CALL_GOALS = ['不降价，讲清差异化价值', '确认对方真实预算范围', '争取二次面谈时间'];
 
 function formatTime(seconds: number) {
   const m = Math.floor(seconds / 60);
@@ -57,6 +56,14 @@ export default function Call() {
   const [historyReplay, setHistoryReplay] = useState<ReplayItem[]>([]);
   const [micError, setMicError] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
+  /** 场景信息（目标/剧本，来自场景库配置） */
+  const [scenarioInfo, setScenarioInfo] = useState<SessionCreated['scenario'] | null>(null);
+  const [sessionMode, setSessionMode] = useState<'practice' | 'exam'>('practice');
+  const [hintText, setHintText] = useState('');
+  const [hintsLeft, setHintsLeft] = useState(0);
+  const [hintLoading, setHintLoading] = useState(false);
+  /** 随场考题队列（逐题弹窗作答） */
+  const [quizQueue, setQuizQueue] = useState<QuizQuestion[]>([]);
 
   const socketRef = useRef<VoiceSocket | null>(null);
   const recorderRef = useRef<PcmRecorder | null>(null);
@@ -68,6 +75,8 @@ export default function Call() {
   const mountedRef = useRef(true);
   const endedRef = useRef(false);
   const intentionalCloseRef = useRef(false);
+  /** 本场已选择「稍后再答」的考题 id（避免每轮重复弹出） */
+  const dismissedQuizIdsRef = useRef<Set<string>>(new Set());
 
   const personaName = persona?.name ?? '对方';
   const personaAvatar = persona?.avatar ?? '/avatars/man-3.jpg';
@@ -88,7 +97,10 @@ export default function Call() {
         if (cancelled) return;
         setPersona(res.persona);
         setScenarioName(res.scenario?.name ?? null);
+        setScenarioInfo(res.scenario);
         setScenarioId(res.session.scenarioId);
+        setSessionMode(res.session.mode);
+        setHintsLeft(Math.max(0, 3 - (res.session.hintsUsed ?? 0)));
         setRemainingSeconds(res.remainingSeconds);
         if (res.session.status !== 'active') {
           endedRef.current = true;
@@ -189,6 +201,7 @@ export default function Call() {
         if (ev.turn) {
           setRemainingSeconds(ev.turn.remainingSeconds);
           if (ev.turn.timeUp) toast('本场练习时间已到，可挂断查看复盘报告');
+          enqueueQuizzes(ev.turn.pendingQuizzes);
         }
         break;
       case 'stopped':
@@ -200,6 +213,45 @@ export default function Call() {
         break;
       default:
         break;
+    }
+  };
+
+  /** 收集本轮触发的考题：过滤已在队列与已跳过的，逐题弹窗 */
+  const enqueueQuizzes = (quizzes?: QuizQuestion[]) => {
+    if (!quizzes || quizzes.length === 0) return;
+    setQuizQueue((prev) => {
+      const known = new Set(prev.map((q) => q.id));
+      const fresh = quizzes.filter((q) => !known.has(q.id) && !dismissedQuizIdsRef.current.has(q.id));
+      return fresh.length > 0 ? [...prev, ...fresh] : prev;
+    });
+  };
+
+  const quizOpen = quizQueue.length > 0;
+
+  /** 考题弹窗期间停止采集（服务端 VAD 只见静音，不会触发新回合） */
+  useEffect(() => {
+    if (quizOpen && phase === 'connected') recorderRef.current?.stop();
+  }, [quizOpen, phase]);
+
+  /** 关闭考题弹窗：恢复采集（若仍在通话且未手动静音/暂停） */
+  const closeQuiz = (quiz: QuizQuestion, answered: boolean) => {
+    if (!answered) dismissedQuizIdsRef.current.add(quiz.id);
+    setQuizQueue((prev) => prev.filter((q) => q.id !== quiz.id));
+    if (phase === 'connected' && !isMuted && !isPaused) void startRecorder();
+  };
+
+  /** 教练提示（仅 practice 模式，消耗本场提示次数） */
+  const handleHint = async () => {
+    if (!sessionId || hintLoading || hintsLeft <= 0) return;
+    setHintLoading(true);
+    try {
+      const res = await requestHint(sessionId);
+      setHintText(res.hintTurn.text);
+      setHintsLeft(res.hintsRemaining);
+    } catch (err) {
+      toast(apiError(err, '提示生成失败'));
+    } finally {
+      setHintLoading(false);
     }
   };
 
@@ -283,14 +335,43 @@ export default function Call() {
     }
   };
 
-  const handlePause = () => {
-    recorderRef.current?.stop();
-    setIsPaused(true);
+  /** 暂停：先通知服务端冻结计时，成功后停采集并暂停 TTS 播放；失败则保持原状 */
+  const handlePause = async () => {
+    if (!sessionId || isPaused) return;
+    try {
+      const res = await pauseSession(sessionId);
+      if (typeof res.remainingSeconds === 'number') setRemainingSeconds(Math.max(0, res.remainingSeconds));
+      recorderRef.current?.stop();
+      playerRef.current?.pause();
+      setIsPaused(true);
+    } catch (err) {
+      toast(apiError(err, '暂停失败，请重试'));
+    }
   };
 
-  const handleResume = () => {
-    setIsPaused(false);
-    if (!isMuted) void startRecorder();
+  /** 继续：先恢复服务端会话，成功后恢复播放与采集；失败则保持暂停状态 */
+  const handleResume = async () => {
+    if (!sessionId || !isPaused) return;
+    try {
+      const res = await resumeSession(sessionId);
+      if (typeof res.remainingSeconds === 'number') setRemainingSeconds(Math.max(0, res.remainingSeconds));
+      setIsPaused(false);
+      if (isSpeaker) playerRef.current?.resumePlayback();
+      if (!isMuted) void startRecorder();
+    } catch (err) {
+      toast(apiError(err, '继续失败，请重试'));
+    }
+  };
+
+  /** 扬声器开关：关闭时暂停 TTS 播放（音频在本地排队不出声），开启后从队列恢复 */
+  const handleSpeakerToggle = () => {
+    if (isSpeaker) {
+      playerRef.current?.pause();
+      setIsSpeaker(false);
+    } else {
+      if (!isPaused) playerRef.current?.resumePlayback();
+      setIsSpeaker(true);
+    }
   };
 
   if (!sessionId) return <Navigate to="/home" replace />;
@@ -355,7 +436,7 @@ export default function Call() {
               )}
               <div className="ctrl1">
                 <button title="静音" onClick={handleMuteToggle} className={isMuted ? 'on' : ''}>{isMuted ? '🔇' : '🎙'}</button>
-                <button title="扬声器" onClick={() => setIsSpeaker(!isSpeaker)} className={isSpeaker ? 'on' : ''}>🔊</button>
+                <button title={isSpeaker ? '关闭扬声器' : '打开扬声器'} onClick={handleSpeakerToggle} className={isSpeaker ? 'on' : ''}>{isSpeaker ? '🔊' : '🔇'}</button>
                 <button title="打断对方" onClick={() => socketRef.current?.send({ type: 'interrupt' })}>✋</button>
                 <button title="字幕" onClick={() => setShowSubtitle(!showSubtitle)}>CC</button>
               </div>
@@ -374,13 +455,29 @@ export default function Call() {
               <div className="card panel">
                 <h3 style={{ marginBottom: '8px', fontWeight: 700, fontSize: '15px' }}>🎯 本场目标</h3>
                 <ul className="goal">
-                  {CALL_GOALS.map((g) => <li key={g}>{g}</li>)}
+                  {(scenarioInfo?.coverageTopics?.length
+                    ? scenarioInfo.coverageTopics
+                    : [scenarioInfo?.script?.purpose ?? scenarioInfo?.name ?? '本场练习']
+                  ).map((g) => <li key={g}>{g}</li>)}
                 </ul>
               </div>
-              <div className="card panel">
-                <h3 style={{ marginBottom: '8px', fontWeight: 700, fontSize: '15px' }}>💡 教练提示</h3>
-                <p className="small muted">对方说「超出预期」时不要急着解释价格，先问预算结构。</p>
-              </div>
+              {sessionMode === 'practice' && (
+                <div className="card panel">
+                  <h3 style={{ marginBottom: '8px', fontWeight: 700, fontSize: '15px' }}>💡 教练提示</h3>
+                  {hintText ? (
+                    <p className="small" style={{ marginBottom: 8 }}>{hintText}</p>
+                  ) : (
+                    <p className="small muted" style={{ marginBottom: 8 }}>卡住时可以向教练求助，本场剩余 {hintsLeft} 次</p>
+                  )}
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={handleHint}
+                    disabled={hintLoading || hintsLeft <= 0 || phase !== 'connected'}
+                  >
+                    {hintLoading ? '生成中…' : hintsLeft > 0 ? `给我提示（剩 ${hintsLeft} 次）` : '次数已用完'}
+                  </button>
+                </div>
+              )}
             </aside>
           </div>
         </main>
@@ -437,6 +534,16 @@ export default function Call() {
         <div style={{ position: 'fixed', left: '50%', bottom: '48px', transform: 'translateX(-50%)', background: 'rgba(23,25,31,.92)', color: '#F7F7FA', padding: '10px 18px', borderRadius: '999px', fontSize: '13.5px', zIndex: 100, boxShadow: '0 6px 24px rgba(0,0,0,.3)' }}>
           {toastMsg}
         </div>
+      )}
+
+      {/* 随场考题弹窗（对练中触发，逐题作答） */}
+      {quizOpen && phase === 'connected' && (
+        <QuizModal
+          sessionId={sessionId}
+          quiz={quizQueue[0]}
+          onDone={() => closeQuiz(quizQueue[0], true)}
+          onSkip={quizQueue[0].required ? undefined : () => closeQuiz(quizQueue[0], false)}
+        />
       )}
     </div>
   );

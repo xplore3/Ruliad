@@ -25,7 +25,7 @@ function textOf(message: ChatMessage): string {
 export type MockHandler = (messages: ChatMessage[], options?: ChatOptions) => string;
 
 /** 学员发言中的负面/违规信号词（judge 启发式用） */
-const NEGATIVE_WORDS = ['打折', '降价', '不知道', '随便', '保证收益', '一定赔', '肯定赚'];
+const NEGATIVE_WORDS = ['打折', '降价', '不知道', '随便', '保证提分', '包过', '绝对有效果'];
 
 /**
  * 离线确定性 provider：无 API Key 时全系统可跑通。

@@ -147,15 +147,13 @@ export async function authRoutes(app: FastifyInstance, ctx: RouteContext): Promi
         }
       }
     } else {
-      app.log.info('[SMS] 未配置 TENCENT_CLOUD_SECRET_ID / TENCENT_CLOUD_SECRET_KEY，验证码仅记录日志');
+      app.log.warn('[SMS] 未配置 TENCENT_CLOUD_SECRET_ID / TENCENT_CLOUD_SECRET_KEY');
     }
 
-    // 开发环境：返回 _devCode 方便调试
-    return reply.code(200).send({
-      success: true,
-      message: '验证码已发送',
-      _devCode: code,
-    });
+    // 走到这里说明短信未真正发出（未配置腾讯云 SMS 或配置不完整），且未开启 SMS_DEV_ECHO：
+    // 验证码无法送达用户，明确 503 告警，绝不在响应里回显验证码明文
+    app.log.warn(`[SMS] 短信服务不可用且 SMS_DEV_ECHO 未开启，验证码无法送达（${phone}）。请配置腾讯云 SMS 或设置 SMS_DEV_ECHO=1（仅开发）`);
+    return reply.code(503).send({ error: '短信服务未配置，暂时无法发送验证码，请联系管理员' });
   });
 
   // ====== 验证码登录/注册（一体） ======
@@ -283,4 +281,26 @@ export async function authRoutes(app: FastifyInstance, ctx: RouteContext): Promi
     if (!user) return reply.code(404).send({ error: '用户不存在' });
     return publicUser(user);
   });
+
+  // 修改密码：校验旧密码后换新哈希。token 为无状态 JWT，无法即时吊销，
+  // 这里更新密码哈希（旧密码立即失效），已签发 token 到期后自然失效
+  app.post<{ Body: { oldPassword?: string; newPassword?: string } }>(
+    '/auth/change-password',
+    async (request, reply) => {
+      const { oldPassword, newPassword } = request.body ?? {};
+      if (!oldPassword || !newPassword) {
+        return reply.code(400).send({ error: 'oldPassword / newPassword 必填' });
+      }
+      if (newPassword.length < 6) {
+        return reply.code(400).send({ error: '新密码长度至少 6 位' });
+      }
+      const user = await store.getUser(request.userId);
+      if (!user) return reply.code(404).send({ error: '用户不存在' });
+      if (!verifyPassword(oldPassword, user.passwordHash)) {
+        return reply.code(400).send({ error: '旧密码错误' });
+      }
+      await store.saveUser({ ...user, passwordHash: hashPassword(newPassword) });
+      return { success: true };
+    }
+  );
 }

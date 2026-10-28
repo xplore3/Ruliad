@@ -35,6 +35,8 @@ export interface TTSOptions {
   arousal?: number;
   /** 激情倍率（默认 1）：等比放大 arousal 的语速/音调抬升，示范销售用 3 */
   excitement?: number;
+  /** 语速倍率（0.5~2.0，缺省 1）：在情绪推导语速基础上等比缩放，结果钳制在 0.5~2 */
+  rate?: number;
 }
 
 export interface TTSResult {

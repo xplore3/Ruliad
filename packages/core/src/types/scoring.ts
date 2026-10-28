@@ -102,7 +102,15 @@ export interface ScoreReport {
     fillerCounts: Record<string, number>;
     coverageHits: string[];
     coverageMisses: string[];
+    /** 学员发言占比（按字符数，0-1） */
+    talkRatio: number;
+    /** 估算语速（字/分钟，按对话时间窗内总字数为学员语速的近似） */
+    avgSpeechRate: number;
+    /** 明显停顿次数（学员应答前静默 > 3s） */
+    pauseCount: number;
   };
+  /** 教练总结（LLM 生成，失败时回退模板文案） */
+  summary?: string;
   /** 视频表现评审（有录像且配置视觉模型时产出） */
   videoReview?: VideoReview;
   /** 考题得分汇总 */

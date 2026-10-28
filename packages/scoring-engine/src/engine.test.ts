@@ -27,17 +27,17 @@ const defs: ScoreItemDef[] = [
 const scenario: Scenario = {
   id: 'scenario-objection',
   tenantId: 'tenant-demo',
-  name: '保险异议处理',
+  name: '家长异议处理',
   personaConfigId: 'persona-wang',
   skillPointIds: ['sp-objection'],
   successCriteria: { passScore: 70 },
   durationMinutes: 10,
   difficulty: 2,
-  coverageTopics: ['理赔时效', '增值服务'],
+  coverageTopics: ['课时费', '退费政策'],
 };
 
 const longPersonaText =
-  '我跟你说啊，我之前那个保单理赔拖了快两个月，打电话过去每次都是不同的客服，说要补这个材料那个材料，最后我都懒得折腾了，你们这次不会也这样吧？';
+  '我跟你说啊，我之前给孩子报的那个机构，交费之前说得天花乱坠，上了两个月老师换来换去，退费拖了快两个月，打电话过去每次都是不同的客服，最后我都懒得折腾了，你们这次不会也这样吧？';
 
 const session: Session = {
   id: 'session-test-1',
@@ -52,17 +52,17 @@ const session: Session = {
     {
       seq: 2,
       speaker: 'trainee',
-      text: '其实其实其实，这个产品保证收益，其实您放心就行',
+      text: '其实其实其实，这个课程保证提分，其实您放心就行',
       at: '2026-01-01T10:00:10Z',
     },
     { seq: 3, speaker: 'persona', text: longPersonaText, at: '2026-01-01T10:00:20Z' },
     // 打断启发式：长 persona 轮后学员短回复
     { seq: 4, speaker: 'trainee', text: '哦', at: '2026-01-01T10:00:25Z' },
-    // 其实 ×7（合计 11 次，超阈值）+ 覆盖话题 理赔时效
+    // 其实 ×7（合计 11 次，超阈值）+ 覆盖话题 课时费
     {
       seq: 5,
       speaker: 'trainee',
-      text: '其实其实其实其实其实其实其实，理赔时效我们承诺三十天内处理完毕',
+      text: '其实其实其实其实其实其实其实，课时费我们承诺开课前无理由退费',
       at: '2026-01-01T10:00:35Z',
     },
   ],
@@ -92,11 +92,22 @@ describe('scoreSession', () => {
     expect(report.ruleStats.interruptions).toBe(1);
 
     // 话题覆盖
-    expect(report.ruleStats.coverageHits).toEqual(['理赔时效']);
-    expect(report.ruleStats.coverageMisses).toEqual(['增值服务']);
+    expect(report.ruleStats.coverageHits).toEqual(['课时费']);
+    expect(report.ruleStats.coverageMisses).toEqual(['退费政策']);
     expect(report.violations.some((v) => v.ruleId === 'coverage-miss' && !v.fatal)).toBe(true);
 
-    // 双 judge 字段（mock 含负面词"保证收益" -> 最低档 poor，双 judge 一致）
+    // 状态指标：学员 54 字 / 总 156 字；时间窗 35s；两处应答前静默 > 3s
+    expect(report.ruleStats.talkRatio).toBeCloseTo(54 / 156, 5);
+    expect(report.ruleStats.avgSpeechRate).toBe(267);
+    expect(report.ruleStats.pauseCount).toBe(2);
+
+    // 教练总结：mock judge 无 summary 字段 → 回退模板文案
+    expect(report.summary).toBeTruthy();
+    expect(report.summary).toContain('本次练习总分 30 分');
+    expect(report.summary).toContain('未通过');
+    expect(report.summary).toContain('最需要改进');
+
+    // 双 judge 字段（mock 含负面词"保证提分" -> 最低档 poor，双 judge 一致）
     expect(report.items).toHaveLength(1);
     const item = report.items[0];
     expect(item.levelKey).toBe('poor');
@@ -139,5 +150,42 @@ describe('scoreSession', () => {
     expect(report.items.map((i) => i.itemId).sort()).toEqual(['item-obj-1', 'item-obs']);
     expect(report.totalScore).toBe(30);
     expect(report.items.find((i) => i.itemId === 'item-obs')!.isObservation).toBe(true);
+  });
+
+  it('skillPointNames 选项把技能点 id 映射为名称', async () => {
+    const report = await scoreSession(session, scenario, defs, gateway, {
+      skillPointNames: { 'sp-objection': '异议处理' },
+    });
+    expect(report.skillScores[0].skillPointName).toBe('异议处理');
+  });
+
+  it('考题维度：total 为各题满分之和（含答错题）', async () => {
+    const withQuiz: Session = {
+      ...session,
+      quizResults: [
+        {
+          quizId: 'q1',
+          answer: ['a'],
+          correct: true,
+          score: 10,
+          maxScore: 10,
+          atTurnSeq: 2,
+          answeredAt: '2026-01-01T10:01:00Z',
+        },
+        {
+          quizId: 'q2',
+          answer: ['b'],
+          correct: false,
+          score: 0,
+          maxScore: 10,
+          atTurnSeq: 3,
+          answeredAt: '2026-01-01T10:02:00Z',
+        },
+      ],
+    };
+    const report = await scoreSession(withQuiz, scenario, defs, gateway);
+    expect(report.quizScore).toBeDefined();
+    expect(report.quizScore!.earned).toBe(10);
+    expect(report.quizScore!.total).toBe(20);
   });
 });

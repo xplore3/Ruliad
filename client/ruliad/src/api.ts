@@ -3,9 +3,7 @@ import type {
   User,
   Scenario,
   PersonaConfig,
-  RoleCard,
   GrowthData,
-  TaskView,
   ReviewData,
   TurnResult,
   SessionCreated,
@@ -14,10 +12,14 @@ import type {
   SceneType,
   ScenarioScript,
   ScenarioParticipant,
+  CustomerQuestion,
+  GoldenCase,
+  ScoreItemDef,
 } from './types';
 
 const TOKEN_KEY = 'grasp-token';
 const USER_KEY = 'grasp-user';
+const PREFS_KEY = 'grasp-prefs';
 
 export interface StoredUser {
   id: string;
@@ -44,6 +46,7 @@ export function setToken(token: string) {
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
+  localStorage.removeItem(PREFS_KEY);
 }
 
 export function getStoredUser(): StoredUser | null {
@@ -143,20 +146,16 @@ export async function fetchScenarios() {
   return data as { scenarios: Scenario[] };
 }
 
-export async function fetchRoleCards() {
-  const { data } = await api.get('/role-cards');
-  return data as { cards: RoleCard[] };
-}
-
-export async function fetchTasks() {
-  const { data } = await api.get('/tasks');
-  return data as { tasks: TaskView[] };
-}
-
 // ====== 会话 API ======
 
 export async function createSession(scenarioId: string, mode: 'practice' | 'exam' = 'practice', examWindowId?: string) {
-  const { data } = await api.post('/sessions', { scenarioId, mode, ...(examWindowId ? { examWindowId } : {}) });
+  const { data } = await api.post('/sessions', {
+    scenarioId,
+    mode,
+    ...(examWindowId ? { examWindowId } : {}),
+    // 自动附上设置页的教练提示强度偏好，Practice 等调用方无需关心
+    coachIntensity: getPreferredCoachIntensity(),
+  });
   return data as SessionCreated;
 }
 
@@ -185,6 +184,17 @@ export async function requestHint(sessionId: string) {
   return data as { hintTurn: import('./types').TranscriptTurn; hintsRemaining: number };
 }
 
+/** 提交考题答案；返回对错、得分、解析与正确答案（答题后展示用） */
+export async function submitQuizAnswer(sessionId: string, quizId: string, answer: string[]) {
+  const { data } = await api.post(`/sessions/${sessionId}/quiz-answer`, { quizId, answer });
+  return data as {
+    correct: boolean;
+    score: number;
+    explanation?: string;
+    correctAnswer?: string[] | string;
+  };
+}
+
 export async function endSession(sessionId: string) {
   const { data } = await api.post(`/sessions/${sessionId}/end`);
   return data as { sessionId: string; skippedReport?: boolean };
@@ -206,8 +216,16 @@ export async function resumeSession(sessionId: string) {
   return data as { remainingSeconds: number | null };
 }
 
+/** 进入正式对练（live）：通知服务端从此刻开始倒计时（幂等）。失败不影响本地流程 */
+export async function markLiveStart(sessionId: string) {
+  const { data } = await api.post(`/sessions/${sessionId}/live-start`);
+  return data as { remainingSeconds: number | null };
+}
+
 export async function fetchReview(sessionId: string) {
   const { data } = await api.get(`/sessions/${sessionId}/review`);
+  // 报告就绪即触发本地通知（受设置页「报告生成通知」开关控制）
+  localNotify('练习报告已生成', '本次评分与反馈已就绪');
   return data as ReviewData;
 }
 
@@ -245,9 +263,10 @@ export interface ScenarioPayload {
   durationMinutes: number;
   difficulty?: number;
   coverageTopics?: string[];
+  description?: string | null;
+  productKBId?: string;
   methodology?: string;
   source?: string;
-  hasScript?: boolean;
   sceneType?: SceneType;
   script?: ScenarioScript | null;
   participants?: ScenarioParticipant[] | null;
@@ -255,12 +274,12 @@ export interface ScenarioPayload {
 
 export async function createScenario(payload: ScenarioPayload) {
   const { data } = await api.post('/scenarios', payload);
-  return data as { scenario: Scenario };
+  return data as Scenario;
 }
 
 export async function updateScenario(id: string, payload: Partial<ScenarioPayload>) {
   const { data } = await api.put(`/scenarios/${id}`, payload);
-  return data as { scenario: Scenario };
+  return data as Scenario;
 }
 
 export async function deleteScenario(id: string) {
@@ -279,12 +298,12 @@ export interface PersonaConfigPayload {
 
 export async function createPersonaConfig(payload: PersonaConfigPayload) {
   const { data } = await api.post('/persona-configs', payload);
-  return data as { persona: PersonaConfig };
+  return data as PersonaConfig;
 }
 
 export async function updatePersonaConfig(id: string, payload: Partial<PersonaConfigPayload>) {
   const { data } = await api.put(`/persona-configs/${id}`, payload);
-  return data as { persona: PersonaConfig };
+  return data as PersonaConfig;
 }
 
 export async function fetchSkillPoints() {
@@ -292,9 +311,13 @@ export async function fetchSkillPoints() {
   return data as { skillPoints: import('./types').SkillPoint[] };
 }
 
-/** 试聊：不落库的角色试聊 */
+/** 试聊：不落库的角色试聊。后端契约为 { text, history }：text 为最新一条用户消息，history 为之前的多轮 */
 export async function trialChat(personaConfigId: string, messages: { role: 'user' | 'assistant'; content: string }[]) {
-  const { data } = await api.post(`/persona-configs/${personaConfigId}/trial-chat`, { messages });
+  const last = messages[messages.length - 1];
+  const { data } = await api.post(`/persona-configs/${personaConfigId}/trial-chat`, {
+    text: last?.role === 'user' ? last.content : '',
+    history: messages.slice(0, -1),
+  });
   return data as { reply: string };
 }
 
@@ -322,18 +345,166 @@ export async function extractScenarioFromAudio(wav: Blob, current?: Record<strin
   return data as ScenarioExtractResult;
 }
 
+// ====== 资源库管理 API（admin） ======
+
+export async function fetchPersonaConfigs() {
+  const { data } = await api.get('/persona-configs');
+  return data as { personaConfigs: PersonaConfig[] };
+}
+
+export type LibraryExtractTarget = 'scenario' | 'question' | 'score-item' | 'golden-case';
+
+export interface LibraryExtractResult {
+  reply: string;
+  rows: Record<string, unknown>[];
+}
+
+/** 整段文字 AI 提炼为资源库条目（不落库） */
+export async function extractLibraryRows(target: LibraryExtractTarget, text: string) {
+  const { data } = await api.post('/library/extract', { target, text });
+  return data as LibraryExtractResult;
+}
+
+// ---- 客户提问库 ----
+
+export async function listCustomerQuestions(category?: string) {
+  const { data } = await api.get('/library/questions', { params: category ? { category } : {} });
+  return data as { questions: CustomerQuestion[] };
+}
+
+export async function createCustomerQuestion(payload: Partial<CustomerQuestion>) {
+  const { data } = await api.post('/library/questions', payload);
+  return data as CustomerQuestion;
+}
+
+export async function batchCreateCustomerQuestions(items: Partial<CustomerQuestion>[]) {
+  const { data } = await api.post('/library/questions/batch', { items });
+  return data as { count: number; questions: CustomerQuestion[] };
+}
+
+export async function updateCustomerQuestion(id: string, payload: Partial<CustomerQuestion>) {
+  const { data } = await api.put(`/library/questions/${id}`, payload);
+  return data as CustomerQuestion;
+}
+
+export async function deleteCustomerQuestion(id: string) {
+  await api.delete(`/library/questions/${id}`);
+}
+
+// ---- 评分项定义 ----
+
+export async function listScoreItems(skillPointId?: string) {
+  const { data } = await api.get('/library/score-items', { params: skillPointId ? { skillPointId } : {} });
+  return data as { items: ScoreItemDef[] };
+}
+
+export async function createScoreItem(payload: Partial<ScoreItemDef>) {
+  const { data } = await api.post('/library/score-items', payload);
+  return data as ScoreItemDef;
+}
+
+export async function updateScoreItem(id: string, payload: Partial<ScoreItemDef>) {
+  const { data } = await api.put(`/library/score-items/${id}`, payload);
+  return data as ScoreItemDef;
+}
+
+export async function deleteScoreItem(id: string) {
+  await api.delete(`/library/score-items/${id}`);
+}
+
+// ---- 金标准案例 ----
+
+export async function listGoldenCases() {
+  const { data } = await api.get('/library/golden-cases');
+  return data as { cases: GoldenCase[] };
+}
+
+export async function createGoldenCase(payload: Partial<GoldenCase>) {
+  const { data } = await api.post('/library/golden-cases', payload);
+  return data as GoldenCase;
+}
+
+export async function updateGoldenCase(id: string, payload: Partial<GoldenCase>) {
+  const { data } = await api.put(`/library/golden-cases/${id}`, payload);
+  return data as GoldenCase;
+}
+
+export async function deleteGoldenCase(id: string) {
+  await api.delete(`/library/golden-cases/${id}`);
+}
+
 // ====== 用户偏好 ======
 
 export type Preferences = Record<string, unknown>;
 
+/** 读本地缓存的偏好（voice.ts / createSession 等非组件代码的同步消费入口） */
+export function getCachedPreferences(): Preferences {
+  const raw = localStorage.getItem(PREFS_KEY);
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as Preferences;
+  } catch {
+    return {};
+  }
+}
+
+/** 默认语速偏好 → TTS rate：慢 0.8 / 标准 1 / 快 1.25 */
+export function getPreferredSpeechRate(): number {
+  const v = getCachedPreferences().speechRate;
+  if (v === 'slow') return 0.8;
+  if (v === 'fast') return 1.25;
+  return 1;
+}
+
+/** 教练提示强度偏好 → 会话创建参数（历史值 quiet 归一为 low） */
+export function getPreferredCoachIntensity(): 'low' | 'medium' | 'high' {
+  const v = getCachedPreferences().coachIntensity;
+  if (v === 'high') return 'high';
+  if (v === 'low' || v === 'quiet') return 'low';
+  return 'medium';
+}
+
+/** 本地通知；未开偏好或浏览器未授权时静默跳过 */
+export function localNotify(title: string, body?: string) {
+  if (getCachedPreferences().notifyReport === false) return;
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  try {
+    new Notification(title, { body });
+  } catch {
+    /* 部分环境构造 Notification 受限，忽略 */
+  }
+}
+
 export async function fetchPreferences() {
   const { data } = await api.get('/users/me/preferences');
+  const prefs = (data as { preferences?: Preferences }).preferences ?? {};
+  localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
   return data as { preferences: Preferences };
 }
 
 export async function savePreferences(preferences: Preferences) {
   const { data } = await api.put('/users/me/preferences', preferences);
+  const saved = (data as { preferences?: Preferences }).preferences ?? preferences;
+  localStorage.setItem(PREFS_KEY, JSON.stringify(saved));
   return data as { preferences: Preferences };
+}
+
+// ====== 账号管理 API ======
+
+/** 修改密码；旧密码错误时后端返回 400 */
+export async function changePassword(oldPassword: string, newPassword: string) {
+  await api.post('/auth/change-password', { oldPassword, newPassword });
+}
+
+/** 导出我的数据（JSON） */
+export async function exportMyData() {
+  const { data } = await api.get('/users/me/export');
+  return data;
+}
+
+/** 注销账号（204）；调用方负责清理本地状态并跳转登录页 */
+export async function deleteAccount() {
+  await api.delete('/users/me');
 }
 
 // ====== 新手指引（地推引流课） API ======
@@ -371,9 +542,9 @@ export async function demoChoice(sessionId: string, audio: ArrayBuffer) {
   return data as { text: string; choice: 'replay' | 'practice' };
 }
 
-/** 任意文本合成语音；voiceRole 选择音色（默认 persona），arousal 控制情绪唤醒度，excitement 为激情倍率 */
+/** 任意文本合成语音；voiceRole 选择音色（默认 persona），arousal 控制情绪唤醒度，excitement 为激情倍率；rate 取设置页默认语速偏好 */
 export async function ttsClip(sessionId: string, text: string, voiceRole: GuidanceVoiceRole = 'persona', arousal?: number, excitement?: number) {
-  const { data } = await api.post(`/sessions/${sessionId}/tts`, { text, voiceRole, arousal, excitement });
+  const { data } = await api.post(`/sessions/${sessionId}/tts`, { text, voiceRole, arousal, excitement, rate: getPreferredSpeechRate() });
   return data as { audioBase64: string; audioFormat: string };
 }
 

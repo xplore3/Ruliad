@@ -12,6 +12,18 @@ import type { Store } from '@grasp-mvp/infra';
 const TENANT = 'tenant-demo';
 
 /**
+ * 是否灌入演示考核历史：
+ * - SEED_DEMO_HISTORY=1：强制灌入；
+ * - SEED_DEMO_HISTORY=0：强制不灌；
+ * - 未设置：仅非 production 环境灌入（生产默认不灌合成看板数据）。
+ */
+export function shouldSeedDemoHistory(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env.SEED_DEMO_HISTORY === '1') return true;
+  if (env.SEED_DEMO_HISTORY === '0') return false;
+  return env.NODE_ENV !== 'production';
+}
+
+/**
  * 演示历史数据：不依赖 LLM，直接构造确定性的 Session / ScoreReport /
  * CertRecord / UserSkillState（mulberry32 固定种子伪随机）。
  * 幂等：仅当没有任何 CertRecord 时灌入。
@@ -19,7 +31,7 @@ const TENANT = 'tenant-demo';
  * 数据内容对齐 docs/*.png 设计稿：
  * - 5 大区 × 6 技能点基线考核（得出高管热力图达标率矩阵，每格分母 100）
  * - 3–8 月试点组/对照组月度达标率趋势（31→69 / 27→35）
- * - 合规红线 14 起（华北·夸大收益 7、西部·错误适应症 4、华东二区·夸大收益 3）
+ * - 合规红线 14 起（华北·夸大提分 7、西部·虚假案例宣传 4、华东二区·夸大提分 3）
  * - 「2026 Q3 L2 认证」23 人名单：18 完成（11 过 / 7 未过）、5 未开始
  * - 主管团队 5 名成员的认证史（林小满连续未达标、赵川 L2、何薇 L1、周迪 L2、沈亦未开始）
  * - 林小满成长数据：W1–W6 进步曲线 43/52/50/59/64/67、口头禅「其实」11/9/7/4、
@@ -99,6 +111,9 @@ export async function seedHistory(store: Store): Promise<void> {
     fillerCounts?: Record<string, number>;
     coverageHits?: string[];
     coverageMisses?: string[];
+    talkRatio?: number;
+    avgSpeechRate?: number;
+    pauseCount?: number;
     transcript?: TranscriptTurn[];
     emotionTrace?: Session['emotionTrace'];
     prevSessionId?: string;
@@ -141,6 +156,9 @@ export async function seedHistory(store: Store): Promise<void> {
         fillerCounts: opts.fillerCounts ?? {},
         coverageHits: opts.coverageHits ?? [],
         coverageMisses: opts.coverageMisses ?? [],
+        talkRatio: opts.talkRatio ?? 0.55,
+        avgSpeechRate: opts.avgSpeechRate ?? 210,
+        pauseCount: opts.pauseCount ?? 3,
       },
       createdAt: opts.at,
     };
@@ -174,9 +192,9 @@ export async function seedHistory(store: Store): Promise<void> {
   ];
   // 合规红线分布：组织 -> { detail, count }（放在该组织未达标池前 N 场）
   const REDLINE_PLAN: Record<string, { detail: string; count: number }> = {
-    hb: { detail: '夸大收益表述', count: 7 },
-    xb: { detail: '错误适应症', count: 4 },
-    hd2: { detail: '夸大收益表述', count: 3 },
+    hb: { detail: '夸大提分效果', count: 7 },
+    xb: { detail: '虚假案例宣传', count: 4 },
+    hd2: { detail: '夸大提分效果', count: 3 },
   };
 
   function bulkUserIds(orgKey: string): string[] {
@@ -524,13 +542,13 @@ export async function seedHistory(store: Store): Promise<void> {
   // 07-30 复盘演示会话：总分 68（较上次 +14）、达标线 75、合规红线一票否决
   const demoStart = new Date('2026-07-30T14:00:00+08:00').getTime();
   const demoTurns: Array<{ sec: number; speaker: 'trainee' | 'persona'; text: string; arousal: number }> = [
-    { sec: 12, speaker: 'persona', text: '你有什么事快说，我一会儿还有个会。', arousal: 0.33 },
-    { sec: 20, speaker: 'trainee', text: '主任您好，我是××的小林，今天想用三分钟跟您汇报一个新的降糖方案。', arousal: 0.37 },
-    { sec: 48, speaker: 'persona', text: '又是新药？你们这类产品我看过太多了，数据都是自己做的吧。', arousal: 0.62 },
-    { sec: 62, speaker: 'trainee', text: '我们这款效果特别好，基本上所有患者都能达标。', arousal: 0.86 },
-    { sec: 80, speaker: 'persona', text: '（皱眉）这种话我听不了。你们公司培训就这么讲的？', arousal: 0.88 },
-    { sec: 96, speaker: 'trainee', text: '抱歉主任，我说得不严谨。III 期研究中在××亚组的达标率是 62%，我把研究摘要留给您。', arousal: 0.55 },
-    { sec: 125, speaker: 'persona', text: '行，摘要放这儿吧。下次带上你们的医学部同事。', arousal: 0.42 },
+    { sec: 12, speaker: 'persona', text: '你有什么事快说，我一会儿还要去接送孩子。', arousal: 0.33 },
+    { sec: 20, speaker: 'trainee', text: '家长您好，我是××的小林，今天想用三分钟跟您介绍一个数学思维课程。', arousal: 0.37 },
+    { sec: 48, speaker: 'persona', text: '又是推销课程？你们这类机构我看过太多了，提分案例都是自己编的吧。', arousal: 0.62 },
+    { sec: 62, speaker: 'trainee', text: '我们这个课效果特别好，基本上所有孩子都能提分。', arousal: 0.86 },
+    { sec: 80, speaker: 'persona', text: '（皱眉）这种话我听不了。你们机构培训就这么讲的？', arousal: 0.88 },
+    { sec: 96, speaker: 'trainee', text: '抱歉家长，我说得不严谨。上学期同基础学员平均提分 15 分，我把脱敏的学员档案留给您。', arousal: 0.55 },
+    { sec: 125, speaker: 'persona', text: '行，资料放这儿吧。下次带上你们的任课老师。', arousal: 0.42 },
   ];
   const bandOf = (arousal: number) => (arousal < 0.4 ? 'calm' : arousal < 0.7 ? 'guarded' : 'annoyed');
   const demoTranscript: TranscriptTurn[] = demoTurns.map((t, i) => ({
@@ -548,7 +566,7 @@ export async function seedHistory(store: Store): Promise<void> {
       levelKey: 'good',
       levelLabel: '优',
       score: 88,
-      quote: '主任您好，我是××的小林，今天想用三分钟跟您汇报一个新的降糖方案。',
+      quote: '家长您好，我是××的小林，今天想用三分钟跟您介绍一个数学思维课程。',
       quoteTurnSeq: 2,
       rationale: '开场 20 秒内完成自我介绍并给出 3 分钟时间承诺，符合张伟三步破冰法第一步。',
       confidence: 0.95,
@@ -564,10 +582,10 @@ export async function seedHistory(store: Store): Promise<void> {
       levelKey: 'ok',
       levelLabel: '中',
       score: 50,
-      quote: '我们这款效果特别好，基本上所有患者都能达标。',
+      quote: '我们这个课效果特别好，基本上所有孩子都能提分。',
       quoteTurnSeq: 4,
-      rationale: '面对「数据都是自己做的吧」的质疑未先共情澄清，直接给出绝对化表述。',
-      betterScript: '「主任，我理解您的顾虑。这是 III 期随机双盲研究，×× 亚组达标率 62%，摘要留给您。」',
+      rationale: '面对「提分案例都是自己编的吧」的质疑未先共情澄清，直接给出绝对化表述。',
+      betterScript: '「家长，我理解您的顾虑。这是脱敏的真实学员档案，同基础学员平均提分 15 分，资料留给您。」',
       confidence: 0.9,
       judgeAgree: true,
       isReference: false,
@@ -576,15 +594,15 @@ export async function seedHistory(store: Store): Promise<void> {
     },
     {
       itemId: 'item-obj-2',
-      itemName: '证据引用规范',
+      itemName: '案例引用规范',
       skillPointId: 'sp-objection',
       levelKey: 'ok',
       levelLabel: '中',
       score: 55,
-      quote: 'III 期研究中在××亚组的达标率是 62%，我把研究摘要留给您。',
+      quote: '上学期同基础学员平均提分 15 分，我把脱敏的学员档案留给您。',
       quoteTurnSeq: 6,
-      rationale: '补充引用了研究类型与亚组人群，但首次提及数据时未给出处。（双 judge 不一致，本项为参考项）',
-      betterScript: '「这是发表在《中华内分泌代谢杂志》的 III 期研究，×× 亚组达标率 62%，摘要我留给您。」',
+      rationale: '补充说明了学员基础与学习周期，但首次提及数据时未给出处。（双 judge 不一致，本项为参考项）',
+      betterScript: '「这是上学期的脱敏学员档案，同基础学员平均提分 15 分，学习周期 16 周，资料我留给您。」',
       confidence: 0.6,
       judgeAgree: false,
       isReference: true,
@@ -598,10 +616,10 @@ export async function seedHistory(store: Store): Promise<void> {
       levelKey: 'poor',
       levelLabel: '否决',
       score: 2,
-      quote: '我们这款效果特别好，基本上所有患者都能达标。',
+      quote: '我们这个课效果特别好，基本上所有孩子都能提分。',
       quoteTurnSeq: 4,
-      rationale: '「基本上所有患者都能达标」触发违禁话术句式（夸大收益）→ 本项一票否决。',
-      betterScript: '「主任，我不谈『所有患者』。III 期××亚组达标率 62%，这是研究摘要，您先看数据再判断。」',
+      rationale: '「基本上所有孩子都能提分」触发违禁话术句式（夸大提分效果）→ 本项一票否决。',
+      betterScript: '「家长，我不谈『所有孩子』。上学期同基础学员平均提分 15 分，这是脱敏档案，您先看数据再判断。」',
       confidence: 0.98,
       judgeAgree: true,
       isReference: false,
@@ -615,10 +633,10 @@ export async function seedHistory(store: Store): Promise<void> {
       levelKey: 'ok',
       levelLabel: '中',
       score: 55,
-      quote: 'III 期研究中在××亚组的达标率是 62%，我把研究摘要留给您。',
+      quote: '上学期同基础学员平均提分 15 分，我把脱敏的学员档案留给您。',
       quoteTurnSeq: 6,
-      rationale: '最终留下研究摘要作为下一步触点，但未明确约定回访时间或推进到下一步动作。',
-      betterScript: '「主任，摘要我留给您。我周四上午 10 点再联系您，咱们根据数据再详细聊一次，您看行吗？」',
+      rationale: '最终留下学员档案作为下一步触点，但未明确约定试听时间或推进到下一步动作。',
+      betterScript: '「家长，档案我留给您。我周四下午 4 点再联系您，咱们约一节试听课详细体验，您看行吗？」',
       confidence: 0.85,
       judgeAgree: true,
       isReference: false,
@@ -638,13 +656,13 @@ export async function seedHistory(store: Store): Promise<void> {
     skillScores: [skill('sp-icebreak', 72), skill('sp-need', 66), skill('sp-objection', 48), skill('sp-compliance', 30), skill('sp-closing', 55)],
     items: demoItems,
     violations: [
-      { ruleId: 'redline-absolutize', kind: 'redline', detail: '夸大收益表述', turnSeq: 4, fatal: true },
-      { ruleId: 'rule-interruption', kind: 'interruption', detail: '打断客户 1 次', turnSeq: 3, fatal: false },
+      { ruleId: 'redline-absolutize', kind: 'redline', detail: '夸大提分效果', turnSeq: 4, fatal: true },
+      { ruleId: 'rule-interruption', kind: 'interruption', detail: '打断家长 1 次', turnSeq: 3, fatal: false },
     ],
     interruptions: 1,
     fillerCounts: { 其实: 4 },
-    coverageHits: ['开场自我介绍与时间承诺', '循证证据引用', '下一步约定'],
-    coverageMisses: ['适应症合规表述', '异议首反应'],
+    coverageHits: ['开场自我介绍与时间承诺', '真实提分案例引用', '下一步约定'],
+    coverageMisses: ['效果承诺合规表述', '异议首反应'],
     transcript: demoTranscript,
     emotionTrace: demoTurns.map((t, i) => ({
       seq: i + 1,

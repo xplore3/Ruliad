@@ -51,14 +51,16 @@ export interface Scenario {
   durationMinutes: number;
   difficulty: number;
   coverageTopics?: string[];
+  description?: string;
   personaName?: string;
   personaTitle?: string;
+  skillPointIds?: string[];
   skillPointNames?: string[];
   methodology?: string;
   source?: string;
   practiceCount?: number;
-  /** 是否带剧本（实用场景=有剧本；实战训练自由对练=无剧本） */
-  hasScript?: boolean;
+  /** 场景级产品知识库 id（可选；优先于角色默认知识库） */
+  productKBId?: string;
   /** 场景类型（缺省视为 practical） */
   sceneType?: SceneType;
   /** 剧本（实用场景） */
@@ -106,6 +108,8 @@ export interface Session {
   pausedMs?: number;
   /** AI 教练开场白缓存 */
   coachOpening?: string;
+  /** 进入正式对练（live）的时间（ISO），倒计时与用时以此为起点 */
+  liveStartedAt?: string;
   startedAt: string;
   endedAt?: string;
   videoFrames?: string[];
@@ -178,6 +182,47 @@ export interface SkillPoint {
   assetName?: string;
   practiceCount?: number;
   locked?: boolean;
+}
+
+/** ===== 资源库管理 ===== */
+
+/** 客户提问问题库条目 */
+export interface CustomerQuestion {
+  id: string;
+  tenantId: string;
+  category: string;
+  question: string;
+  referenceAnswer?: string;
+  difficulty?: number;
+  skillPointIds?: string[];
+  frequency?: number;
+}
+
+export interface ScoreLevel {
+  key: string;
+  label: string;
+  score: number;
+  description: string;
+}
+
+export interface ScoreItemDef {
+  id: string;
+  tenantId: string;
+  skillPointId: string;
+  name: string;
+  behaviorAnchor: string;
+  judgePrompt: string;
+  weight: number;
+  levels: ScoreLevel[];
+  layer: 'company' | 'team' | 'personal';
+  isObservation: boolean;
+}
+
+export interface GoldenCase {
+  id: string;
+  name: string;
+  transcript: { seq: number; speaker: 'trainee' | 'persona'; text: string }[];
+  expected: { itemId: string; levelKey: string }[];
 }
 
 export interface UserSkillState {
@@ -280,7 +325,7 @@ export interface QuizQuestion {
   id: string;
   type: 'single_choice' | 'multi_choice' | 'true_false' | 'short_answer' | 'scenario_pick';
   prompt: string;
-  options?: string[];
+  options?: { id: string; label: string }[];
   score: number;
   required?: boolean;
 }
@@ -302,7 +347,7 @@ export interface SessionCreated {
     name: string;
     durationMinutes: number;
     coverageTopics?: string[];
-    hasScript?: boolean;
+    description?: string;
     sceneType?: SceneType;
     script?: ScenarioScript;
     participants?: ScenarioParticipant[];

@@ -61,12 +61,12 @@ pnpm install
   不配置时全部任务路由到确定性 MockLLMProvider，离线可跑通完整闭环。
 - 启动时若无场景数据，api-gateway 自动播入种子数据（demo 租户、学员"小李"、
   角色"王经理"、3 个技能点、2 个场景、5 个评分项）。
-  种子含 **58 个 AI 陪练员**（覆盖医药 / 金融 / 地产 / 教育 / 电商 / 保险 / 企业软件等 7+ 行业），
+  种子含 **8 个 AI 陪练员**（教育培训机构家长角色，覆盖焦虑型 / 升学型 / 理性型 / 体验型 / 犹豫拖延型等类型），
   启动时自动增量同步——已有旧数据时只补充缺失的陪练员，不会覆盖已有数据。
 
 ## 云端部署
 
-### 种子数据（58 个陪练员）在云端生效
+### 种子数据（8 个陪练员）在云端生效
 
 种子数据采用 **自动增量同步** 机制，无需手动操作即可在云端生效：
 
@@ -166,12 +166,12 @@ pnpm test
 # 产品知识库：整体创建/替换（entries[].kind ∈ keypoint/redline/competitor/faq）
 curl -X PUT http://localhost:3060/api/v1/workshop/product-kb \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"name":"降糖产品线话术手册","entries":[{"kind":"faq","title":"医保怎么报","content":"先确认集采通道…","frequency":31}]}'
+  -d '{"name":"数学思维课程话术手册","entries":[{"kind":"faq","title":"能优惠吗","content":"先确认课时包与赠课方案…","frequency":31}]}'
 
 # 条目批量导入：带 id 覆盖同 id 条目，无 id 追加；版本自动 +1
 curl -X POST http://localhost:3060/api/v1/workshop/product-kb/entries \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"entries":[{"kind":"redline","title":"禁止承诺收益","content":"不得使用保本、稳赚等表述"}]}'
+  -d '{"entries":[{"kind":"redline","title":"禁止保过承诺","content":"不得使用保证提分、包过等表述"}]}'
 
 # 用户批量导入（HR 花名册）：orgName/teamName 按名解析、缺失自动创建；
 # username 已存在则更新（不显式给 password 不动原密码）；缺省初始密码 123456；单次上限 500
