@@ -8,18 +8,27 @@ import {
   createGoldenCase,
   createScenario,
   createScoreItem,
+  deleteAnalysisStandard,
   deleteCustomerQuestion,
   deleteGoldenCase,
+  deleteRealismStandard,
   deleteScenario,
+  deleteScenarioGuidance,
   deleteScoreItem,
   extractLibraryRows,
   fetchPersonaConfigs,
   fetchScenarios,
   fetchSkillPoints,
   getStoredUser,
+  listAnalysisStandards,
   listCustomerQuestions,
   listGoldenCases,
+  listRealismStandards,
+  listScenarioGuidances,
   listScoreItems,
+  saveAnalysisStandard,
+  saveRealismStandard,
+  saveScenarioGuidance,
   updateCustomerQuestion,
   updateGoldenCase,
   updateScenario,
@@ -35,6 +44,14 @@ import type {
   ScoreLevel,
   SkillPoint,
 } from '../types';
+import type {
+  AnalysisStandard,
+  DemoScriptTemplate,
+  DifficultyLevel,
+  DurationParams,
+  RealismStandard,
+  ScenarioGuidance,
+} from '../lib/guidance';
 
 /** ===== 通用行模型：clean=已入库未改 / dirty=已改 / draft=新草稿 / deleted=待删除 ===== */
 
@@ -372,8 +389,9 @@ interface ToolbarProps {
   pendingCount: number;
   saving: boolean;
   onAdd: () => void;
-  onExtract: () => void;
-  onPaste: () => void;
+  /** 不传则隐藏（该库不支持 AI 提炼/粘贴表格时） */
+  onExtract?: () => void;
+  onPaste?: () => void;
   onReload: () => void;
   onSave: () => void;
 }
@@ -382,8 +400,8 @@ function Toolbar({ pendingCount, saving, onAdd, onExtract, onPaste, onReload, on
   return (
     <div className="lib-toolbar">
       <button className="btn btn-ghost btn-sm" onClick={onAdd}>＋ 新增行</button>
-      <button className="btn btn-ghost btn-sm" onClick={onExtract}>🤖 AI 提炼</button>
-      <button className="btn btn-ghost btn-sm" onClick={onPaste}>📋 粘贴表格</button>
+      {onExtract && <button className="btn btn-ghost btn-sm" onClick={onExtract}>🤖 AI 提炼</button>}
+      {onPaste && <button className="btn btn-ghost btn-sm" onClick={onPaste}>📋 粘贴表格</button>}
       <button className="btn btn-ghost btn-sm" onClick={onReload}>↻ 刷新</button>
       <span style={{ flex: 1 }} />
       {pendingCount > 0 && <span className="chip chip-amber">{pendingCount} 项待保存</span>}
@@ -549,16 +567,26 @@ function ParticipantsEditor({ participants, onChange }: {
 
 /** ===== 页面 ===== */
 
-type TabKey = 'scenarios' | 'questions' | 'score-items' | 'golden-cases';
+type TabKey = 'scenarios' | 'questions' | 'score-items' | 'golden-cases' | 'analysis-standards' | 'realism-standards' | 'guidance';
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'scenarios', label: '场景库' },
   { key: 'questions', label: '客户提问库' },
   { key: 'score-items', label: '评分项' },
   { key: 'golden-cases', label: '金标准案例' },
+  { key: 'analysis-standards', label: '分析标准库' },
+  { key: 'realism-standards', label: '真实度标准库' },
+  { key: 'guidance', label: '场景引导包' },
 ];
 
 const DIFF_LABELS: Record<number, string> = { 1: '初级', 2: '进阶', 3: '挑战' };
+
+/** 场景库「配置引导」跳转引导包 Tab 时携带的目标 */
+interface GuidanceFocus {
+  id?: string;
+  scenarioId?: string;
+  name?: string;
+}
 
 export default function Library() {
   const navigate = useNavigate();
@@ -568,12 +596,27 @@ export default function Library() {
   const [skillPoints, setSkillPoints] = useState<SkillPoint[]>([]);
   const [personas, setPersonas] = useState<PersonaConfig[]>([]);
   const [scoreItems, setScoreItems] = useState<ScoreItemDef[]>([]);
+  /** 已配置的引导包列表（场景库「引导包」列用；引导包 Tab 保存后通过 reloadGuidances 刷新） */
+  const [guidances, setGuidances] = useState<ScenarioGuidance[]>([]);
+  const [guidanceFocus, setGuidanceFocus] = useState<GuidanceFocus | null>(null);
+
+  const reloadGuidances = () => {
+    listScenarioGuidances().then((r) => setGuidances(r.items)).catch(() => {});
+  };
 
   useEffect(() => {
     fetchSkillPoints().then((r) => setSkillPoints(r.skillPoints)).catch(() => {});
     fetchPersonaConfigs().then((r) => setPersonas(r.personaConfigs)).catch(() => {});
     listScoreItems().then((r) => setScoreItems(r.items)).catch(() => {});
+    reloadGuidances();
   }, []);
+
+  /** 场景库跳转：已有引导包 → 打开编辑；未配置 → 新建草稿并预填场景 */
+  const configureGuidance = (focus: GuidanceFocus) => {
+    setGuidanceFocus(focus);
+    setTab('guidance');
+    setNotice(null);
+  };
 
   if (!isAdmin) {
     return (
@@ -608,12 +651,226 @@ export default function Library() {
         </div>
       )}
 
-      {tab === 'scenarios' && <ScenarioTab skillPoints={skillPoints} personas={personas} setNotice={setNotice} />}
+      {tab === 'scenarios' && (
+        <ScenarioTab skillPoints={skillPoints} personas={personas} guidances={guidances} onConfigureGuidance={configureGuidance} setNotice={setNotice} />
+      )}
       {tab === 'questions' && <QuestionTab skillPoints={skillPoints} setNotice={setNotice} />}
       {tab === 'score-items' && (
         <ScoreItemTab skillPoints={skillPoints} setNotice={setNotice} onChanged={() => listScoreItems().then((r) => setScoreItems(r.items)).catch(() => {})} />
       )}
       {tab === 'golden-cases' && <GoldenCaseTab scoreItems={scoreItems} setNotice={setNotice} />}
+      {tab === 'analysis-standards' && (
+        <StandardTab
+          categoryOptions={ANALYSIS_CATEGORY_OPTIONS}
+          hasExample
+          emptyDraft={{ name: '', category: 'method', description: '' }}
+          extractTarget="analysis-standard"
+          pasteExample={'名称\t分类\t说明\t示例\n语速平稳\t语速\t保持 200-240 字/分钟，重点词放慢\t介绍价格时放慢报数'}
+          list={() => listAnalysisStandards().then((r) => r.items)}
+          save={saveAnalysisStandard}
+          remove={deleteAnalysisStandard}
+          setNotice={setNotice}
+        />
+      )}
+      {tab === 'realism-standards' && (
+        <StandardTab
+          categoryOptions={REALISM_CATEGORY_OPTIONS}
+          hasExample={false}
+          emptyDraft={{ name: '', category: 'reaction', description: '' }}
+          extractTarget="realism-standard"
+          pasteExample={'名称\t分类\t说明\n直接拒绝\t拒绝行为\t客户不问理由直接拒绝，测试销售的第一反应'}
+          list={() => listRealismStandards().then((r) => r.items)}
+          save={saveRealismStandard}
+          remove={deleteRealismStandard}
+          setNotice={setNotice}
+        />
+      )}
+      {tab === 'guidance' && (
+        <GuidanceTab
+          focus={guidanceFocus}
+          onFocusHandled={() => setGuidanceFocus(null)}
+          onChanged={reloadGuidances}
+          setNotice={setNotice}
+        />
+      )}
+    </div>
+  );
+}
+
+/** ===== Tab 5/6：分析标准库 / 真实度标准库（同一套行内编辑表格，仅分类选项与有无示例列不同） ===== */
+
+const ANALYSIS_CATEGORY_OPTIONS = [
+  { value: 'tone', label: '语调' },
+  { value: 'pace', label: '语速' },
+  { value: 'method', label: '关键方法' },
+  { value: 'etiquette', label: '礼仪' },
+];
+
+const REALISM_CATEGORY_OPTIONS = [
+  { value: 'reaction', label: '反应自然度' },
+  { value: 'objection', label: '拒绝行为' },
+  { value: 'stalling', label: '拖延行为' },
+  { value: 'emotion', label: '情绪变化' },
+];
+
+interface StandardRowData {
+  id?: string;
+  name: string;
+  category: string;
+  description: string;
+  example?: string;
+}
+
+function StandardTab({ categoryOptions, hasExample, emptyDraft, extractTarget, pasteExample, list, save, remove, setNotice }: {
+  categoryOptions: { value: string; label: string }[];
+  hasExample: boolean;
+  /** AI 提炼 target（后端 /library/extract 已支持） */
+  extractTarget: 'analysis-standard' | 'realism-standard';
+  /** 粘贴表格示例文本 */
+  pasteExample: string;
+  emptyDraft: StandardRowData;
+  list: () => Promise<(AnalysisStandard | RealismStandard)[]>;
+  save: (d: StandardRowData) => Promise<StandardRowData>;
+  remove: (id: string) => Promise<unknown>;
+  setNotice: (s: string | null) => void;
+}) {
+  const { rows, setRows, loadRows, addDrafts, updateRow, toggleDelete } = useRows<StandardRowData>();
+  const [panel, setPanel] = useState<'extract' | 'paste' | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const reload = () => {
+    setLoading(true);
+    list()
+      .then((items) => loadRows(items.map((s) => ({ id: s.id, name: s.name, category: s.category, description: s.description, example: 'example' in s ? s.example : undefined }))))
+      .catch((err) => setNotice(apiError(err, '加载标准库失败')))
+      .finally(() => setLoading(false));
+  };
+  useEffect(reload, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** 分类值解析：英文枚举原样保留，中文标签映射回枚举值，其余按自定义保留并提示 */
+  const resolveCategory = (v: string): { category: string; warn?: string } => {
+    const t = v.trim();
+    if (!t) return { category: emptyDraft.category };
+    const byValue = categoryOptions.find((c) => c.value === t);
+    if (byValue) return { category: byValue.value };
+    const byLabel = categoryOptions.find((c) => c.label === t);
+    if (byLabel) return { category: byLabel.value };
+    return { category: t, warn: `分类「${t}」未匹配，已按自定义保留` };
+  };
+
+  const mapExtracted = (r: Record<string, unknown>): { data: StandardRowData; warn?: string[] } => {
+    const cat = resolveCategory(String(r.category ?? ''));
+    return {
+      data: {
+        name: String(r.name ?? ''),
+        category: cat.category,
+        description: String(r.description ?? ''),
+        example: hasExample && r.example ? String(r.example) : undefined,
+      },
+      warn: cat.warn ? [cat.warn] : undefined,
+    };
+  };
+
+  const mapPasted = (cells: string[][]): { data: StandardRowData; warn?: string[] }[] =>
+    cells.map((c) => {
+      const cat = resolveCategory(c[1] ?? '');
+      return {
+        data: {
+          name: c[0] ?? '',
+          category: cat.category,
+          description: c[2] ?? '',
+          example: hasExample ? c[3] || undefined : undefined,
+        },
+        warn: cat.warn ? [cat.warn] : undefined,
+      };
+    });
+
+  const pasteHeaders = hasExample ? ['名称', '分类', '说明', '示例'] : ['名称', '分类', '说明'];
+
+  const handlers: SaveHandlers<StandardRowData> = {
+    validate: (d) => {
+      if (!d.name?.trim()) return '名称必填';
+      if (!d.category) return '请选择分类';
+      if (!d.description?.trim()) return '说明必填';
+      return null;
+    },
+    // 后端 upsert：带 id 更新，否则新建
+    create: (d) => save(d),
+    update: (id, d) => save({ ...d, id }),
+    remove: (id) => remove(id),
+  };
+
+  const pendingCount = rows.filter((r) => r.status !== 'clean').length;
+
+  const saveAll = async () => {
+    setSaving(true);
+    const { saved, failed } = await saveRows(rows, handlers, setRows);
+    setSaving(false);
+    setNotice(`保存完成：成功 ${saved} 项${failed ? `，失败 ${failed} 项（见行内提示）` : ''}`);
+    if (saved > 0) reload();
+  };
+
+  return (
+    <div className="card lib-card">
+      <Toolbar
+        pendingCount={pendingCount}
+        saving={saving}
+        onAdd={() => addDrafts([{ data: { ...emptyDraft } }])}
+        onExtract={() => setPanel('extract')}
+        onPaste={() => setPanel('paste')}
+        onReload={reload}
+        onSave={saveAll}
+      />
+      {loading ? (
+        <p style={{ padding: 16, color: '#6B7280', fontSize: 13 }}>加载中…</p>
+      ) : (
+        <div className="lib-table-wrap">
+          <table className="lib-table">
+            <thead>
+              <tr>
+                <th>状态</th><th>名称</th><th>分类</th><th>说明</th>{hasExample && <th>示例</th>}<th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.key} className={`lib-row-${row.status}`}>
+                  <td><RowStatusChip row={row} />{row.error && <div className="lib-err">{row.error}</div>}</td>
+                  <td><CellInput value={row.data.name} onChange={(v) => updateRow(row.key, { name: v })} /></td>
+                  <td>
+                    <select className="lib-cell" value={row.data.category} onChange={(e) => updateRow(row.key, { category: e.target.value })}>
+                      {categoryOptions.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                      {row.data.category && !categoryOptions.some((c) => c.value === row.data.category) && (
+                        <option value={row.data.category}>{row.data.category}（自定义）</option>
+                      )}
+                    </select>
+                  </td>
+                  <td style={{ minWidth: 260 }}><CellTextarea value={row.data.description} onChange={(v) => updateRow(row.key, { description: v })} /></td>
+                  {hasExample && (
+                    <td style={{ minWidth: 200 }}><CellTextarea value={row.data.example} onChange={(v) => updateRow(row.key, { example: v || undefined })} /></td>
+                  )}
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    <button className="btn btn-ghost btn-sm" onClick={() => toggleDelete(row.key)}>
+                      {row.status === 'deleted' ? '恢复' : '删除'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {panel === 'extract' && (
+        <ExtractPanel target={extractTarget} onClose={() => setPanel(null)} onRows={(rs) => addDrafts(rs.map(mapExtracted))} />
+      )}
+      {panel === 'paste' && (
+        <PastePanel
+          headers={pasteHeaders}
+          example={pasteExample}
+          onClose={() => setPanel(null)}
+          onRows={(rs) => addDrafts(mapPasted(rs))}
+        />
+      )}
     </div>
   );
 }
@@ -621,7 +878,7 @@ export default function Library() {
 /** ===== AI 提炼 / 粘贴表格 面板（各 Tab 复用） ===== */
 
 function ExtractPanel({ target, onClose, onRows }: {
-  target: 'scenario' | 'question' | 'score-item' | 'golden-case';
+  target: 'scenario' | 'question' | 'score-item' | 'golden-case' | 'analysis-standard' | 'realism-standard';
   onClose: () => void;
   onRows: (rows: Record<string, unknown>[]) => void;
 }) {
@@ -759,9 +1016,11 @@ function toScenarioPayload(d: ScenarioRowData) {
   };
 }
 
-function ScenarioTab({ skillPoints, personas, setNotice }: {
+function ScenarioTab({ skillPoints, personas, guidances, onConfigureGuidance, setNotice }: {
   skillPoints: SkillPoint[];
   personas: PersonaConfig[];
+  guidances: ScenarioGuidance[];
+  onConfigureGuidance: (focus: GuidanceFocus) => void;
   setNotice: (s: string | null) => void;
 }) {
   const { rows, setRows, loadRows, addDrafts, updateRow, markSaved, markError, toggleDelete } = useRows<ScenarioRowData>();
@@ -897,7 +1156,7 @@ function ScenarioTab({ skillPoints, personas, setNotice }: {
             <thead>
               <tr>
                 <th>状态</th><th>名称</th><th>类型</th><th>难度</th><th>时长(分)</th><th>及格分</th>
-                <th>陪练角色</th><th>技能点</th><th>方法论</th><th>话题</th><th>操作</th>
+                <th>陪练角色</th><th>技能点</th><th>方法论</th><th>话题</th><th>引导包</th><th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -929,6 +1188,16 @@ function ScenarioTab({ skillPoints, personas, setNotice }: {
                   <td><SkillPointPicker value={row.data.skillPointIds} options={skillPoints} onChange={(ids) => updateRow(row.key, { skillPointIds: ids })} /></td>
                   <td><CellInput value={row.data.methodology} onChange={(v) => updateRow(row.key, { methodology: v || undefined })} /></td>
                   <td><CellInput value={row.data.coverageTopics?.join('、')} onChange={(v) => updateRow(row.key, { coverageTopics: v ? v.split(/[、/]/).map((s) => s.trim()).filter(Boolean) : undefined })} placeholder="话题1、话题2" /></td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    {row.data.id ? (() => {
+                      const g = guidances.find((x) => x.scenarioId === row.data.id);
+                      return g ? (
+                        <button className="btn btn-ghost btn-sm" title={`编辑引导包「${g.name}」`} onClick={() => onConfigureGuidance({ id: g.id })}>已配置 ✓</button>
+                      ) : (
+                        <button className="btn btn-ghost btn-sm" onClick={() => onConfigureGuidance({ scenarioId: row.data.id!, name: row.data.name })}>配置引导</button>
+                      );
+                    })() : <span style={{ color: '#9CA3AF', fontSize: 12 }}>保存后可配置</span>}
+                  </td>
                   <td style={{ whiteSpace: 'nowrap' }}>
                     {row.status !== 'deleted' && (
                       <button className="btn btn-ghost btn-sm" onClick={() => setDetailKey(row.key)}>详情</button>
@@ -1717,5 +1986,369 @@ function GoldenPastePanel({ onClose, onRows, onAdd }: {
         <button className="btn btn-primary btn-sm" disabled={!text.trim()} onClick={run}>解析并加入表格</button>
       </div>
     </Panel>
+  );
+}
+
+/** ===== Tab 7：场景引导包 ===== */
+
+type GuidanceRowData = Omit<ScenarioGuidance, 'id' | 'tenantId'> & { id?: string };
+
+const DEFAULT_DURATION: DurationParams = { targetMinutes: 10, minTurns: 6, maxTurns: 20, countdownSeconds: 600 };
+
+function newGuidanceDraft(scenarioId = '', name = ''): GuidanceRowData {
+  return {
+    scenarioId,
+    name,
+    qualifyQuestions: [],
+    demo: null,
+    keyPoints: [],
+    analysisStandardIds: [],
+    realismStandardIds: [],
+    difficultyLevels: [],
+    defaultDifficulty: 1,
+    duration: { ...DEFAULT_DURATION },
+    liveIntro: { narration: '', goal: '' },
+    voiceProfile: { style: '', arousal: 0.5 },
+    scoringFocus: [],
+  };
+}
+
+function toGuidanceRow(g: ScenarioGuidance): GuidanceRowData {
+  return {
+    id: g.id,
+    scenarioId: g.scenarioId,
+    name: g.name,
+    qualifyQuestions: g.qualifyQuestions ?? [],
+    demo: g.demo ?? null,
+    keyPoints: g.keyPoints ?? [],
+    analysisStandardIds: g.analysisStandardIds ?? [],
+    realismStandardIds: g.realismStandardIds ?? [],
+    difficultyLevels: g.difficultyLevels ?? [],
+    defaultDifficulty: g.defaultDifficulty ?? 1,
+    duration: g.duration ?? { ...DEFAULT_DURATION },
+    liveIntro: g.liveIntro ?? { narration: '', goal: '' },
+    voiceProfile: g.voiceProfile ?? { style: '', arousal: 0.5 },
+    scoringFocus: g.scoringFocus ?? [],
+  };
+}
+
+/** 难度档位行编辑器（level 1-5 / 档位名 / 说明 / 对 AI 客户行为要求） */
+function DifficultyLevelsEditor({ levels, onChange }: { levels: DifficultyLevel[]; onChange: (l: DifficultyLevel[]) => void }) {
+  const update = (idx: number, patch: Partial<DifficultyLevel>) =>
+    onChange(levels.map((lv, i) => (i === idx ? { ...lv, ...patch } : lv)));
+  return (
+    <div>
+      <table className="lib-table">
+        <thead><tr><th>等级(1-5)</th><th>档位名</th><th>难度说明</th><th>AI 客户行为要求</th><th></th></tr></thead>
+        <tbody>
+          {levels.map((lv, idx) => (
+            <tr key={idx}>
+              <td style={{ width: 90 }}><CellInput type="number" value={lv.level} onChange={(v) => update(idx, { level: Math.max(1, Math.min(5, Number(v) || 1)) })} /></td>
+              <td><CellInput value={lv.label} onChange={(v) => update(idx, { label: v })} placeholder="如 温和客户" /></td>
+              <td style={{ minWidth: 200 }}><CellTextarea rows={1} value={lv.description} onChange={(v) => update(idx, { description: v })} /></td>
+              <td style={{ minWidth: 220 }}><CellTextarea rows={1} value={lv.customerBehavior} onChange={(v) => update(idx, { customerBehavior: v })} /></td>
+              <td><button className="btn btn-ghost btn-sm" onClick={() => onChange(levels.filter((_, i) => i !== idx))}>✕</button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <button
+        className="btn btn-ghost btn-sm"
+        style={{ marginTop: 8 }}
+        onClick={() => onChange([...levels, { level: Math.min(5, levels.length + 1), label: '', description: '', customerBehavior: '' }])}
+      >
+        ＋ 加一档
+      </button>
+    </div>
+  );
+}
+
+/** 通用 id/name 多选（平铺 checkbox，用于分析标准 / 真实度标准引用） */
+function IdNameChecks({ value, onChange, options }: {
+  value: string[];
+  onChange: (ids: string[]) => void;
+  options: { id: string; name: string }[];
+}) {
+  if (options.length === 0) return <span style={{ fontSize: 13, color: '#9CA3AF' }}>暂无条目，请先到对应标准库添加</span>;
+  return (
+    <div className="lib-checks">
+      {options.map((o) => (
+        <label key={o.id}>
+          <input
+            type="checkbox"
+            checked={value.includes(o.id)}
+            onChange={(e) =>
+              onChange(e.target.checked ? [...value, o.id] : value.filter((id) => id !== o.id))
+            }
+          />
+          {o.name}
+        </label>
+      ))}
+    </div>
+  );
+}
+
+function GuidanceTab({ focus, onFocusHandled, onChanged, setNotice }: {
+  focus: GuidanceFocus | null;
+  onFocusHandled: () => void;
+  onChanged: () => void;
+  setNotice: (s: string | null) => void;
+}) {
+  const { rows, setRows, loadRows, addDrafts, updateRow, markSaved, markError, toggleDelete } = useRows<GuidanceRowData>();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [savingOne, setSavingOne] = useState(false);
+  const [detailKey, setDetailKey] = useState<string | null>(null);
+  const [scenarios, setScenarios] = useState<Scenario[]>([]);
+  const [analysisStandards, setAnalysisStandards] = useState<AnalysisStandard[]>([]);
+  const [realismStandards, setRealismStandards] = useState<RealismStandard[]>([]);
+  /** 编辑器内示范剧本的 JSON 草稿（完成/保存时解析回 demo 字段） */
+  const [demoText, setDemoText] = useState('');
+  const [noDemo, setNoDemo] = useState(false);
+  const [demoErr, setDemoErr] = useState<string | null>(null);
+
+  const reload = () => {
+    setLoading(true);
+    listScenarioGuidances()
+      .then((r) => loadRows(r.items.map(toGuidanceRow)))
+      .catch((err) => setNotice(apiError(err, '加载场景引导包失败')))
+      .finally(() => setLoading(false));
+  };
+  useEffect(reload, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    fetchScenarios().then((r) => setScenarios(r.scenarios)).catch(() => {});
+    listAnalysisStandards().then((r) => setAnalysisStandards(r.items)).catch(() => {});
+    listRealismStandards().then((r) => setRealismStandards(r.items)).catch(() => {});
+  }, []);
+
+  const openEditor = (row: Row<GuidanceRowData>) => {
+    setDemoText(row.data.demo ? JSON.stringify(row.data.demo, null, 2) : '');
+    setNoDemo(row.data.demo === null);
+    setDemoErr(null);
+    setDetailKey(row.key);
+  };
+
+  // 场景库「配置引导 / 已配置」跳转：已有 → 直接打开编辑器；未配置 → 新建草稿并预填场景
+  useEffect(() => {
+    if (!focus || loading) return;
+    if (focus.id) {
+      const row = rows.find((r) => r.data.id === focus.id);
+      if (row) openEditor(row);
+      else setNotice('未找到对应引导包，可能已被删除');
+    } else if (focus.scenarioId) {
+      addDrafts([{ data: newGuidanceDraft(focus.scenarioId, focus.name ?? '') }]);
+      setNotice('已新建引导包草稿并预填场景，点击「编辑」完善后保存');
+    }
+    onFocusHandled();
+  }, [focus, loading]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** 解析编辑器里的示范 JSON；无示范模式 → demo=null */
+  const parseDemoInput = (): { demo: DemoScriptTemplate | null } | { error: string } => {
+    if (noDemo) return { demo: null };
+    const text = demoText.trim();
+    if (!text) return { error: '示范 JSON 不能为空；若无示范请勾选「无示范模式」' };
+    try {
+      const parsed = JSON.parse(text) as DemoScriptTemplate;
+      if (!parsed || !Array.isArray(parsed.lines)) return { error: '示范 JSON 需包含 lines 数组' };
+      return { demo: parsed };
+    } catch {
+      return { error: '示范 JSON 解析失败，请检查格式' };
+    }
+  };
+
+  /** 「完成」：尽力把示范 JSON 暂存进行数据；解析失败保留原值并提示 */
+  const closeEditor = () => {
+    const row = rows.find((r) => r.key === detailKey);
+    if (row) {
+      const d = parseDemoInput();
+      if ('error' in d) {
+        // 未填且原本就没示范时不算错误
+        if (!(demoText.trim() === '' && row.data.demo === null && !noDemo)) setNotice(`示范 JSON 未暂存：${d.error}`);
+      } else {
+        updateRow(row.key, { demo: d.demo });
+      }
+    }
+    setDetailKey(null);
+  };
+
+  const validate = (d: GuidanceRowData) => {
+    if (!d.scenarioId) return '请选择绑定场景';
+    if (!d.name?.trim()) return '名称必填';
+    if (!d.qualifyQuestions?.length) return '资格问题至少一题（编辑器中每行一条）';
+    const dur = d.duration;
+    if (![dur.targetMinutes, dur.minTurns, dur.maxTurns, dur.countdownSeconds].every(Number.isFinite)) {
+      return '时长参数必须为数字';
+    }
+    return null;
+  };
+
+  const pendingCount = rows.filter((r) => r.status !== 'clean').length;
+
+  const saveAll = async () => {
+    setSaving(true);
+    const { saved, failed } = await saveRows(rows, {
+      validate,
+      create: (d) => saveScenarioGuidance(d),
+      update: (id, d) => saveScenarioGuidance({ ...d, id }),
+      remove: (id) => deleteScenarioGuidance(id),
+    }, setRows);
+    setSaving(false);
+    setNotice(`保存完成：成功 ${saved} 项${failed ? `，失败 ${failed} 项（见行内提示）` : ''}`);
+    if (saved > 0) { reload(); onChanged(); }
+  };
+
+  const saveOne = async (row: Row<GuidanceRowData>) => {
+    const d = parseDemoInput();
+    if ('error' in d) {
+      setDemoErr(d.error);
+      return;
+    }
+    setDemoErr(null);
+    const payload = { ...row.data, demo: d.demo };
+    const invalid = validate(payload);
+    if (invalid) return markError(row.key, invalid);
+    setSavingOne(true);
+    try {
+      const saved = await saveScenarioGuidance(row.status === 'draft' ? payload : { ...payload, id: row.data.id });
+      markSaved(row.key, toGuidanceRow(saved));
+      setNotice('已保存此行');
+      onChanged();
+    } catch (err) {
+      markError(row.key, apiError(err, '保存失败'));
+    } finally {
+      setSavingOne(false);
+    }
+  };
+
+  const detailRow = rows.find((r) => r.key === detailKey);
+  const scenarioName = (id: string) => scenarios.find((s) => s.id === id)?.name ?? id;
+
+  return (
+    <div className="card lib-card">
+      <Toolbar
+        pendingCount={pendingCount}
+        saving={saving}
+        onAdd={() => addDrafts([{ data: newGuidanceDraft() }])}
+        onReload={reload}
+        onSave={saveAll}
+      />
+      {loading ? (
+        <p style={{ padding: 16, color: '#6B7280', fontSize: 13 }}>加载中…</p>
+      ) : (
+        <div className="lib-table-wrap">
+          <table className="lib-table">
+            <thead>
+              <tr><th>状态</th><th>名称</th><th>绑定场景</th><th>资格问题</th><th>示范</th><th>操作</th></tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.key} className={`lib-row-${row.status}`}>
+                  <td><RowStatusChip row={row} />{row.error && <div className="lib-err">{row.error}</div>}</td>
+                  <td style={{ minWidth: 160 }}><CellInput value={row.data.name} onChange={(v) => updateRow(row.key, { name: v })} /></td>
+                  <td>
+                    <select className="lib-cell" value={row.data.scenarioId} onChange={(e) => updateRow(row.key, { scenarioId: e.target.value })}>
+                      <option value="">选择场景…</option>
+                      {scenarios.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      {row.data.scenarioId && !scenarios.some((s) => s.id === row.data.scenarioId) && (
+                        <option value={row.data.scenarioId}>{row.data.scenarioId}（未匹配）</option>
+                      )}
+                    </select>
+                  </td>
+                  <td>{row.data.qualifyQuestions.length} 题</td>
+                  <td>{row.data.demo ? `有（${row.data.demo.lines.length} 句）` : '无示范模式'}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    {row.status !== 'deleted' && (
+                      <button className="btn btn-ghost btn-sm" onClick={() => openEditor(row)}>编辑</button>
+                    )}
+                    <button className="btn btn-ghost btn-sm" onClick={() => toggleDelete(row.key)}>
+                      {row.status === 'deleted' ? '恢复' : '删除'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {detailRow && (
+        <DetailModal
+          title={`引导包：${detailRow.data.name || '（未命名）'}${detailRow.data.scenarioId ? ` · ${scenarioName(detailRow.data.scenarioId)}` : ''}`}
+          saving={savingOne}
+          onSave={() => saveOne(detailRow)}
+          onClose={closeEditor}
+        >
+          <Field label="绑定场景">
+            <select className="input" value={detailRow.data.scenarioId} onChange={(e) => updateRow(detailRow.key, { scenarioId: e.target.value })}>
+              <option value="">选择场景…</option>
+              {scenarios.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </Field>
+          <Field label="名称"><MInput value={detailRow.data.name} onChange={(v) => updateRow(detailRow.key, { name: v })} /></Field>
+          <Field label="资格问题（第1步，1~2 题）" wide>
+            <LinesTextarea value={detailRow.data.qualifyQuestions} onChange={(v) => updateRow(detailRow.key, { qualifyQuestions: v })} placeholder="每行一题，如：你做过地推吗？" />
+          </Field>
+          <Field label="讲解要点（第3步）" wide>
+            <LinesTextarea value={detailRow.data.keyPoints} onChange={(v) => updateRow(detailRow.key, { keyPoints: v })} placeholder="每行一个要点" />
+          </Field>
+          <Field label="引用分析标准" wide>
+            <IdNameChecks value={detailRow.data.analysisStandardIds} options={analysisStandards} onChange={(ids) => updateRow(detailRow.key, { analysisStandardIds: ids })} />
+          </Field>
+          <Field label="引用真实度标准" wide>
+            <IdNameChecks value={detailRow.data.realismStandardIds} options={realismStandards} onChange={(ids) => updateRow(detailRow.key, { realismStandardIds: ids })} />
+          </Field>
+          <div className="lib-fieldset">
+            <h4>难度档位（第4步）</h4>
+            <DifficultyLevelsEditor levels={detailRow.data.difficultyLevels} onChange={(v) => updateRow(detailRow.key, { difficultyLevels: v })} />
+            <div className="lib-form" style={{ marginTop: 8 }}>
+              <Field label="默认难度"><MInput type="number" value={detailRow.data.defaultDifficulty} onChange={(v) => updateRow(detailRow.key, { defaultDifficulty: Number(v) || 1 })} /></Field>
+            </div>
+          </div>
+          <div className="lib-fieldset">
+            <h4>时长参数（第4步）</h4>
+            <div className="lib-form">
+              <Field label="目标时长（分钟）"><MInput type="number" value={detailRow.data.duration.targetMinutes} onChange={(v) => updateRow(detailRow.key, { duration: { ...detailRow.data.duration, targetMinutes: Number(v) } })} /></Field>
+              <Field label="最少轮次"><MInput type="number" value={detailRow.data.duration.minTurns} onChange={(v) => updateRow(detailRow.key, { duration: { ...detailRow.data.duration, minTurns: Number(v) } })} /></Field>
+              <Field label="最多轮次"><MInput type="number" value={detailRow.data.duration.maxTurns} onChange={(v) => updateRow(detailRow.key, { duration: { ...detailRow.data.duration, maxTurns: Number(v) } })} /></Field>
+              <Field label="倒计时（秒）"><MInput type="number" value={detailRow.data.duration.countdownSeconds} onChange={(v) => updateRow(detailRow.key, { duration: { ...detailRow.data.duration, countdownSeconds: Number(v) } })} /></Field>
+            </div>
+          </div>
+          <Field label="开场旁白（liveIntro.narration）" wide>
+            <MTextarea rows={3} value={detailRow.data.liveIntro.narration} onChange={(v) => updateRow(detailRow.key, { liveIntro: { ...detailRow.data.liveIntro, narration: v } })} />
+          </Field>
+          <Field label="演练目标（liveIntro.goal）" wide>
+            <MInput value={detailRow.data.liveIntro.goal} onChange={(v) => updateRow(detailRow.key, { liveIntro: { ...detailRow.data.liveIntro, goal: v } })} />
+          </Field>
+          <div className="lib-fieldset">
+            <h4>教练音色（voiceProfile）</h4>
+            <div className="lib-form">
+              <Field label="风格 style"><MInput value={detailRow.data.voiceProfile.style} onChange={(v) => updateRow(detailRow.key, { voiceProfile: { ...detailRow.data.voiceProfile, style: v } })} /></Field>
+              <Field label="唤醒度 arousal(0-1)"><MInput type="number" value={detailRow.data.voiceProfile.arousal} onChange={(v) => updateRow(detailRow.key, { voiceProfile: { ...detailRow.data.voiceProfile, arousal: Number(v) } })} /></Field>
+              <Field label="激情 excitement"><MInput type="number" value={detailRow.data.voiceProfile.excitement} onChange={(v) => updateRow(detailRow.key, { voiceProfile: { ...detailRow.data.voiceProfile, excitement: v === '' ? undefined : Number(v) } })} /></Field>
+              <Field label="语速 rate"><MInput type="number" value={detailRow.data.voiceProfile.rate} onChange={(v) => updateRow(detailRow.key, { voiceProfile: { ...detailRow.data.voiceProfile, rate: v === '' ? undefined : Number(v) } })} /></Field>
+            </div>
+          </div>
+          <Field label="重点评分维度（第5步）" wide>
+            <LinesTextarea value={detailRow.data.scoringFocus} onChange={(v) => updateRow(detailRow.key, { scoringFocus: v })} placeholder="每行一个维度" />
+          </Field>
+          <div className="lib-fieldset">
+            <h4>示范剧本（第2步）</h4>
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, marginBottom: 8 }}>
+              <input type="checkbox" checked={noDemo} onChange={(e) => { setNoDemo(e.target.checked); setDemoErr(null); }} />
+              无示范模式（如现场成交，保存为 null，练习页跳过示范直接进讲解）
+            </label>
+            {!noDemo && (
+              <MTextarea
+                rows={10}
+                value={demoText}
+                placeholder={'{"lines":[{"role":"sales","text":"您好！","excitement":3}],"faqPick":2,"faqPoolRef":"..."}'}
+                onChange={(v) => { setDemoText(v); setDemoErr(null); }}
+              />
+            )}
+            {demoErr && <p style={{ fontSize: 13, color: '#E85A4A', margin: '6px 0 0' }}>{demoErr}</p>}
+          </div>
+        </DetailModal>
+      )}
+    </div>
   );
 }

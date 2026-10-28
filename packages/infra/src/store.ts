@@ -1,4 +1,5 @@
 import type {
+  AnalysisStandard,
   Appeal,
   CalibrationEvent,
   CertRecord,
@@ -15,8 +16,10 @@ import type {
   PersonaConfig,
   ProductKB,
   QuizQuestion,
+  RealismStandard,
   RegressionRun,
   Scenario,
+  ScenarioGuidance,
   ScenarioTask,
   ScoreItemDef,
   ScoreReport,
@@ -65,6 +68,9 @@ export interface SeedData {
   productKBs: ProductKB[];
   examWindows?: ExamWindow[];
   extractionProjects?: ExtractionProject[];
+  analysisStandards?: AnalysisStandard[];
+  realismStandards?: RealismStandard[];
+  scenarioGuidance?: ScenarioGuidance[];
 }
 
 /**
@@ -130,6 +136,19 @@ export interface Store {
   listCustomerQuestions(tenantId: string, category?: string): Promise<CustomerQuestion[]>;
   saveCustomerQuestion(q: CustomerQuestion): Promise<void>;
   deleteCustomerQuestion(id: string): Promise<void>;
+
+  // ---- 场景引导资源库 ----
+  getScenarioGuidance(scenarioId: string): Promise<ScenarioGuidance | undefined>;
+  getScenarioGuidanceById(id: string): Promise<ScenarioGuidance | undefined>;
+  listScenarioGuidances(tenantId: string): Promise<ScenarioGuidance[]>;
+  saveScenarioGuidance(g: ScenarioGuidance): Promise<void>;
+  deleteScenarioGuidance(id: string): Promise<void>;
+  listAnalysisStandards(tenantId: string): Promise<AnalysisStandard[]>;
+  saveAnalysisStandard(s: AnalysisStandard): Promise<void>;
+  deleteAnalysisStandard(id: string): Promise<void>;
+  listRealismStandards(tenantId: string): Promise<RealismStandard[]>;
+  saveRealismStandard(s: RealismStandard): Promise<void>;
+  deleteRealismStandard(id: string): Promise<void>;
 
   // ---- 申诉 ----
   createAppeal(appeal: Appeal): Promise<void>;

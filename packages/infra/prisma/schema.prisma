@@ -142,6 +142,39 @@ model CustomerQuestion {
   @@index([tenantId])
 }
 
+// ---------------- 场景引导资源库 ----------------
+
+model ScenarioGuidance {
+  id         String @id @default(uuid())
+  tenantId   String
+  scenarioId String
+  name       String
+  data       String
+
+  @@index([tenantId])
+  @@index([scenarioId])
+}
+
+model AnalysisStandard {
+  id       String @id @default(uuid())
+  tenantId String
+  name     String
+  category String @default("")
+  data     String
+
+  @@index([tenantId])
+}
+
+model RealismStandard {
+  id       String @id @default(uuid())
+  tenantId String
+  name     String
+  category String @default("")
+  data     String
+
+  @@index([tenantId])
+}
+
 // ---------------- 会话与评分 ----------------
 
 model Session {

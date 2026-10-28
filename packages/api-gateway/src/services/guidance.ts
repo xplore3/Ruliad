@@ -1,22 +1,24 @@
-import type { LLMGateway } from '@grasp-mvp/core';
+import type {
+  AnalysisStandard,
+  DemoLine,
+  DemoScriptTemplate,
+  LLMGateway,
+  ScenarioGuidance,
+} from '@grasp-mvp/core';
+import type { Store } from '@grasp-mvp/infra';
 import { DEMO_FAQ_ITEMS, type DemoFaqItem } from '../demo-faq.data.js';
 
 /**
- * 地推引流课新手指引：资格判断 + 双 AI 示范对话剧本生成。
- * 示范剧本按标准地推流程确定性生成（客户问题与标准答案从地推开场景问答题库 demo-faq.data.ts 抽取），
+ * 场景引导新手指引：资格判断 + 示范剧本渲染 + 讲解口播稿组装。
+ * 资源库化以后，示范剧本由各场景的 ScenarioGuidance.demo 模板渲染（占位符 + FAQ 池抽取），
  * 不依赖 LLM；资格判断与示范选择的 LLM 调用失败/解析失败均有确定性兜底，保证 mock 环境可跑通。
+ * 地推场景保留 generateDemoScript 作为资源缺失时的兜底。
  */
 
-/** 资格提问两问（与前端播放顺序一致） */
+/** 资格提问兜底（场景无引导资源时的默认两问） */
 export const QUALIFY_QUESTIONS = ['你做过地推吗？', '你做过教培行业的地推吗？'] as const;
 
-/** 示范剧本一行：销售 / 客户 / 小朋友 / 旁白；arousal 控制 TTS 情绪，excitement 为激情倍率（销售=3） */
-export interface DemoLine {
-  role: 'sales' | 'customer' | 'child' | 'narrator';
-  text: string;
-  arousal?: number;
-  excitement?: number;
-}
+export type { DemoLine } from '@grasp-mvp/core';
 
 export type DemoChoice = 'replay' | 'practice';
 
@@ -39,8 +41,8 @@ function fallbackExperienced(answer: string): boolean {
 }
 
 /**
- * 判断学员是否做过地推 / 教培地推。
- * qa 为累积问答（可能只有第 1 题）。两题都答"做过"才返回 true；任一题"没做过"或缺答 → false。
+ * 判断学员是否有相关经验（问题数量按场景引导资源配置，不写死）。
+ * 全部问题都答"做过"才返回 true；任一题"没做过"或缺答 → false。
  */
 export async function judgeExperience(
   gateway: LLMGateway,
@@ -57,25 +59,17 @@ export async function judgeExperience(
             '你是销售培训的新手资格审核员。下面是学员对资格提问的语音回答（经语音识别，可能有错字）。',
             '请判断每个问题学员是否表达"做过/有相关经验"。回答含糊、答非所问、回避问题都视为没做过。',
             qaLines,
-            qa.length === 1
-              ? '只输出 JSON：{"didGroundPush": true 或 false}'
-              : '只输出 JSON：{"didGroundPush": true 或 false, "didEduGroundPush": true 或 false}（按问题顺序对应）',
+            `只输出 JSON：{"results": [true 或 false, ...]}（数组按问题顺序，共 ${qa.length} 项）`,
             '不要输出任何其他内容。',
           ].join('\n'),
         },
       ],
       { jsonMode: true, temperature: 0 }
     );
-    const parsed = JSON.parse(extractJson(result.content)) as {
-      didGroundPush?: unknown;
-      didEduGroundPush?: unknown;
-    };
-    const didGroundPush =
-      typeof parsed.didGroundPush === 'boolean' ? parsed.didGroundPush : fallbackExperienced(qa[0].answer);
-    if (qa.length === 1) return didGroundPush;
-    const didEdu =
-      typeof parsed.didEduGroundPush === 'boolean' ? parsed.didEduGroundPush : fallbackExperienced(qa[1].answer);
-    return didGroundPush && didEdu;
+    const parsed = JSON.parse(extractJson(result.content)) as { results?: unknown };
+    const results = Array.isArray(parsed.results) ? parsed.results : [];
+    // 逐题解析，缺位/非布尔走关键词兜底
+    return qa.every((x, i) => (typeof results[i] === 'boolean' ? results[i] : fallbackExperienced(x.answer)));
   } catch {
     // LLM 失败/解析失败：逐题关键词兜底，全部判"做过"才算有经验
     return qa.every((x) => fallbackExperienced(x.answer));
@@ -102,6 +96,7 @@ const SALES_SURNAMES = ['王', '李', '张', '刘', '陈'];
  * → 指着邀请函介绍体验课与地址 → 蹲下与孩子玩游戏 → 让孩子请家长订邀请函（小声→大声）
  * → 垫本子 → 客户再问（题库问题+标准答案）→ 递笔成交 → 孩子道谢 → 微信还是现金 → 致谢定时间道别。
  * version 仅作接口兼容，随机性来自称呼/年龄/姓氏/题库抽题。
+ * 资源库化以后作为地推场景资源缺失时的兜底。
  */
 export function generateDemoScript(_version: number): DemoLine[] {
   // 开场称呼：大哥 或 姐 二选一，全剧统一；对应孩子口中的 爸爸/妈妈
@@ -207,4 +202,117 @@ export async function judgeDemoChoice(gateway: LLMGateway, text: string): Promis
   if (REPLAY_EXP.test(text)) return 'replay';
   if (PRACTICE_EXP.test(text)) return 'practice';
   return 'practice';
+}
+
+/** 示范剧本 FAQ 池条目（question 为客户台词，faq 为标准应答话术） */
+export interface DemoFaqPoolItem {
+  question: string;
+  faq: string;
+}
+
+/** FAQ 池路由：池标识 → 客户提问问题库的分类集合；'ground-push-demo-faq' 走内置 28 条题库 */
+const FAQ_POOL_CATEGORIES: Record<string, string[]> = {
+  'ground-push-demo-faq': ['地推示范'],
+  'inquiry-demo-faq': ['咨询接待场景', '线下谈单场景', '通用场景'],
+  'phone-sales-demo-faq': ['电销场景', '地推电销拓客场景', '地推电销场景'],
+};
+
+/**
+ * 按 faqPoolRef 解析 FAQ 池：
+ * - 优先从客户提问问题库（CustomerQuestion）按 FAQ_POOL_CATEGORIES 分类读取，referenceAnswer 作为标准答案
+ * - 库中取不足 need 条时回退 demo-faq.data.ts 内置 28 条地推 FAQ（保证 mock/空库可跑）
+ */
+export async function resolveFaqPool(
+  store: Store,
+  tenantId: string,
+  poolRef: string | undefined,
+  need: number
+): Promise<DemoFaqPoolItem[]> {
+  const categories = poolRef ? FAQ_POOL_CATEGORIES[poolRef] : undefined;
+  if (categories) {
+    const questions = await store.listCustomerQuestions(tenantId);
+    const pool = questions
+      .filter((q) => categories.includes(q.category) && q.referenceAnswer?.trim())
+      .map((q) => ({ question: q.question, faq: q.referenceAnswer!.trim() }));
+    if (pool.length >= need) return pool;
+  }
+  return DEMO_FAQ_ITEMS.map((x) => ({ question: x.question, faq: x.faq }));
+}
+
+/** 不放回随机抽 n 条 */
+function pickFaqs(pool: DemoFaqPoolItem[], n: number): DemoFaqPoolItem[] {
+  const rest = [...pool];
+  const picked: DemoFaqPoolItem[] = [];
+  for (let i = 0; i < n && rest.length > 0; i++) {
+    picked.push(rest.splice(Math.floor(Math.random() * rest.length), 1)[0]);
+  }
+  return picked;
+}
+
+/**
+ * 渲染示范剧本模板：
+ * 1. 解析 variables（choice 随机选项 / intRange 随机整数 / map 按 from 变量值映射）
+ * 2. 从 faqPool 不放回随机抽 faq1..faqN（faqPick 条）
+ * 3. 占位符替换：${name} 用变量值，${faqN.question}/${faqN.answer} 用抽中的 FAQ（答案经 sanitizeFaq 清洗）
+ */
+export function renderDemoScript(template: DemoScriptTemplate, faqPool: DemoFaqPoolItem[]): DemoLine[] {
+  // 变量解析（按声明顺序，map 依赖前面的变量已解析）
+  const vars: Record<string, string> = {};
+  for (const [name, variable] of Object.entries(template.variables ?? {})) {
+    if (variable.kind === 'choice') {
+      vars[name] = variable.options[Math.floor(Math.random() * variable.options.length)];
+    } else if (variable.kind === 'intRange') {
+      vars[name] = String(variable.min + Math.floor(Math.random() * (variable.max - variable.min + 1)));
+    } else {
+      vars[name] = variable.mapping[vars[variable.from]] ?? '';
+    }
+  }
+
+  const faqs = pickFaqs(faqPool, template.faqPick ?? 0);
+  const age = Number(vars.age) || 6;
+  const address = vars.address ?? '哥/姐';
+
+  const interpolate = (text: string): string =>
+    text.replace(/\$\{([^}]+)\}/g, (raw, expr: string) => {
+      const faqMatch = expr.match(/^faq(\d+)\.(question|answer)$/);
+      if (faqMatch) {
+        const item = faqs[Number(faqMatch[1]) - 1];
+        if (!item) return raw; // 池子不足时保留占位，便于排查
+        return faqMatch[2] === 'question' ? item.question : sanitizeFaq(item.faq, age, address);
+      }
+      return vars[expr] ?? raw;
+    });
+
+  return template.lines.map((line) => ({ ...line, text: interpolate(line.text) }));
+}
+
+/** 加载场景引导资源包（无资源返回 undefined，调用方走兜底逻辑） */
+export async function getGuidance(store: Store, scenarioId: string): Promise<ScenarioGuidance | undefined> {
+  return store.getScenarioGuidance(scenarioId);
+}
+
+const CN_NUMERALS = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+
+/**
+ * 组装教练口播稿（第3步）：讲解要点 + 引用的分析标准库条目，按"第一/第二…"编号。
+ * 返回纯文本数组，每项一段口播。
+ */
+export function composeBriefing(guidance: ScenarioGuidance, standards: AnalysisStandard[]): string[] {
+  const referenced = guidance.analysisStandardIds
+    .map((id) => standards.find((s) => s.id === id))
+    .filter((s): s is AnalysisStandard => !!s);
+  const points = [
+    ...guidance.keyPoints,
+    ...referenced.map((s) => `${s.name}：${s.description}${s.example ? `例如：${s.example}` : ''}`),
+  ];
+  if (points.length === 0) return [];
+  // 无示范模式（demo=null）的场景没有"刚才这段示范"，开场与收尾问句相应调整
+  const hasDemo = guidance.demo != null;
+  const lines = [hasDemo ? '先来讲解刚才这段示范的关键点。' : '先来讲解这个场景的关键要领。'];
+  points.forEach((point, i) => {
+    const numeral = CN_NUMERALS[i] ?? String(i + 1);
+    lines.push(`第${numeral}，${point}`);
+  });
+  if (hasDemo) lines.push('想再听一次示范对白，还是直接开始模拟练习？');
+  return lines;
 }

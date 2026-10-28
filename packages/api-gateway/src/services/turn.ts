@@ -11,22 +11,32 @@ const CONSISTENCY_CORRECTION = '（注意：上一次回复出戏或泄露了不
 /** 系统级开场白触发词：电话接通后自动播放问候，不存入 transcript */
 const SYSTEM_GREETING_TOKEN = '__SYSTEM_GREETING__';
 
-export function remainingSeconds(session: Session, scenario: Scenario): number {
+export function remainingSeconds(session: Session, scenario: Scenario, overrideMinutes?: number): number {
+  const minutes = overrideMinutes ?? scenario.durationMinutes;
   // 倒计时从进入正式对练（live）起算；开场/新手指引阶段不消耗时长
-  if (!session.liveStartedAt) return scenario.durationMinutes * 60;
+  if (!session.liveStartedAt) return minutes * 60;
   const nowMs = Date.now();
   const pausedMs =
     (session.pausedMs ?? 0) +
     (session.pausedAt ? nowMs - new Date(session.pausedAt).getTime() : 0);
   const elapsedMs = nowMs - new Date(session.liveStartedAt).getTime() - pausedMs;
   return Math.min(
-    scenario.durationMinutes * 60,
-    Math.max(0, Math.round(scenario.durationMinutes * 60 - elapsedMs / 1000))
+    minutes * 60,
+    Math.max(0, Math.round(minutes * 60 - elapsedMs / 1000))
   );
 }
 
+/** 场景有效时长（分钟）：场景引导包的时长参数优先于场景自身 durationMinutes */
+export async function effectiveDurationMinutes(
+  store: RouteContext['store'],
+  scenario: Scenario
+): Promise<number> {
+  const guidance = await store.getScenarioGuidance(scenario.id).catch(() => undefined);
+  return guidance?.duration?.targetMinutes ?? scenario.durationMinutes;
+}
+
 /** 加载 persona 运行时（编译后的 bundle + 原始配置），配置缺失返回 undefined */
-export async function loadRuntime(ctx: RouteContext, scenario: Scenario) {
+export async function loadRuntime(ctx: RouteContext, scenario: Scenario, difficulty?: number) {
   const personaConfig = await ctx.store.getPersonaConfig(scenario.personaConfigId);
   if (!personaConfig) return undefined;
   const elements = await ctx.store.listElements({});
@@ -42,6 +52,28 @@ export async function loadRuntime(ctx: RouteContext, scenario: Scenario) {
   }
 
   const bundle = compilePersona(personaConfig, elements, productKB, scenario);
+
+  // 注入场景引导包的第4步参数：难度系数说明（选定档位的客户行为要求）+ 真实度标准库
+  const guidance = await ctx.store.getScenarioGuidance(scenario.id).catch(() => undefined);
+  if (guidance) {
+    const level =
+      guidance.difficultyLevels.find((l) => l.level === (difficulty ?? guidance.defaultDifficulty)) ??
+      guidance.difficultyLevels.find((l) => l.level === guidance.defaultDifficulty) ??
+      guidance.difficultyLevels[0];
+    const realism = (await ctx.store.listRealismStandards(guidance.tenantId).catch(() => [])).filter((s) =>
+      guidance.realismStandardIds.includes(s.id)
+    );
+    const parts: string[] = [];
+    if (level) {
+      parts.push(`演练难度：${level.label}（${level.level}级）——${level.description}。你的行为要求：${level.customerBehavior}`);
+    }
+    if (realism.length > 0) {
+      parts.push(`真实度要求：${realism.map((s) => `${s.name}——${s.description}`).join('；')}`);
+    }
+    if (parts.length > 0) {
+      bundle.systemPrompt = `${bundle.systemPrompt}\n\n【演练要求】\n${parts.join('\n')}`;
+    }
+  }
   return { personaConfig, bundle, productKB };
 }
 
@@ -137,7 +169,8 @@ export async function runTurn(
     text: displayText,
     at: now,
   };
-  const remaining = remainingSeconds(session, scenario);
+  const minutes = await effectiveDurationMinutes(store, scenario);
+  const remaining = remainingSeconds(session, scenario, minutes);
   const lastTrace = session.emotionTrace[session.emotionTrace.length - 1];
 
   // 超时：固定收口文案，不再调 LLM
@@ -164,7 +197,7 @@ export async function runTurn(
     };
   }
 
-  const runtime = await loadRuntime(ctx, scenario);
+  const runtime = await loadRuntime(ctx, scenario, session.difficulty);
   if (!runtime) {
     console.error('[runTurn] persona 运行时加载失败, scenarioId=', scenario.id, 'personaConfigId=', scenario.personaConfigId);
     return null;
@@ -251,7 +284,7 @@ traineeTurn,
 personaTurn,
 arousal: snapshot.arousal,
 bandKey: snapshot.bandKey,
-remainingSeconds: remainingSeconds(session, scenario),
+remainingSeconds: remainingSeconds(session, scenario, minutes),
 pendingQuizzes: pendingQuizzes.length > 0 ? pendingQuizzes.map(toPublicQuiz) : undefined,
 };
 }

@@ -347,12 +347,59 @@ export async function extractScenarioFromAudio(wav: Blob, current?: Record<strin
 
 // ====== 资源库管理 API（admin） ======
 
+// ---- 分析标准库 / 真实度标准库 / 场景引导包（新手指引五步流程配套） ----
+
+export async function listAnalysisStandards() {
+  const { data } = await api.get('/library/analysis-standards');
+  return data as { items: import('./lib/guidance').AnalysisStandard[] };
+}
+
+/** upsert：body 带 id 则更新，否则新建 */
+export async function saveAnalysisStandard(payload: Partial<import('./lib/guidance').AnalysisStandard>) {
+  const { data } = await api.post('/library/analysis-standards', payload);
+  return data as import('./lib/guidance').AnalysisStandard;
+}
+
+export async function deleteAnalysisStandard(id: string) {
+  await api.delete(`/library/analysis-standards/${id}`);
+}
+
+export async function listRealismStandards() {
+  const { data } = await api.get('/library/realism-standards');
+  return data as { items: import('./lib/guidance').RealismStandard[] };
+}
+
+/** upsert：body 带 id 则更新，否则新建 */
+export async function saveRealismStandard(payload: Partial<import('./lib/guidance').RealismStandard>) {
+  const { data } = await api.post('/library/realism-standards', payload);
+  return data as import('./lib/guidance').RealismStandard;
+}
+
+export async function deleteRealismStandard(id: string) {
+  await api.delete(`/library/realism-standards/${id}`);
+}
+
+export async function listScenarioGuidances() {
+  const { data } = await api.get('/library/scenario-guidance');
+  return data as { items: import('./lib/guidance').ScenarioGuidance[] };
+}
+
+/** upsert：body 带 id 则更新，否则新建；scenarioId / name / qualifyQuestions 后端必填校验 */
+export async function saveScenarioGuidance(payload: Partial<import('./lib/guidance').ScenarioGuidance>) {
+  const { data } = await api.post('/library/scenario-guidance', payload);
+  return data as import('./lib/guidance').ScenarioGuidance;
+}
+
+export async function deleteScenarioGuidance(id: string) {
+  await api.delete(`/library/scenario-guidance/${id}`);
+}
+
 export async function fetchPersonaConfigs() {
   const { data } = await api.get('/persona-configs');
   return data as { personaConfigs: PersonaConfig[] };
 }
 
-export type LibraryExtractTarget = 'scenario' | 'question' | 'score-item' | 'golden-case';
+export type LibraryExtractTarget = 'scenario' | 'question' | 'score-item' | 'golden-case' | 'analysis-standard' | 'realism-standard';
 
 export interface LibraryExtractResult {
   reply: string;
@@ -507,9 +554,15 @@ export async function deleteAccount() {
   await api.delete('/users/me');
 }
 
-// ====== 新手指引（地推引流课） API ======
+// ====== 新手指引 API ======
 
 export type GuidanceVoiceRole = 'persona' | 'coach' | 'sales' | 'narrator' | 'child';
+
+/** 场景新手指引包；guidance 为 null 表示该场景无引导资源（调用方回退本地逻辑） */
+export async function fetchGuidance(scenarioId: string) {
+  const { data } = await api.get(`/scenarios/${scenarioId}/guidance`);
+  return data as { guidance: import('./lib/guidance').ScenarioGuidance | null };
+}
 
 export interface DemoLine {
   role: 'sales' | 'customer' | 'child' | 'narrator';
@@ -520,18 +573,24 @@ export interface DemoLine {
   excitement?: number;
 }
 
-/** 资格提问回答：raw PCM 上传，返回识别文本；q=2 时 experienced 给出结论 */
-export async function qualifyAnswer(sessionId: string, q: 1 | 2, audio: ArrayBuffer) {
+/** 资格提问回答：raw PCM 上传，返回识别文本；最后一题时 experienced 给出结论 */
+export async function qualifyAnswer(sessionId: string, q: number, audio: ArrayBuffer) {
   const { data } = await api.post(`/sessions/${sessionId}/qualify-answer?q=${q}`, audio, {
     headers: { 'Content-Type': 'audio/pcm' },
   });
   return data as { text: string; experienced: boolean | null };
 }
 
-/** 获取一版示范对话剧本 */
+/** 获取一版示范对话剧本；无示范模式时 lines 为空且 hasDemo=false */
 export async function fetchDemo(sessionId: string, version: number) {
   const { data } = await api.post(`/sessions/${sessionId}/demo`, { version });
-  return data as { lines: DemoLine[] };
+  return data as { lines: DemoLine[]; hasDemo?: boolean };
+}
+
+/** 第3步讲解口播稿：每条一句，用教练音色逐条 TTS 播放 */
+export async function fetchBriefing(sessionId: string) {
+  const { data } = await api.post(`/sessions/${sessionId}/briefing`);
+  return data as { lines: string[] };
 }
 
 /** 示范播完后的语音选择：raw PCM 上传，返回识别文本与选择 */

@@ -57,6 +57,10 @@ export interface Session {
   coachIntensity?: 'low' | 'medium' | 'high';
   /** 进入正式对练（live）的时间（ISO）；倒计时以此为起点，开场/新手指引阶段不计时 */
   liveStartedAt?: string;
+  /** 新手指引资格问答结果（answers 按问题顺序） */
+  qualifyResult?: { answers: string[]; experienced: boolean };
+  /** 演练难度等级（对应场景引导包 difficultyLevels.level；缺省用引导包 defaultDifficulty） */
+  difficulty?: number;
   startedAt: string;
   endedAt?: string;
 }

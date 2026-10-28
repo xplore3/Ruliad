@@ -679,7 +679,7 @@ export default function Build() {
         setEditingPersonaConfigId(persona.id);
       }
       if (scenarioId) saveWeights(scenarioId, form.dimensionWeights);
-      setNotice(editingScenarioId ? '场景已更新' : '场景已保存，可在「我的场景」中查看');
+      setNotice(editingScenarioId ? '场景已更新' : '场景已保存，可在「我的场景」中查看；可到资源库配置引导包（资格提问/示范/讲解/难度/时长）');
       await loadMine();
     } catch (err) {
       setNotice(apiError(err, '保存失败'));

@@ -11,6 +11,8 @@ import {
   markLiveStart,
   qualifyAnswer,
   fetchDemo,
+  fetchBriefing,
+  fetchGuidance,
   demoChoice,
   ttsClip,
   apiError,
@@ -18,6 +20,7 @@ import {
   voiceWsUrl,
   type DemoLine,
 } from '../api';
+import type { ScenarioGuidance } from '../lib/guidance';
 import { PcmRecorder, TtsPlayer, VoiceSocket, type VoiceServerEvent } from '../voice';
 import QuizModal from '../components/QuizModal';
 import type { QuizQuestion, TranscriptTurn } from '../types';
@@ -33,7 +36,7 @@ type PracticeStatus =
   | 'ended'
   | 'failed';
 
-/** 开场阶段：启动加载 → 等待就绪 →（地推新手：资格提问 → 示范对话）→ 正式对练 */
+/** 开场阶段：启动加载 → 等待就绪 →（有引导资源：资格提问 → 示范/讲解）→ 正式对练 */
 type Phase = 'boot' | 'ready_wait' | 'qualify' | 'guide' | 'live';
 
 interface PersonaInfo {
@@ -54,9 +57,9 @@ const MAX_HINTS = 3;
 const AUTO_MIC_KEY = 'grasp-auto-mic';
 const PERSONA_FALLBACK_MS = 10000;
 
-/** 地推引流课分类关键词（与 Home.tsx 的分类规则一致） */
+/** 地推引流课分类关键词（与 Home.tsx 的分类规则一致）；仅在 guidance 拉取失败/为 null 时作回退判定 */
 const GROUND_PUSH_KEYWORDS = ['地推', '破冰', '陌生', '展会', '商场', '摊位', '驻足'];
-/** 新手指引资格提问（教练语音提问，用户语音自由回答） */
+/** 资格提问回退题库（guidance 不可用时使用；正常以 guidance.qualifyQuestions 为准） */
 const QUALIFY_QUESTIONS = ['你做过地推吗？', '你做过教育行业的地推吗？'];
 /** 示范播完后教练的询问 */
 const GUIDE_CHOICE_QUESTION = '想再听一个版本的示范，还是开始模拟练习？';
@@ -66,6 +69,15 @@ const VAD_SILENCE_MS = 1300;
 const VAD_MAX_RECORD_MS = 15000;
 /** 自动聆听识别失败的重试上限，超过后给出文字提示 */
 const GUIDANCE_MAX_RETRY = 2;
+
+/** 资格问题：优先引导包；guidance 拉取失败/为 null 且命中地推关键词时回退硬编码题库 */
+function resolveQualifyQuestions(g: ScenarioGuidance | null, s: ScenarioInfo | null): string[] {
+  if (g?.qualifyQuestions?.length) return g.qualifyQuestions;
+  if (s && GROUND_PUSH_KEYWORDS.some((k) => `${s.name} ${(s.coverageTopics ?? []).join(' ')}`.includes(k))) {
+    return QUALIFY_QUESTIONS;
+  }
+  return [];
+}
 
 function formatTime(seconds: number) {
   const m = Math.floor(seconds / 60);
@@ -101,8 +113,10 @@ export default function Practice() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [autoMic, setAutoMic] = useState(() => localStorage.getItem(AUTO_MIC_KEY) !== '0');
 
-  // ===== 新手指引（地推引流课）状态 =====
-  const [qualifyQ, setQualifyQ] = useState<1 | 2>(1);
+  // ===== 新手指引状态 =====
+  /** 场景引导包（拉取失败/为 null 时回退到地推关键词 + 硬编码题库的旧逻辑） */
+  const [guidance, setGuidance] = useState<ScenarioGuidance | null>(null);
+  const [qualifyQ, setQualifyQ] = useState<number>(1);
   const [qualifyStage, setQualifyStage] = useState<'asking' | 'recording' | 'uploading' | 'error'>('asking');
   const [qualifyText, setQualifyText] = useState('');
   const [qualifyHint, setQualifyHint] = useState('');
@@ -110,7 +124,10 @@ export default function Practice() {
   const [demoLines, setDemoLines] = useState<DemoLine[]>([]);
   /** 当前正在播放的示范台词下标（-1 = 无） */
   const [demoIndex, setDemoIndex] = useState(-1);
-  const [demoStage, setDemoStage] = useState<'loading' | 'playing' | 'ask'>('loading');
+  const [demoStage, setDemoStage] = useState<'loading' | 'playing' | 'briefing' | 'narration' | 'ask'>('loading');
+  /** 第3步讲解口播稿与当前播放句下标（-1 = 无） */
+  const [briefLines, setBriefLines] = useState<string[]>([]);
+  const [briefIndex, setBriefIndex] = useState(-1);
   const [guideRec, setGuideRec] = useState<'idle' | 'recording' | 'uploading'>('idle');
   const [guideText, setGuideText] = useState('');
   const [guideHint, setGuideHint] = useState('');
@@ -135,6 +152,10 @@ export default function Practice() {
   const turnAudioDoneRef = useRef(true);
   /** 新手指引专用录音器（独立于语音回合的 VoiceSocket 链路） */
   const guidanceRecRef = useRef<PcmRecorder | null>(null);
+  /** guidance 镜像（async 链路中读取最新值，避免闭包过期） */
+  const guidanceRef = useRef<ScenarioGuidance | null>(null);
+  /** 在途的 guidance 请求（「我准备好了」点击时若未落定会先等它） */
+  const guidanceReqRef = useRef<Promise<void> | null>(null);
   /** 中断在途自动聆听（stopGuidanceMedia / 组件清理时调用） */
   const guidanceCancelRef = useRef<(() => void) | null>(null);
   /** 自动聆听最大时长兜底定时器 */
@@ -203,6 +224,14 @@ export default function Practice() {
         setPersona(p);
         setScenario(s);
         setSessionMode(session.mode);
+        // 并行拉取场景引导包；失败/为 null 时回退到本地关键词判定（见 resolveQualifyQuestions）
+        guidanceReqRef.current = fetchGuidance(session.scenarioId)
+          .then((res) => {
+            if (cancelled) return;
+            guidanceRef.current = res.guidance ?? null;
+            setGuidance(res.guidance ?? null);
+          })
+          .catch(() => { /* 拉取失败：保持 null，走回退逻辑 */ });
         // 初始开场白（seq:1 的客户第一句话）不进对话记录，从用户的实际对练开始展示
         setMessages((session.transcript ?? []).filter((t) => !(t.seq === 1 && t.speaker === 'persona')));
         setHintsRemaining(Math.max(0, MAX_HINTS - (session.hintsUsed ?? 0)));
@@ -399,11 +428,14 @@ export default function Practice() {
   };
 
   // ===== 进入正式对练（原「我准备好了」的开场逻辑） =====
-  const startLive = () => {
+  const enterLive = () => {
     stopGuidanceMedia();
     setPhaseBoth('live');
     // 通知服务端从此刻起倒计时（开场/新手指引不消耗时长）；失败时回退为按会话创建时间计时
     if (sessionId) {
+      // 引导包给了倒计时秒数：先用它，服务端响应回来再校正
+      const cd = guidanceRef.current?.duration?.countdownSeconds;
+      if (typeof cd === 'number' && cd > 0) setRemaining(cd);
       markLiveStart(sessionId)
         .then((res) => {
           if (typeof res.remainingSeconds === 'number') setRemaining(Math.max(0, res.remainingSeconds));
@@ -422,10 +454,40 @@ export default function Practice() {
     }
   };
 
-  // ===== 点击「我准备好了」：地推引流课新手先走资格提问，否则直接开练 =====
-  const handleReady = () => {
+  /** 进 live 入口：有引导包旁白时先播第4步开场旁白，播完（或失败）再正式进场 */
+  const startLive = () => {
+    stopGuidanceMedia();
+    const narration = isVoice ? guidanceRef.current?.liveIntro?.narration : undefined;
+    if (sessionId && narration) {
+      const token = demoTokenRef.current;
+      // 复用讲解环节的界面展示旁白文本（narration 阶段暂停恢复时直接重进本入口）
+      setPhaseBoth('guide');
+      setDemoStage('narration');
+      setBriefLines([narration]);
+      setBriefIndex(0);
+      void (async () => {
+        try {
+          const clip = await ttsClip(sessionId, narration, 'narrator');
+          if (demoTokenRef.current === token) await playClip(clip.audioBase64);
+        } catch {
+          /* 旁白合成/播放失败直接进场 */
+        }
+        // 旁白期间被暂停/打断（token 已失效）：不进场，恢复时由暂停逻辑重进本入口
+        if (demoTokenRef.current === token) enterLive();
+      })();
+      return;
+    }
+    enterLive();
+  };
+
+  // ===== 点击「我准备好了」：有引导资源的场景先走资格提问，否则直接开练 =====
+  const handleReady = async () => {
     setErrorMsg('');
-    if (guidanceEligible) {
+    // guidance 请求仍在途时先等它落定，避免误判走旧回退逻辑
+    if (isVoice && !guidanceRef.current && guidanceReqRef.current) {
+      await guidanceReqRef.current.catch(() => { /* 失败按回退逻辑处理 */ });
+    }
+    if (isVoice && resolveQualifyQuestions(guidanceRef.current, scenario).length > 0) {
       // 用户手势上下文内创建/恢复 guidance AudioContext，后续 TTS 播放不受自动播放限制
       ensureGuideCtx();
       void beginQualify();
@@ -598,9 +660,11 @@ export default function Practice() {
     await askQualifyQuestion(1);
   };
 
-  const askQualifyQuestion = async (q: 1 | 2) => {
+  const askQualifyQuestion = async (q: number) => {
     if (!sessionId) return;
-    const question = QUALIFY_QUESTIONS[q - 1];
+    const questions = resolveQualifyQuestions(guidanceRef.current, scenario);
+    const question = questions[q - 1];
+    if (!question) return;
     setQualifyQ(q);
     setQualifyText('');
     setQualifyHint('');
@@ -618,8 +682,9 @@ export default function Practice() {
   };
 
   /** 资格提问的全自动语音回答：自动录音 → VAD 判停 → 上传识别 → 自动进入下一环节 */
-  const autoAnswerQualify = async (q: 1 | 2) => {
+  const autoAnswerQualify = async (q: number) => {
     if (!sessionId || phaseRef.current !== 'qualify' || statusRef.current === 'paused') return;
+    const totalQ = resolveQualifyQuestions(guidanceRef.current, scenario).length;
     setQualifyStage('recording');
     const { audio, micError, micErrorMsg } = await autoListen();
     if (phaseRef.current !== 'qualify' || (!audio && !micError)) return;
@@ -638,8 +703,8 @@ export default function Practice() {
       if (!res.text) throw new Error('empty asr');
       setQualifyText(`我：${res.text}`);
       setQualifyHint('');
-      if (q === 1) {
-        await askQualifyQuestion(2);
+      if (q < totalQ) {
+        await askQualifyQuestion(q + 1);
       } else if (res.experienced) {
         startLive();
       } else {
@@ -671,16 +736,27 @@ export default function Practice() {
     const token = demoTokenRef.current;
     setPhaseBoth('guide');
     setDemoVersion(version);
-    setDemoStage('loading');
     setDemoLines([]);
     setDemoIndex(-1);
+    setBriefLines([]);
+    setBriefIndex(-1);
     setGuideText('');
     setGuideHint('');
     setErrorMsg('');
+    // 无示范模式（如现场成交，guidance.demo === null）：跳过示范直接进讲解
+    if (guidanceRef.current && guidanceRef.current.demo === null) {
+      await beginBriefing(token, false);
+      return;
+    }
+    setDemoStage('loading');
     try {
-      const { lines } = await fetchDemo(sessionId, version);
+      const { lines, hasDemo } = await fetchDemo(sessionId, version);
       if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
-      if (lines.length === 0) throw new Error('empty demo');
+      // 后端声明无示范：跳过示范直接进讲解
+      if (hasDemo === false || lines.length === 0) {
+        await beginBriefing(token, false);
+        return;
+      }
       setDemoLines(lines);
       setDemoStage('playing');
       // 预合成管线：播放当前句时提前合成后面 3 句，句间不再等 TTS 网络往返（每句现场合成要 1~3 秒）
@@ -719,11 +795,57 @@ export default function Practice() {
       }
       if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
       setDemoIndex(-1);
-      await askGuideChoice();
+      // 第3步：示范播完进要点讲解
+      await beginBriefing(token, true);
     } catch (err) {
       if (demoTokenRef.current !== token) return;
       setErrorMsg(apiError(err, '示范对话加载失败，可直接开始练习'));
       setDemoStage('ask');
+    }
+  };
+
+  /**
+   * 第3步讲解：拉取口播稿用教练音色逐条 TTS 播放（复用示范的预取管线模式）。
+   * hasDemo=true 时讲完问「再听一版还是开始练习」；无示范场景讲解完直接进 live。
+   */
+  const beginBriefing = async (token: number, hasDemo: boolean) => {
+    if (!sessionId || demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
+    setDemoStage('briefing');
+    setDemoLines([]);
+    setDemoIndex(-1);
+    try {
+      const { lines } = await fetchBriefing(sessionId);
+      if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
+      setBriefLines(lines);
+      // 与示范相同的预取管线：播当前句时提前合成后 3 句
+      const synth = (text: string) => ttsClip(sessionId, text, 'coach').catch(() => null);
+      const inflight = new Map<number, Promise<{ audioBase64: string } | null>>();
+      const prefetch = (i: number) => {
+        if (i < lines.length && !inflight.has(i)) inflight.set(i, synth(lines[i]));
+      };
+      prefetch(0);
+      prefetch(1);
+      prefetch(2);
+      for (let i = 0; i < lines.length; i++) {
+        if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
+        setBriefIndex(i);
+        const pending = inflight.get(i) ?? synth(lines[i]);
+        inflight.delete(i);
+        prefetch(i + 3);
+        const clip = await pending;
+        if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
+        if (clip) await playClip(clip.audioBase64);
+      }
+    } catch {
+      /* 讲解稿拉取/播放失败不阻塞后续流程 */
+    }
+    if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
+    setBriefIndex(-1);
+    if (hasDemo) {
+      await askGuideChoice();
+    } else {
+      // 无示范场景 replay 无意义，讲解后直接进 live
+      startLive();
     }
   };
 
@@ -956,6 +1078,7 @@ export default function Practice() {
           if (p === 'qualify') void askQualifyQuestion(qualifyQ);
           else if (p === 'guide') {
             if (demoStage === 'ask') void askGuideChoice();
+            else if (demoStage === 'narration') startLive();
             else void beginGuide(demoVersion);
           }
           // ready_wait：回到「我准备好了」界面即可，无需额外动作
@@ -1071,13 +1194,10 @@ export default function Practice() {
   /** 示范对话当前说话的角色（用于双角色可视化高亮） */
   const demoCurrentRole =
     demoIndex >= 0 && demoIndex < demoLines.length ? demoLines[demoIndex].role : null;
-  /** 仅语音模式的地推引流课场景启用新手指引 */
-  const guidanceEligible =
-    isVoice &&
-    !!scenario &&
-    GROUND_PUSH_KEYWORDS.some((k) =>
-      `${scenario.name} ${(scenario.coverageTopics ?? []).join(' ')}`.includes(k)
-    );
+  /** 资格问题总数（引导包优先，回退硬编码题库；为空表示本场景无新手指引） */
+  const qualifyQuestions = resolveQualifyQuestions(guidance, scenario);
+  /** 页面展示的时长：引导包给了 targetMinutes 时以它为准 */
+  const durationMinutes = guidance?.duration?.targetMinutes ?? scenario?.durationMinutes;
 
   return (
     <div className="min-h-screen bg-light-bg flex flex-col text-text-primary">
@@ -1135,7 +1255,7 @@ export default function Practice() {
           </aside>
 
           {/* 手机端目标条 */}
-          <div className="card goal-m">🎯 {scenario?.name ?? '本场练习'} · 限时 {scenario?.durationMinutes ?? '-'} 分钟</div>
+          <div className="card goal-m">🎯 {scenario?.name ?? '本场练习'} · 限时 {durationMinutes ?? '-'} 分钟</div>
 
           {/* ---- 中：状态条 + 提示屏 + 字幕 + 消息 + 操作区 ---- */}
           <section className="chatcol">
@@ -1151,12 +1271,20 @@ export default function Practice() {
               )}
               {phase === 'qualify' && status !== 'paused' && (
                 <div className="statusbar statusbar-blue">
-                  🎓 新手指引 · 教练提问（第 {qualifyQ} / 2 题），请用语音回答，倒计时已冻结
+                  🎓 新手指引 · 教练提问（第 {qualifyQ} / {qualifyQuestions.length} 题），请用语音回答，倒计时已冻结
                 </div>
               )}
               {phase === 'guide' && status !== 'paused' && (
                 <div className="statusbar statusbar-blue">
-                  📖 新手指引 · 示范对话{demoStage === 'ask' ? '已播完' : '播放中'}，倒计时已冻结
+                  📖 新手指引 ·{' '}
+                  {demoStage === 'ask'
+                    ? '示范对话已播完'
+                    : demoStage === 'briefing'
+                      ? '要点讲解播放中'
+                      : demoStage === 'narration'
+                        ? '开场旁白播报中'
+                        : '示范对话播放中'}
+                  ，倒计时已冻结
                 </div>
               )}
               {inLive && status === 'loading' && (
@@ -1234,7 +1362,7 @@ export default function Practice() {
                 )}
                 {phase === 'qualify' && status !== 'paused' && (
                   <div className="flex flex-col items-center gap-5 px-6 max-w-[560px]">
-                    <div className="text-[13px] font-semibold opacity-75">资格提问 · 第 {qualifyQ} / 2 题</div>
+                    <div className="text-[13px] font-semibold opacity-75">资格提问 · 第 {qualifyQ} / {qualifyQuestions.length} 题</div>
                     {qualifyStage === 'recording' && (
                       <>
                         <div className="flex items-end gap-[5px] h-9">
@@ -1256,6 +1384,12 @@ export default function Practice() {
                     )}
                     {qualifyHint && <div className="text-[13px] font-semibold text-coral">{qualifyHint}</div>}
                     {qualifyText && <div className="text-[12.5px] font-medium opacity-60">{qualifyText}</div>}
+                    <button
+                      className="text-[12.5px] font-medium opacity-60 underline underline-offset-2 hover:opacity-90"
+                      onClick={startLive}
+                    >
+                      已有经验？跳过指引直接开始
+                    </button>
                   </div>
                 )}
                 {phase === 'guide' && status !== 'paused' && (
@@ -1310,6 +1444,35 @@ export default function Practice() {
                           onClick={startLive}
                         >
                           ⏭ 跳过示范，直接开始
+                        </button>
+                      </div>
+                    )}
+                    {(demoStage === 'briefing' || demoStage === 'narration') && (
+                      <div className="flex flex-col items-center gap-4">
+                        <div className="text-[14px] font-semibold opacity-90">
+                          {demoStage === 'narration' ? '🗣 开场旁白' : '🎓 要点讲解'}
+                        </div>
+                        <div className="flex items-end gap-[5px] h-9">
+                          {[0, 1, 2, 3, 4].map((i) => (
+                            <span key={i} className="w-[5px] rounded-full bg-white/85 animate-pulse" style={{ height: `${14 + (i % 3) * 9}px`, animationDelay: `${i * 0.15}s` }} />
+                          ))}
+                        </div>
+                        {briefIndex >= 0 && briefIndex < briefLines.length && (
+                          <div className="px-4 max-w-[560px] text-center text-[14px] font-medium leading-relaxed text-[#F7F7FA]">
+                            {briefLines[briefIndex]}
+                          </div>
+                        )}
+                        {demoStage === 'briefing' && briefLines.length > 0 && (
+                          <div className="text-[12px] font-medium opacity-60 tabular-nums">
+                            {Math.max(1, briefIndex + 1)} / {briefLines.length}
+                          </div>
+                        )}
+                        <button
+                          className="btn btn-sm"
+                          style={{ background: 'rgba(255,255,255,.14)', color: '#fff' }}
+                          onClick={startLive}
+                        >
+                          ⏭ 跳过，直接开始
                         </button>
                       </div>
                     )}
@@ -1560,7 +1723,7 @@ export default function Practice() {
               <h3 style={{ marginBottom: '8px', fontSize: '15px', fontWeight: 700 }}>🎯 本场信息</h3>
               <ul className="goal">
                 <li>{scenario?.name ?? '—'}</li>
-                <li>限时 {scenario?.durationMinutes ?? '-'} 分钟 · {sessionMode === 'practice' ? '练习模式' : '考核模式'}</li>
+                <li>限时 {durationMinutes ?? '-'} 分钟 · {sessionMode === 'practice' ? '练习模式' : '考核模式'}</li>
                 {bandKey && <li>对方状态：{bandKey}</li>}
               </ul>
             </div>
@@ -1594,7 +1757,7 @@ export default function Practice() {
             </div>
             <div className="boot-meta">
               {persona ? `${persona.name}${persona.occupation ? ` · ${persona.occupation}` : ''}` : ''}
-              {scenario ? ` · 限时 ${scenario.durationMinutes} 分钟` : ''}
+              {durationMinutes ? ` · 限时 ${durationMinutes} 分钟` : ''}
             </div>
           </div>
         </div>

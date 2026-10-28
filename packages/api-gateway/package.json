@@ -13,6 +13,7 @@
     "start": "node --env-file=.env dist/server.js",
     "seed": "pnpm build && node --env-file=.env dist/seed-demo.js",
     "seed:faq": "pnpm build && node --env-file=.env dist/seed-sales-faq.js",
+    "seed:guidance": "pnpm build && node --env-file=.env dist/seed-guidance.js",
     "test": "vitest run --passWithNoTests",
     "lint": "tsc --noEmit"
   },
