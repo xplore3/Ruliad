@@ -7,7 +7,7 @@ import {
   judgeExperience,
   performDemoScript,
   resolveFaqPool,
-  QUALIFY_QUESTIONS,
+  resolveQualifyQuestions,
 } from '../services/guidance.js';
 
 /** 'audio/wav; codecs=1' → 'wav'；取不到时回退 'pcm'（与 voice.ts 同款） */
@@ -34,7 +34,7 @@ async function extractAudio(request: FastifyRequest): Promise<{ audio?: Buffer; 
  * - GET  /scenarios/:id/guidance        新手指引流程配置（无配置返回 guidance=null）
  * - POST /sessions/:id/qualify-answer?q=N  资格提问的语音回答 → ASR → LLM 判断是否做过（最后一题给结论并落库）
  * - POST /sessions/:id/demo             示范剧本交给大模型理解演绎成双人对话（无资源时声明无示范，前端跳过该步骤）
- * - POST /sessions/:id/briefing         教练讲解口播稿（keyPoints + 讲解标准库）
+ * - POST /sessions/:id/briefing         教练讲解口播稿（keyPoints + 讲解标准库 → 大模型理解改写，不照念原文）
  * - POST /sessions/:id/demo-choice      示范后的语音选择 → 再听一版 / 开始练习
  */
 export async function guidanceRoutes(app: FastifyInstance, ctx: RouteContext): Promise<void> {
@@ -61,11 +61,13 @@ export async function guidanceRoutes(app: FastifyInstance, ctx: RouteContext): P
       if (!session) return reply.code(404).send({ error: '会话不存在' });
       if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
 
-      // 问题从指引配置取；无配置回退默认两问
+      // 问题从指引配置取；无配置时仅地推类场景回退默认两问，其他场景无资格提问
       const guidance = await getGuidance(store, session.scenarioId);
-      const questions = guidance?.qualifyQuestions?.length
-        ? guidance.qualifyQuestions
-        : ([...QUALIFY_QUESTIONS] as string[]);
+      const scenario = await store.getScenario(session.scenarioId);
+      const questions = resolveQualifyQuestions(guidance, scenario);
+      if (questions.length === 0) {
+        return reply.code(400).send({ error: '该场景没有资格提问' });
+      }
 
       const q = Number(request.query.q ?? '1');
       if (!Number.isInteger(q) || q < 1 || q > questions.length) {
@@ -113,7 +115,8 @@ export async function guidanceRoutes(app: FastifyInstance, ctx: RouteContext): P
     return { lines: await performDemoScript(gateway, script, pool, version), hasDemo: true };
   });
 
-  // 教练讲解口播稿：keyPoints + 引用的讲解标准库条目；无资源返回空口播
+  // 教练讲解口播稿：keyPoints + 引用的讲解标准库条目渲染成参照稿后，交给大模型理解改写成自然口播
+  // （不照念资源库原文；LLM 失败回退参照稿）；无资源返回空口播
   app.post<{ Params: { id: string } }>('/sessions/:id/briefing', async (request, reply) => {
     const session = await store.getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: '会话不存在' });
@@ -123,7 +126,7 @@ export async function guidanceRoutes(app: FastifyInstance, ctx: RouteContext): P
     if (!guidance) return { lines: [] };
 
     const standards = await store.listBriefingStandards(session.tenantId);
-    return { lines: composeBriefing(guidance, standards) };
+    return { lines: await composeBriefing(gateway, guidance, standards) };
   });
 
   // 示范后的选择：raw PCM → ASR → judgeDemoChoice；choice='practice' 即进入第4步演练，响应附带 liveIntro（旁白+目标，无资源为 null）

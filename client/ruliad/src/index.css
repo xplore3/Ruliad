@@ -226,6 +226,8 @@ body.no-tab .tabbar { display: none; }
   box-shadow: var(--shadow-coral); }
 .seg-lg { display: flex; width: 100%; max-width: 380px; }
 .seg-lg button { flex: 1; padding: 10px 22px; font-size: 13px; }
+.section .seg-lg { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.section .seg-lg button { flex: 0 0 auto; white-space: nowrap; }
 
 /* ===== 表单域 ===== */
 .field { margin-bottom: 18px; }

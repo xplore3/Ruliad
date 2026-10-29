@@ -57,7 +57,7 @@ const MAX_HINTS = 3;
 const AUTO_MIC_KEY = 'grasp-auto-mic';
 const PERSONA_FALLBACK_MS = 10000;
 
-/** 地推引流课分类关键词（与 Home.tsx 的分类规则一致）；仅在 guidance 拉取失败/为 null 时作回退判定 */
+/** 地推引流课分类关键词（与 Home.tsx 及后端 guidance 服务的判定规则一致）；仅在 guidance 拉取失败/为 null 时作回退判定 */
 const GROUND_PUSH_KEYWORDS = ['地推', '破冰', '陌生', '展会', '商场', '摊位', '驻足'];
 /** 资格提问回退题库（guidance 不可用时使用；正常以 guidance.qualifyQuestions 为准） */
 const QUALIFY_QUESTIONS = ['你做过地推吗？', '你做过教育行业的地推吗？'];

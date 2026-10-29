@@ -156,7 +156,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
   type VoiceRole = 'persona' | 'coach' | 'sales' | 'narrator' | 'child';
   // 指引模式各角色的固定音色（与 persona 常用默认 longxiaochun_v2 区分开）；
   // mock speech 忽略音色参数，aliyun 未知音色会报错——这里选的都是官方音色。
-  // sales 用 CosyVoice v3 音色 longanhuan（欢脱元气女，v3 模型表现力更强；provider 会按音色自动切到 cosyvoice-v3-flash）
+  // sales 用 CosyVoice v3 音色 longanhuan（欢脱元气女，v3 模型表现力更强；provider 按音色代际自动路由到 v3 系模型）
   const ROLE_VOICES: Record<Exclude<VoiceRole, 'persona'>, string> = {
     coach: 'longshu_v2',
     sales: 'longanhuan',

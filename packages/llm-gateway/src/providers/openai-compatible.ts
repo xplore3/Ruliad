@@ -24,7 +24,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
   ) {}
 
   async chat(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResult> {
-    // 思维链模型（如 deepseek-v4-flash）偶发"只有 reasoning_content、content 为空"的响应，重试最多 2 次
+    // 思维链模型（如 deepseek-flash）偶发"只有 reasoning_content、content 为空"的响应
+    // 兜底方案已内聚在 chatOnce 中（reasoning_content 回退），重试用于应对极端情况
     let lastErr: unknown;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
@@ -85,7 +86,20 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
     // 如果 content 为空但存在 completionTokens，尝试多种兜底提取
     if (!content && json.usage?.completion_tokens > 0) {
-      // 兜底1：deepseek 部分模型（如 deepseek-flash）可能把内容放在 delta 中
+      // 兜底1：deepseek 部分模型（如 deepseek-flash）可能把内容放在 reasoning_content 中
+      // 原因：deepseek-flash 是思维链模型，若推理 token 耗尽 max_tokens，content 可能为空，
+      // 但实际有效响应存在于 reasoning_content 字段
+      const reasoningContent = choice?.message?.reasoning_content;
+      if (typeof reasoningContent === 'string' && reasoningContent.trim()) {
+        content = reasoningContent.trim();
+        console.warn(
+          `[LLMGateway][WARN] 命中 reasoning_content 兜底：model=${json.model ?? this.config.model}`
+        );
+      }
+    }
+
+    if (!content && json.usage?.completion_tokens > 0) {
+      // 兜底2：deepseek 部分模型（如 deepseek-flash）可能把内容放在 delta 中
       const deltaContent = choice?.delta?.content;
       if (typeof deltaContent === 'string' && deltaContent.trim()) {
         content = deltaContent.trim();
@@ -93,7 +107,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     }
 
     if (!content && json.usage?.completion_tokens > 0) {
-      // 兜底2：尝试从 tool_calls 中提取内容
+      // 兜底3：尝试从 tool_calls 中提取内容
       const toolCalls = choice?.message?.tool_calls ?? choice?.delta?.tool_calls;
       if (toolCalls && toolCalls.length > 0) {
         const toolContent = toolCalls
