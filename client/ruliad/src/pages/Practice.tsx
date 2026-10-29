@@ -821,7 +821,7 @@ export default function Practice() {
               : line.role === 'child'
                 ? 'child'
                 : 'narrator';
-        return ttsClip(sessionId, line.text, voiceRole, line.arousal, line.excitement).catch(() => null);
+        return ttsClip(sessionId, line.text, voiceRole, line.arousal, line.excitement, line.soft).catch(() => null);
       };
       const inflight = new Map<number, Promise<{ audioBase64: string } | null>>();
       const prefetch = (i: number) => {

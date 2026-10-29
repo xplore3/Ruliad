@@ -216,6 +216,7 @@ function sanitizePerformedLine(raw: unknown): DemoLine | null {
   const out: DemoLine = { role: line.role as DemoLine['role'], text: line.text.trim() };
   if (Number.isFinite(line.excitement)) out.excitement = Math.max(1, Math.min(10, Math.round(Number(line.excitement))));
   if (Number.isFinite(line.arousal)) out.arousal = Math.max(0, Math.min(1, Number(line.arousal)));
+  if (line.soft === true) out.soft = true;
   return out;
 }
 
@@ -247,7 +248,8 @@ export async function performDemoScript(
             '2. 措辞可以自然发挥：加语气词、合理过渡、让客户反应更真实；不要机械照念',
             '3. 可以微调台词拆分与顺序衔接，但总行数与参照稿接近，客户提问与对应应答必须成对出现',
             version > 1 ? '4. 这是再听一版的请求：换一种演绎风格（节奏/用词/客户性格微调），事实不变' : '',
-            '只输出 JSON：{"lines":[{"role":"sales|customer|child|narrator","text":"台词","excitement":1-10 整数（情绪强度，销售开场高、旁白低）}]}',
+            '5. 销售对小朋友（孩子角色）说话的台词，该条额外加 "soft": true（播报时会放轻放缓，避免吓到孩子）',
+            '只输出 JSON：{"lines":[{"role":"sales|customer|child|narrator","text":"台词","excitement":1-10 整数（情绪强度，销售开场高、旁白低；对小朋友说话的台词不超过 4）}]}',
             '不要输出任何其他内容。',
             '',
             '【剧本参照稿】',

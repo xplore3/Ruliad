@@ -161,7 +161,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
     coach: 'longshu_v2',
     sales: 'longanhuan',
     narrator: 'longhua_v2',
-    child: 'longtong_v2',
+    child: 'longhuhu_v3',
   };
 
   // 开场白/文字模式回复的服务端 TTS：按 persona 音色合成任意文本（与 voice-turn 回复同一声音）；

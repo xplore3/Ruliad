@@ -10,6 +10,8 @@ export interface GuidanceDemoLine {
   arousal?: number;
   /** 激情倍率 */
   excitement?: number;
+  /** 销售对小朋友说话的台词：播报放轻放缓 */
+  soft?: boolean;
 }
 
 /** 示范剧本变量：choice 随机选项 / intRange 随机整数 / map 由另一变量映射（如 address→parent） */
