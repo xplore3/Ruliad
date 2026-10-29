@@ -200,15 +200,15 @@ export default function Home() {
   });
 
   return (
-    <div>
+    <main className="wrap" style={{ paddingTop: 10 }}>
       {loading ? (
-        <div className="flex items-center justify-center h-64">
-          <div className="w-8 h-8 border-3 border-coral/30 border-t-coral rounded-full animate-spin" />
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 260 }}>
+          <div className="spinner" />
         </div>
       ) : error ? (
-        <div className="flex flex-col items-center justify-center h-64 gap-3">
-          <p className="text-sm text-text-secondary">{error}</p>
-          <button className="btn-ghost btn btn-sm" onClick={load}>重试</button>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 260, gap: 12 }}>
+          <p className="small muted">{error}</p>
+          <button className="btn btn-ghost btn-sm" onClick={load}>重试</button>
         </div>
       ) : (
         <>
@@ -276,8 +276,8 @@ export default function Home() {
           </div>
 
           {filteredScenes.length === 0 ? (
-            <div className="flex items-center justify-center h-40">
-              <p className="text-sm text-text-tertiary">暂无符合条件的场景</p>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 160 }}>
+              <p className="small muted">暂无符合条件的场景</p>
             </div>
           ) : (
             <div className="scene-grid">
@@ -353,6 +353,6 @@ export default function Home() {
           )}
         </>
       )}
-    </div>
+    </main>
   );
 }

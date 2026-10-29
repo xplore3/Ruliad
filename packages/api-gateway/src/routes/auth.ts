@@ -77,83 +77,92 @@ export async function authRoutes(app: FastifyInstance, ctx: RouteContext): Promi
       return reply.code(400).send({ error: '手机号格式不正确' });
     }
 
-    // 开发回显模式（SMS_DEV_ECHO=1）：跳过频率/单日限制与真实短信发送，任何手机号直接回显验证码
-    const devEcho = process.env.SMS_DEV_ECHO === '1';
+    // SMS_ENABLE=true：真实发送短信并校验；其他情况：全部模拟执行
+    const smsEnabled = process.env.SMS_ENABLE === 'true';
 
-    // 频率限制：60 秒内只能发 1 次
-    const existing = codeStore.get(phone);
-    if (!devEcho && existing && Date.now() - existing.sentAt < RATE_LIMIT_MS) {
-      const waitSec = Math.ceil((RATE_LIMIT_MS - (Date.now() - existing.sentAt)) / 1000);
-      return reply.code(429).send({ error: `发送太频繁，请 ${waitSec} 秒后再试` });
-    }
+    if (smsEnabled) {
+      // ── 真实短信模式 ──
 
-    // 单日次数限制
-    const daily = dailyCount.get(phone);
-    const today = todayKey();
-    if (!devEcho && daily && daily.date === today && daily.count >= DAILY_LIMIT) {
-      return reply.code(429).send({ error: '今日验证码获取次数已达上限（5次），请明天再试' });
-    }
+      // 频率限制：60 秒内只能发 1 次
+      const existing = codeStore.get(phone);
+      if (existing && Date.now() - existing.sentAt < RATE_LIMIT_MS) {
+        const waitSec = Math.ceil((RATE_LIMIT_MS - (Date.now() - existing.sentAt)) / 1000);
+        return reply.code(429).send({ error: `发送太频繁，请 ${waitSec} 秒后再试` });
+      }
 
-    const code = generateCode();
-    codeStore.set(phone, {
-      code,
-      expiresAt: Date.now() + CODE_TTL_MS,
-      sentAt: Date.now(),
-    });
+      // 单日次数限制
+      const daily = dailyCount.get(phone);
+      const today = todayKey();
+      if (daily && daily.date === today && daily.count >= DAILY_LIMIT) {
+        return reply.code(429).send({ error: '今日验证码获取次数已达上限（5次），请明天再试' });
+      }
 
-    // 更新单日计数
-    if (daily && daily.date === today) {
-      daily.count++;
+      const code = generateCode();
+      codeStore.set(phone, {
+        code,
+        expiresAt: Date.now() + CODE_TTL_MS,
+        sentAt: Date.now(),
+      });
+
+      // 更新单日计数
+      if (daily && daily.date === today) {
+        daily.count++;
+      } else {
+        dailyCount.set(phone, { count: 1, date: today });
+      }
+
+      app.log.info(`[验证码] ${phone} => ${code}`);
+
+      // 检查短信配置是否完整
+      const client = getSmsClient();
+      const cfg = getSmsConfig();
+      const smsConfigured = !!(client && cfg.signName && cfg.templateId && cfg.sdkAppId);
+
+      if (!smsConfigured) {
+        const reason = !client
+          ? '未配置 TENCENT_CLOUD_SECRET_ID / TENCENT_CLOUD_SECRET_KEY'
+          : '短信配置不完整（需 SMS_SIGN_NAME / SMS_TEMPLATE_CODE / TENCENT_SMS_SDK_APP_ID）';
+        app.log.error(`[SMS] SMS_ENABLE=true 但 ${reason}`);
+        return reply.code(503).send({
+          error: `短信服务未配置：${reason}`,
+        });
+      }
+
+      // 调用腾讯云短信服务发送验证码
+      try {
+        const result = await client.sendSms({
+          phoneNumbers: [phone],
+          smsSdkAppId: cfg.sdkAppId,
+          signName: cfg.signName,
+          templateId: cfg.templateId,
+          templateParams: [code, '5'],
+        });
+        const status = result.SendStatusSet?.[0];
+        if (status && status.Code === 'Ok') {
+          return reply.code(200).send({ success: true, message: '验证码已发送' });
+        }
+        app.log.error(`[腾讯云短信失败] ${JSON.stringify(result.SendStatusSet)} ${JSON.stringify(result.Error)}`);
+        return reply.code(500).send({ error: '短信发送失败，请稍后重试' });
+      } catch (err) {
+        app.log.error(`[短信异常] ${err instanceof Error ? err.message : String(err)}`);
+        return reply.code(500).send({ error: '短信服务异常，请稍后重试' });
+      }
     } else {
-      dailyCount.set(phone, { count: 1, date: today });
-    }
+      // ── 模拟模式（SMS_ENABLE≠true）：跳过真实发送，回显验证码，不限制频率 ──
 
-    app.log.info(`[验证码] ${phone} => ${code}`);
+      const code = generateCode();
+      codeStore.set(phone, {
+        code,
+        expiresAt: Date.now() + CODE_TTL_MS,
+        sentAt: Date.now(),
+      });
 
-    // 开发回显模式：SMS_DEV_ECHO=1 时跳过真实短信发送，直接回显验证码（前端自动填充登录）
-    if (devEcho) {
-      app.log.info(`[SMS] SMS_DEV_ECHO=1，跳过真实发送，回显验证码`);
+      app.log.info(`[SMS] 模拟模式 ${phone} => ${code}`);
       return reply.code(200).send({
         success: true,
-        message: '验证码已发送（开发模式）',
+        message: '验证码已发送（模拟模式）',
         _devCode: code,
       });
-    }
-
-    // 开发模式：跳过真实发送（如果没有客户端或配置不完整）
-    const client = getSmsClient();
-    const cfg = getSmsConfig();
-    const smsConfigured = !!(client && cfg.signName && cfg.templateId && cfg.sdkAppId);
-
-    if (!smsConfigured) {
-      // 短信服务未完全配置：明确返回，避免网关超时
-      const reason = !client
-        ? '未配置 TENCENT_CLOUD_SECRET_ID / TENCENT_CLOUD_SECRET_KEY'
-        : '短信配置不完整（需 SMS_SIGN_NAME / SMS_TEMPLATE_CODE / TENCENT_SMS_SDK_APP_ID）';
-      app.log.warn(`[SMS] ${reason}，验证码无法送达（${phone}）`);
-      return reply.code(503).send({
-        error: '短信服务未配置，暂时无法发送验证码，请联系管理员',
-      });
-    }
-
-    // 调用腾讯云短信服务发送验证码
-    try {
-      const result = await client.sendSms({
-        phoneNumbers: [phone],
-        smsSdkAppId: cfg.sdkAppId,
-        signName: cfg.signName,
-        templateId: cfg.templateId,
-        templateParams: [code, '5'],
-      });
-      const status = result.SendStatusSet?.[0];
-      if (status && status.Code === 'Ok') {
-        return reply.code(200).send({ success: true, message: '验证码已发送' });
-      }
-      app.log.error(`[腾讯云短信失败] ${JSON.stringify(result.SendStatusSet)} ${JSON.stringify(result.Error)}`);
-      return reply.code(500).send({ error: '短信发送失败，请稍后重试' });
-    } catch (err) {
-      app.log.error(`[短信异常] ${err instanceof Error ? err.message : String(err)}`);
-      return reply.code(500).send({ error: '短信服务异常，请稍后重试' });
     }
   });
 
@@ -169,21 +178,28 @@ export async function authRoutes(app: FastifyInstance, ctx: RouteContext): Promi
         return reply.code(400).send({ error: '手机号和验证码不能为空' });
       }
 
-      // 校验验证码
-      const entry = codeStore.get(phone);
-      if (!entry) {
-        return reply.code(400).send({ error: '验证码已过期，请重新获取' });
-      }
-      if (Date.now() > entry.expiresAt) {
-        codeStore.delete(phone);
-        return reply.code(400).send({ error: '验证码已过期，请重新获取' });
-      }
-      if (entry.code !== code) {
-        return reply.code(400).send({ error: '验证码错误' });
-      }
+      const smsEnabled = process.env.SMS_ENABLE === 'true';
 
-      // 验证通过，删除验证码（一次性使用）
-      codeStore.delete(phone);
+      if (smsEnabled) {
+        // ── 真实模式：严格校验验证码 ──
+        const entry = codeStore.get(phone);
+        if (!entry) {
+          return reply.code(400).send({ error: '验证码已过期，请重新获取' });
+        }
+        if (Date.now() > entry.expiresAt) {
+          codeStore.delete(phone);
+          return reply.code(400).send({ error: '验证码已过期，请重新获取' });
+        }
+        if (entry.code !== code) {
+          return reply.code(400).send({ error: '验证码错误' });
+        }
+        // 验证通过，删除验证码（一次性使用）
+        codeStore.delete(phone);
+      } else {
+        // ── 模拟模式：跳过验证码校验 ──
+        app.log.info(`[SMS] 模拟模式，跳过验证码校验 ${phone}`);
+        codeStore.delete(phone);
+      }
 
       // 以手机号作为 username 查找或创建用户
       let user = await store.getUserByUsername(DEFAULT_TENANT, phone);

@@ -757,9 +757,9 @@ export default function Build() {
   const adminTip = '仅管理员可保存场景';
 
   return (
-    <div>
+    <main className="wrap">
       {/* Tab 切换 */}
-      <div className="seg seg-lg" style={{ marginBottom: 24 }}>
+      <div className="seg seg-lg" style={{ marginBottom: 24, marginTop: 24 }}>
         <button onClick={() => setActiveTab('list')} className={activeTab === 'list' ? 'on' : ''}>
           我的场景
         </button>
@@ -1302,6 +1302,6 @@ export default function Build() {
           </div>
         </section>
       )}
-    </div>
+    </main>
   );
 }

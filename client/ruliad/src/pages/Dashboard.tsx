@@ -140,18 +140,20 @@ export default function Dashboard() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-3 border-coral/30 border-t-coral rounded-full animate-spin" />
+      <div className="wrap" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 260, paddingTop: 10 }}>
+        <div className="spinner" />
       </div>
     );
   }
 
   if (error || !data || !derived) {
     return (
-      <div className="card" style={{ padding: '32px 24px', textAlign: 'center' }}>
-        <p style={{ marginBottom: '16px' }}>{error ?? '看板数据加载失败'}</p>
-        <button className="btn btn-primary" onClick={() => window.location.reload()}>重新加载</button>
-      </div>
+      <main className="wrap" style={{ paddingTop: 10 }}>
+        <div className="card" style={{ padding: '32px 24px', textAlign: 'center' }}>
+          <p style={{ marginBottom: '16px' }}>{error ?? '看板数据加载失败'}</p>
+          <button className="btn btn-primary" onClick={() => window.location.reload()}>重新加载</button>
+        </div>
+      </main>
     );
   }
 
@@ -168,18 +170,16 @@ export default function Dashboard() {
   const durationUnit = hours >= 1 ? '小时' : '分钟';
 
   return (
-    <div>
+    <main className="wrap" style={{ paddingTop: 10 }}>
       {/* 页头：保留 7/30/90 切换 */}
-      <div className="flex items-center justify-between mb-4">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
         <h2 className="bar-title">能力看板</h2>
-        <div className="flex items-center gap-1 bg-white rounded-xl p-0.5 border border-line">
+        <div className="seg">
           {(['7', '30', '90'] as const).map((p) => (
             <button
               key={p}
               onClick={() => setPeriod(p)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                period === p ? 'bg-coral text-white shadow-sm' : 'text-text-secondary hover:bg-warm-bg'
-              }`}
+              className={period === p ? 'on' : ''}
             >
               {p}天
             </button>
@@ -219,9 +219,11 @@ export default function Dashboard() {
         </div>
       </div>
 
+      <hr className="sec-divider" />
+
       {/* 2. 多维能力分析 */}
-      <div className="sec-head">
-        <h2><span>🕸</span> 多维能力分析</h2>
+      <div className="sec-head" style={{ marginTop: 28 }}>
+        <h2 className="bar-title">多维能力分析</h2>
         <span className="more">近 {period} 天 · 全部模式</span>
       </div>
       <div className="card radar-grid sec">
@@ -250,8 +252,8 @@ export default function Dashboard() {
       </div>
 
       {/* 3. 专项能力训练 */}
-      <div className="sec-head">
-        <h2><span>🎯</span> 专项能力训练</h2>
+      <div className="sec-head" style={{ marginTop: 28 }}>
+        <h2 className="bar-title">专项能力训练</h2>
         <span className="more">针对最弱维度推荐场景</span>
       </div>
       <div className="card sec">
@@ -292,9 +294,11 @@ export default function Dashboard() {
         )}
       </div>
 
+      <hr className="sec-divider" />
+
       {/* 4. 练习热力 */}
-      <div className="sec-head">
-        <h2><span>🗓</span> 练习热力</h2>
+      <div className="sec-head" style={{ marginTop: 28 }}>
+        <h2 className="bar-title">练习热力</h2>
         <span className="more">近 12 周</span>
       </div>
       <div className="card heat sec">
@@ -310,9 +314,11 @@ export default function Dashboard() {
         </div>
       </div>
 
+      <hr className="sec-divider" />
+
       {/* 5. 成长里程碑 */}
-      <div className="sec-head">
-        <h2><span>🏅</span> 成长里程碑</h2>
+      <div className="sec-head" style={{ marginTop: 28 }}>
+        <h2 className="bar-title">成长里程碑</h2>
         <span className="more">已解锁 {derived.badges.filter((b) => b.unlocked).length} / {derived.badges.length}</span>
       </div>
       <div className="card sec" style={{ padding: '22px 24px' }}>
@@ -325,7 +331,7 @@ export default function Dashboard() {
           ))}
         </div>
       </div>
-    </div>
+    </main>
   );
 }
 
@@ -343,7 +349,7 @@ function RadarChart({ skills }: { skills: GrowthData['skills'] }) {
   const ratioOf = (s: UserSkillState) => Math.max(0.05, Math.min(1, skillScore(s) / 100));
 
   return (
-    <div className="flex items-center justify-center max-lg:mx-auto">
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <svg width="300" height="220" viewBox={`0 0 ${size} ${size}`}>
         {/* 网格 */}
         {[0.25, 0.5, 0.75, 1].map((ratio) => (
@@ -432,7 +438,7 @@ function MiniTrend({ scores }: { scores: number[] }) {
     pointsAttr = `0,${h / 2} ${w},${h / 2}`;
   }
   return (
-    <svg width={w} height={h} className="flex-none">
+    <svg width={w} height={h} style={{ flexShrink: 0 }}>
       <polyline points={pointsAttr} fill="none" stroke={color} strokeWidth="2" />
     </svg>
   );
