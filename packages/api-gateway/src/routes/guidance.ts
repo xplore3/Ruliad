@@ -2,11 +2,10 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { RouteContext } from '../ctx.js';
 import {
   composeBriefing,
-  generateDemoScript,
   getGuidance,
   judgeDemoChoice,
   judgeExperience,
-  renderDemoScript,
+  performDemoScript,
   resolveFaqPool,
   QUALIFY_QUESTIONS,
 } from '../services/guidance.js';
@@ -31,11 +30,11 @@ async function extractAudio(request: FastifyRequest): Promise<{ audio?: Buffer; 
 }
 
 /**
- * 场景引导新手指引路由（不写入 transcript，不影响评分与复盘）：
- * - GET  /scenarios/:id/guidance        场景引导资源包（无资源返回 guidance=null）
+ * 新手指引流程路由（不写入 transcript，不影响评分与复盘）：
+ * - GET  /scenarios/:id/guidance        新手指引流程配置（无配置返回 guidance=null）
  * - POST /sessions/:id/qualify-answer?q=N  资格提问的语音回答 → ASR → LLM 判断是否做过（最后一题给结论并落库）
- * - POST /sessions/:id/demo             渲染场景示范对话剧本（资源缺失时回退地推兜底剧本）
- * - POST /sessions/:id/briefing         教练讲解口播稿（keyPoints + 分析标准库）
+ * - POST /sessions/:id/demo             示范剧本交给大模型理解演绎成双人对话（无资源时声明无示范，前端跳过该步骤）
+ * - POST /sessions/:id/briefing         教练讲解口播稿（keyPoints + 讲解标准库）
  * - POST /sessions/:id/demo-choice      示范后的语音选择 → 再听一版 / 开始练习
  */
 export async function guidanceRoutes(app: FastifyInstance, ctx: RouteContext): Promise<void> {
@@ -49,7 +48,7 @@ export async function guidanceRoutes(app: FastifyInstance, ctx: RouteContext): P
   // 每会话的资格回答暂存（内存态，不落库；刷新后重新走流程即可）
   const qualifyAnswers = new Map<string, string[]>();
 
-  // 场景引导资源包查询
+  // 新手指引流程配置查询
   app.get<{ Params: { id: string } }>('/scenarios/:id/guidance', async (request) => ({
     guidance: (await getGuidance(store, request.params.id)) ?? null,
   }));
@@ -62,7 +61,7 @@ export async function guidanceRoutes(app: FastifyInstance, ctx: RouteContext): P
       if (!session) return reply.code(404).send({ error: '会话不存在' });
       if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
 
-      // 问题从场景引导资源取；无资源回退默认两问
+      // 问题从指引配置取；无配置回退默认两问
       const guidance = await getGuidance(store, session.scenarioId);
       const questions = guidance?.qualifyQuestions?.length
         ? guidance.qualifyQuestions
@@ -98,32 +97,23 @@ export async function guidanceRoutes(app: FastifyInstance, ctx: RouteContext): P
     }
   );
 
-  // 渲染示范对话剧本：有资源按模板渲染（demo=null 表示无示范模式）；无资源回退地推兜底剧本
-  app.post<{ Params: { id: string }; Body: { version?: number } }>(
-    '/sessions/:id/demo',
-    async (request, reply) => {
-      const session = await store.getSession(request.params.id);
-      if (!session) return reply.code(404).send({ error: '会话不存在' });
-      if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
+  // 示范对话演绎：示范剧本库按 demoScriptId 引用取剧本，渲染参照稿后交给大模型理解演绎成自然双人对话
+  // （无引用或剧本已被删除 → 声明无示范，前端跳过该步骤；version>1 表示"再听一版"，LLM 换风格演绎）
+  app.post<{ Params: { id: string }; Body: { version?: number } }>('/sessions/:id/demo', async (request, reply) => {
+    const session = await store.getSession(request.params.id);
+    if (!session) return reply.code(404).send({ error: '会话不存在' });
+    if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
 
-      const guidance = await getGuidance(store, session.scenarioId);
-      if (guidance) {
-        if (!guidance.demo) return { lines: [], hasDemo: false };
-        const pool = await resolveFaqPool(
-          store,
-          session.tenantId,
-          guidance.demo.faqPoolRef,
-          guidance.demo.faqPick ?? 0
-        );
-        return { lines: renderDemoScript(guidance.demo, pool), hasDemo: true };
-      }
+    const guidance = await getGuidance(store, session.scenarioId);
+    if (!guidance?.demoScriptId) return { lines: [], hasDemo: false };
+    const script = await store.getDemoScript(guidance.demoScriptId);
+    if (!script) return { lines: [], hasDemo: false };
+    const pool = await resolveFaqPool(store, session.tenantId, script.faqPoolRef, script.faqPick ?? 0);
+    const version = Math.max(1, Math.floor(Number(request.body?.version ?? 1)) || 1);
+    return { lines: await performDemoScript(gateway, script, pool, version), hasDemo: true };
+  });
 
-      const version = Math.max(1, Math.floor(Number(request.body?.version ?? 1)) || 1);
-      return { lines: generateDemoScript(version), hasDemo: true };
-    }
-  );
-
-  // 教练讲解口播稿：keyPoints + 引用的分析标准库条目；无资源返回空口播
+  // 教练讲解口播稿：keyPoints + 引用的讲解标准库条目；无资源返回空口播
   app.post<{ Params: { id: string } }>('/sessions/:id/briefing', async (request, reply) => {
     const session = await store.getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: '会话不存在' });
@@ -132,11 +122,11 @@ export async function guidanceRoutes(app: FastifyInstance, ctx: RouteContext): P
     const guidance = await getGuidance(store, session.scenarioId);
     if (!guidance) return { lines: [] };
 
-    const standards = await store.listAnalysisStandards(session.tenantId);
+    const standards = await store.listBriefingStandards(session.tenantId);
     return { lines: composeBriefing(guidance, standards) };
   });
 
-  // 示范后的选择：raw PCM → ASR → judgeDemoChoice
+  // 示范后的选择：raw PCM → ASR → judgeDemoChoice；choice='practice' 即进入第4步演练，响应附带 liveIntro（旁白+目标，无资源为 null）
   app.post<{ Params: { id: string } }>('/sessions/:id/demo-choice', async (request, reply) => {
     const session = await store.getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: '会话不存在' });
@@ -151,6 +141,7 @@ export async function guidanceRoutes(app: FastifyInstance, ctx: RouteContext): P
     if (!text) return reply.code(422).send({ error: '未识别到有效语音' });
 
     const choice = await judgeDemoChoice(gateway, text);
-    return { text, choice };
+    const guidance = await getGuidance(store, session.scenarioId);
+    return { text, choice, liveIntro: guidance?.liveIntro ?? null };
   });
 }

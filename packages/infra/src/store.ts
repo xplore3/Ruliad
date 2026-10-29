@@ -1,9 +1,10 @@
 import type {
-  AnalysisStandard,
+  BriefingStandard,
   Appeal,
   CalibrationEvent,
   CertRecord,
-  CustomerQuestion,
+  DemoFaq,
+  DemoScript,
   DataConsent,
   DomainEvent,
   Element,
@@ -68,14 +69,14 @@ export interface SeedData {
   productKBs: ProductKB[];
   examWindows?: ExamWindow[];
   extractionProjects?: ExtractionProject[];
-  analysisStandards?: AnalysisStandard[];
+  briefingStandards?: BriefingStandard[];
   realismStandards?: RealismStandard[];
   scenarioGuidance?: ScenarioGuidance[];
 }
 
 /**
  * 统一仓储接口。
- * 两个实现：PrismaStore（生产，PostgreSQL）/ MemoryStore（本地无 DB 时降级）。
+ * 两个实现：PrismaStore（生产，SQLite）/ MemoryStore（本地无 DB 时降级）。
  */
 export interface Store {
   // ---- 组织与用户 ----
@@ -131,21 +132,27 @@ export interface Store {
   upsertScoreItemDef(def: ScoreItemDef): Promise<void>;
   deleteScoreItemDef(id: string): Promise<void>;
 
-  // ---- 客户提问问题库 ----
-  getCustomerQuestion(id: string): Promise<CustomerQuestion | undefined>;
-  listCustomerQuestions(tenantId: string, category?: string): Promise<CustomerQuestion[]>;
-  saveCustomerQuestion(q: CustomerQuestion): Promise<void>;
-  deleteCustomerQuestion(id: string): Promise<void>;
+  // ---- 示范问答库（第2步「示范」环节 FAQ 池） ----
+  getDemoFaq(id: string): Promise<DemoFaq | undefined>;
+  listDemoFaqs(tenantId: string, category?: string): Promise<DemoFaq[]>;
+  saveDemoFaq(q: DemoFaq): Promise<void>;
+  deleteDemoFaq(id: string): Promise<void>;
 
-  // ---- 场景引导资源库 ----
+  // ---- 示范剧本库（第2步「示范」双人对戏剧本，按业务线分支） ----
+  getDemoScript(id: string): Promise<DemoScript | undefined>;
+  listDemoScripts(tenantId: string, category?: string): Promise<DemoScript[]>;
+  saveDemoScript(s: DemoScript): Promise<void>;
+  deleteDemoScript(id: string): Promise<void>;
+
+  // ---- 新手指引流程配置 ----
   getScenarioGuidance(scenarioId: string): Promise<ScenarioGuidance | undefined>;
   getScenarioGuidanceById(id: string): Promise<ScenarioGuidance | undefined>;
   listScenarioGuidances(tenantId: string): Promise<ScenarioGuidance[]>;
   saveScenarioGuidance(g: ScenarioGuidance): Promise<void>;
   deleteScenarioGuidance(id: string): Promise<void>;
-  listAnalysisStandards(tenantId: string): Promise<AnalysisStandard[]>;
-  saveAnalysisStandard(s: AnalysisStandard): Promise<void>;
-  deleteAnalysisStandard(id: string): Promise<void>;
+  listBriefingStandards(tenantId: string): Promise<BriefingStandard[]>;
+  saveBriefingStandard(s: BriefingStandard): Promise<void>;
+  deleteBriefingStandard(id: string): Promise<void>;
   listRealismStandards(tenantId: string): Promise<RealismStandard[]>;
   saveRealismStandard(s: RealismStandard): Promise<void>;
   deleteRealismStandard(id: string): Promise<void>;

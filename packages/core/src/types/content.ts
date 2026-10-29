@@ -56,7 +56,7 @@ export interface DataConsent {
   consideration?: string;
 }
 
-/** 回归测试用例（金标准对话） */
+/** 回归测试用例（评分回归对话） */
 export interface GoldenCase {
   id: string;
   name: string;

@@ -5,7 +5,7 @@ import { OpenAICompatibleProvider } from './providers/openai-compatible.js';
 import { createLLMGateway } from './gateway.js';
 
 const judgePrompt = `
-评分项：价格异议首反应
+评分标准：价格异议首反应
 可选档位：[{"key":"concede","label":"降价妥协","score":1},{"key":"clarify","label":"追问澄清","score":2},{"key":"value","label":"价值重述","score":3}]
 对话记录：
 [1] 学员：您好，给您介绍一下我们的产品

@@ -87,7 +87,7 @@ export async function appealsRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     }
   });
 
-  // 申诉列表（join 评分项摘要 / 场景名 / 用户名）；trainee 仅能看到本人的申诉
+  // 申诉列表（join 评分标准摘要 / 场景名 / 用户名）；trainee 仅能看到本人的申诉
   app.get<{ Querystring: { status?: string } }>('/appeals', async (request) => {
     let appeals = await store.listAppeals({ status: request.query.status });
     if (request.userRole === 'trainee') {
@@ -114,7 +114,7 @@ export async function appealsRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     return { appeals: items };
   });
 
-  // 申诉详情 + 完整转写 + 被申诉评分项
+  // 申诉详情 + 完整转写 + 被申诉评分标准
   app.get<{ Params: { id: string } }>('/appeals/:id', async (request, reply) => {
     const appeal = await store.getAppeal(request.params.id);
     if (!appeal) return reply.code(404).send({ error: '申诉不存在' });
@@ -201,7 +201,7 @@ async function performReReview(
     const item = report.items[appeal.scoreItemResultIndex];
     if (item) {
       targetDescription = [
-        `评分项：${item.itemName}`,
+        `评分标准：${item.itemName}`,
         `档位：${item.levelLabel}（${item.score}分）`,
         `判定依据：${item.rationale}`,
         `引用原文：「${item.quote}」`,

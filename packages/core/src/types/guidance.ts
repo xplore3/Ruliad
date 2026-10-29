@@ -1,4 +1,13 @@
-/** 场景引导资源库：新手指引五步流程（资格提问→示范→讲解→演练→评分）的场景级配置 */
+/**
+ * 资源库 ↔ 执行环节对照
+ * 新手指引五步流程 = 资格提问→示范→讲解→演练→评分。
+ * 资源库对照：
+ * - 资格提问 = ScenarioGuidance.qualifyQuestions
+ * - 示范 = 示范剧本库(DemoScript，ScenarioGuidance.demoScriptId 引用，执行时交给大模型理解演绎) + 示范问答库(DemoFaq)
+ * - 讲解 = ScenarioGuidance.keyPoints + 讲解标准库(BriefingStandard)
+ * - 演练 = ScenarioGuidance(difficultyLevels/realismStandardIds/duration/liveIntro/voiceProfile) + 演练真实度标准库(RealismStandard)
+ * - 评分 = 评分标准库(ScoreItemDef) + ScenarioGuidance.scoringFocus
+ */
 
 export type DemoRole = 'sales' | 'customer' | 'child' | 'narrator';
 
@@ -15,7 +24,7 @@ export type DemoVariable =
   | { kind: 'intRange'; min: number; max: number }
   | { kind: 'map'; from: string; mapping: Record<string, string> };
 
-/** 示范剧本模板：text 中可含 ${name} 与 ${faq1.question} ${faq1.answer} 占位符 */
+/** 示范剧本模板：text 中可含 ${name} 与 ${faq1.question} ${faq1.answer} 占位符（示范剧本库 DemoScript 为其超集，可直接作为模板传入 renderDemoScript） */
 export interface DemoScriptTemplate {
   lines: DemoLine[];
   variables?: Record<string, DemoVariable>;
@@ -25,8 +34,8 @@ export interface DemoScriptTemplate {
   faqPoolRef?: string;
 }
 
-/** 分析标准库条目（第3步：讲解示范案例时引用的标准） */
-export interface AnalysisStandard {
+/** 讲解标准库条目（新手指引第3步「讲解」环节，composeBriefing 口播稿引用） */
+export interface BriefingStandard {
   id: string;
   tenantId: string;
   name: string;
@@ -36,7 +45,7 @@ export interface AnalysisStandard {
   example?: string;
 }
 
-/** 真实度标准库条目（第4步：AI 客户逼真度标准） */
+/** 演练真实度标准库条目（第4步：AI 客户逼真度标准） */
 export interface RealismStandard {
   id: string;
   tenantId: string;
@@ -78,7 +87,7 @@ export interface LiveIntro {
   goal: string;
 }
 
-/** 场景引导资源包：五步流程的场景级配置 */
+/** 新手指引流程配置：五步流程的场景级配置 */
 export interface ScenarioGuidance {
   id: string;
   tenantId: string;
@@ -86,16 +95,16 @@ export interface ScenarioGuidance {
   name: string;
   /** 第1步 资格提问 */
   qualifyQuestions: string[];
-  /** 第2步 示范剧本；null=无示范模式 */
-  demo: DemoScriptTemplate | null;
+  /** 第2步 示范剧本库引用；null=无示范模式 */
+  demoScriptId: string | null;
   /** 第3步 讲解要点 */
   keyPoints: string[];
-  /** 第3步 分析标准库引用 */
-  analysisStandardIds: string[];
+  /** 第3步 讲解标准库引用 */
+  briefingStandardIds: string[];
   voiceProfile: VoiceProfile;
   /** 第4步 演练旁白+目标 */
   liveIntro: LiveIntro;
-  /** 第4步 真实度标准库引用 */
+  /** 第4步 演练真实度标准库引用 */
   realismStandardIds: string[];
   /** 第4步 难度系数说明参数 */
   difficultyLevels: DifficultyLevel[];

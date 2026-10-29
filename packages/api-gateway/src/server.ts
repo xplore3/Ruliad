@@ -255,7 +255,7 @@ async function main() {
   );
   await app.register(
     (a) => {
-      // 资源库（考题/评分项/金标准）定义本身不敏感：GET 对全员开放（学员端场景详情要展示评估维度），
+      // 资源库（考题/评分标准/评分回归案例）定义本身不敏感：GET 对全员开放（学员端场景详情要展示评估维度），
       // 写操作仍限 admin/platform
       a.addHook('preHandler', async (req, reply) => {
         if (req.method === 'GET') return;

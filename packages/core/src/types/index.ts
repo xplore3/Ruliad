@@ -8,5 +8,6 @@ export * from './exam.js';
 export * from './content.js';
 export * from './user-skill.js';
 export * from './quiz.js';
-export * from './question.js';
+export * from './demo-faq.js';
+export * from './demo-script.js';
 export * from './guidance.js';

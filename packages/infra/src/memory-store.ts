@@ -1,9 +1,10 @@
 import type {
-  AnalysisStandard,
+  BriefingStandard,
   Appeal,
   CalibrationEvent,
   CertRecord,
-  CustomerQuestion,
+  DemoFaq,
+  DemoScript,
   DataConsent,
   DomainEvent,
   Element,
@@ -33,7 +34,7 @@ import type {
 import type { AppealFilter, CertFilter, SeedData, SessionFilter, Store } from './store.js';
 
 /**
- * 内存仓储：本地无 PostgreSQL 时的降级实现，同时用于单元/集成测试。
+ * 内存仓储：本地无 SQLite 数据库时的降级实现，同时用于单元/集成测试。
  * 进程重启即丢失，仅用于开发与演示。
  */
 export class MemoryStore implements Store {
@@ -51,9 +52,10 @@ export class MemoryStore implements Store {
   private sessions = new Map<string, Session>();
   private scoreReports = new Map<string, ScoreReport>();
   private scoreItemDefs = new Map<string, ScoreItemDef>();
-  private customerQuestions = new Map<string, CustomerQuestion>();
+  private demoFaqs = new Map<string, DemoFaq>();
+  private demoScripts = new Map<string, DemoScript>();
   private scenarioGuidances = new Map<string, ScenarioGuidance>();
-  private analysisStandards = new Map<string, AnalysisStandard>();
+  private briefingStandards = new Map<string, BriefingStandard>();
   private realismStandards = new Map<string, RealismStandard>();
   private appeals = new Map<string, Appeal>();
   private examWindows = new Map<string, ExamWindow>();
@@ -224,23 +226,39 @@ private events: DomainEvent[] = [];
     this.scoreItemDefs.delete(id);
   }
 
-  // ---- 客户提问问题库 ----
-  async getCustomerQuestion(id: string) {
-    return this.customerQuestions.get(id);
+  // ---- 示范问答库 ----
+  async getDemoFaq(id: string) {
+    return this.demoFaqs.get(id);
   }
-  async listCustomerQuestions(tenantId: string, category?: string) {
-    return [...this.customerQuestions.values()].filter(
+  async listDemoFaqs(tenantId: string, category?: string) {
+    return [...this.demoFaqs.values()].filter(
       (q) => q.tenantId === tenantId && (!category || q.category === category)
     );
   }
-  async saveCustomerQuestion(q: CustomerQuestion) {
-    this.customerQuestions.set(q.id, q);
+  async saveDemoFaq(q: DemoFaq) {
+    this.demoFaqs.set(q.id, q);
   }
-  async deleteCustomerQuestion(id: string) {
-    this.customerQuestions.delete(id);
+  async deleteDemoFaq(id: string) {
+    this.demoFaqs.delete(id);
   }
 
-  // ---- 场景引导资源库 ----
+  // ---- 示范剧本库 ----
+  async getDemoScript(id: string) {
+    return this.demoScripts.get(id);
+  }
+  async listDemoScripts(tenantId: string, category?: string) {
+    return [...this.demoScripts.values()].filter(
+      (s) => s.tenantId === tenantId && (!category || s.category === category)
+    );
+  }
+  async saveDemoScript(s: DemoScript) {
+    this.demoScripts.set(s.id, s);
+  }
+  async deleteDemoScript(id: string) {
+    this.demoScripts.delete(id);
+  }
+
+  // ---- 新手指引流程配置 ----
   async getScenarioGuidance(scenarioId: string) {
     return [...this.scenarioGuidances.values()].find((g) => g.scenarioId === scenarioId);
   }
@@ -256,14 +274,14 @@ private events: DomainEvent[] = [];
   async deleteScenarioGuidance(id: string) {
     this.scenarioGuidances.delete(id);
   }
-  async listAnalysisStandards(tenantId: string) {
-    return [...this.analysisStandards.values()].filter((s) => s.tenantId === tenantId);
+  async listBriefingStandards(tenantId: string) {
+    return [...this.briefingStandards.values()].filter((s) => s.tenantId === tenantId);
   }
-  async saveAnalysisStandard(s: AnalysisStandard) {
-    this.analysisStandards.set(s.id, s);
+  async saveBriefingStandard(s: BriefingStandard) {
+    this.briefingStandards.set(s.id, s);
   }
-  async deleteAnalysisStandard(id: string) {
-    this.analysisStandards.delete(id);
+  async deleteBriefingStandard(id: string) {
+    this.briefingStandards.delete(id);
   }
   async listRealismStandards(tenantId: string) {
     return [...this.realismStandards.values()].filter((s) => s.tenantId === tenantId);
@@ -432,7 +450,7 @@ this.quizQuestions.delete(id);
     for (const k of data.productKBs) this.productKBs.set(k.id, k);
     for (const w of data.examWindows ?? []) this.examWindows.set(w.id, w);
     for (const p of data.extractionProjects ?? []) this.extractionProjects.set(p.id, p);
-    for (const s of data.analysisStandards ?? []) this.analysisStandards.set(s.id, s);
+    for (const s of data.briefingStandards ?? []) this.briefingStandards.set(s.id, s);
     for (const s of data.realismStandards ?? []) this.realismStandards.set(s.id, s);
     for (const g of data.scenarioGuidance ?? []) this.scenarioGuidances.set(g.id, g);
   }

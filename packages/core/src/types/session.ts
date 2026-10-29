@@ -59,7 +59,7 @@ export interface Session {
   liveStartedAt?: string;
   /** 新手指引资格问答结果（answers 按问题顺序） */
   qualifyResult?: { answers: string[]; experienced: boolean };
-  /** 演练难度等级（对应场景引导包 difficultyLevels.level；缺省用引导包 defaultDifficulty） */
+  /** 演练难度等级（对应新手指引流程配置 difficultyLevels.level；缺省用指引配置 defaultDifficulty） */
   difficulty?: number;
   startedAt: string;
   endedAt?: string;

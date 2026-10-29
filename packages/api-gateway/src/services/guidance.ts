@@ -1,18 +1,19 @@
 import type {
-  AnalysisStandard,
+  BriefingStandard,
   DemoLine,
   DemoScriptTemplate,
   LLMGateway,
   ScenarioGuidance,
 } from '@grasp-mvp/core';
 import type { Store } from '@grasp-mvp/infra';
-import { DEMO_FAQ_ITEMS, type DemoFaqItem } from '../demo-faq.data.js';
+import { DEMO_FAQ_ITEMS } from '../demo-faq.data.js';
 
 /**
- * 场景引导新手指引：资格判断 + 示范剧本渲染 + 讲解口播稿组装。
- * 资源库化以后，示范剧本由各场景的 ScenarioGuidance.demo 模板渲染（占位符 + FAQ 池抽取），
- * 不依赖 LLM；资格判断与示范选择的 LLM 调用失败/解析失败均有确定性兜底，保证 mock 环境可跑通。
- * 地推场景保留 generateDemoScript 作为资源缺失时的兜底。
+ * 新手指引流程：资格判断 + 示范剧本演绎 + 讲解口播稿组装。
+ * 资源库化以后，示范剧本存示范剧本库（DemoScript），由 ScenarioGuidance.demoScriptId 引用。
+ * 示范执行方式：先把模板确定性渲染成参照稿（变量 + FAQ 池抽取），再交给大模型理解演绎成自然对话；
+ * LLM 失败/输出不合法时回退参照稿，保证 mock/弱网环境可跑通。
+ * 场景无指引配置或剧本引用失效时不提供兜底示范剧本，由路由声明无示范（hasDemo=false），前端跳过示范步骤。
  */
 
 /** 资格提问兜底（场景无引导资源时的默认两问） */
@@ -41,7 +42,7 @@ function fallbackExperienced(answer: string): boolean {
 }
 
 /**
- * 判断学员是否有相关经验（问题数量按场景引导资源配置，不写死）。
+ * 判断学员是否有相关经验（问题数量按新手指引流程配置，不写死）。
  * 全部问题都答"做过"才返回 true；任一题"没做过"或缺答 → false。
  */
 export async function judgeExperience(
@@ -79,97 +80,6 @@ export async function judgeExperience(
 /** 清洗标准答案中的占位标记：xx岁 → 剧本中孩子的年龄；哥/姐 → 当前剧本的称呼（大哥/姐） */
 function sanitizeFaq(text: string, age: number, address: string): string {
   return text.replace(/xx岁/g, `${age}岁`).replace(/哥\/姐/g, address).trim();
-}
-
-function pickTwoFaqs(): [DemoFaqItem, DemoFaqItem] {
-  const pool = [...DEMO_FAQ_ITEMS];
-  const first = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
-  const second = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
-  return [first, second];
-}
-
-const SALES_SURNAMES = ['王', '李', '张', '刘', '陈'];
-
-/**
- * 生成标准地推示范剧本（确定性模板，不走 LLM，保证流程逐字符合培训规范）：
- * 激情开场（大哥/姐 二选一且全剧统一）→ 客户驻足提问（题库问题+标准答案）→ 问年龄/黄金年龄
- * → 指着邀请函介绍体验课与地址 → 蹲下与孩子玩游戏 → 让孩子请家长订邀请函（小声→大声）
- * → 垫本子 → 客户再问（题库问题+标准答案）→ 递笔成交 → 孩子道谢 → 微信还是现金 → 致谢定时间道别。
- * version 仅作接口兼容，随机性来自称呼/年龄/姓氏/题库抽题。
- * 资源库化以后作为地推场景资源缺失时的兜底。
- */
-export function generateDemoScript(_version: number): DemoLine[] {
-  // 开场称呼：大哥 或 姐 二选一，全剧统一；对应孩子口中的 爸爸/妈妈
-  const address = Math.random() < 0.5 ? '大哥' : '姐';
-  const parent = address === '大哥' ? '爸爸' : '妈妈';
-  const age = 4 + Math.floor(Math.random() * 7); // 4~10 岁
-  const surname = SALES_SURNAMES[Math.floor(Math.random() * SALES_SURNAMES.length)];
-  const [faq1, faq2] = pickTwoFaqs();
-  const answer1 = sanitizeFaq(faq1.faq, age, address);
-  const answer2 = sanitizeFaq(faq2.faq, age, address);
-
-  // 销售全程高唤醒（arousal≈0.9）+ 9 倍激情（excitement=9，语速/音调抬升顶到上限）；小朋友小声/大声用 arousal 区分
-  const lines: DemoLine[] = [
-    {
-      role: 'sales',
-      arousal: 0.95,
-      text: `${address}，您好！像您这么有气质的家长，肯定不会拒绝孩子一次成长的机会！我们是天童英语培训机构的，我们想邀请您，带孩子来参加我们的英语试听活动！`,
-    },
-    { role: 'narrator', text: '客户听到介绍，放慢了脚步，停下来接过邀请函，表现出了兴趣。' },
-    { role: 'customer', text: faq1.question },
-    { role: 'sales', arousal: 0.9, text: answer1 },
-    { role: 'sales', arousal: 0.9, text: `对了${address}，您家孩子今年几岁啦？` },
-    { role: 'customer', text: `我家孩子今年${age}岁了。` },
-    { role: 'sales', arousal: 0.95, text: `太好了！${age}岁就是孩子学习英语的黄金年龄！` },
-    { role: 'narrator', text: '客户已经接过了邀请函，销售指着邀请函继续介绍。' },
-    {
-      role: 'sales',
-      arousal: 0.9,
-      text: '孩子过来以后，我们会像这副图画一样，给孩子安排一节英语的体验课，然后让孩子进行口语实践。到时候您觉得好，以后可以让孩子在我们这里学；如果您觉得不合适，也没有关系，到时候您听完以后自己做决定。',
-    },
-    {
-      role: 'sales',
-      arousal: 0.9,
-      text: `您看，这是我们的地址，就在万达广场三楼。这是我的电话，您叫我小${surname}就行。这是我们的邀请函，您带孩子过来，需要您给孩子订一张邀请函，就5块钱，一个家庭都可以过来。来，在这边给孩子填写一下姓名和电话，到时候我们给孩子安排活动。`,
-    },
-    { role: 'narrator', text: '此时销售蹲下来，表示对孩子的亲切，并且和孩子玩一个英语小游戏，激发孩子的兴趣。' },
-    { role: 'sales', arousal: 0.9, text: '小朋友，刚才我们玩的游戏好玩吗？' },
-    { role: 'child', arousal: 0.6, text: '好玩！' },
-    {
-      role: 'sales',
-      arousal: 0.9,
-      text: `那${parent}给你花5块钱，给你订一张邀请函，到时候带你过来，我们玩更好玩的游戏，好不好啊？`,
-    },
-    { role: 'child', arousal: 0.2, text: '好！' },
-    { role: 'sales', arousal: 1, text: '真棒！小朋友大声一点，好不好啊？' },
-    { role: 'child', arousal: 0.85, text: '好！' },
-    { role: 'sales', arousal: 0.9, text: `那小朋友，你把笔递给${parent}，让${parent}给你订一张邀请函。` },
-    { role: 'narrator', text: `小朋友把笔递给了${parent}。销售站了起来，把本子递过去，垫在邀请函下面。` },
-    { role: 'sales', arousal: 0.9, text: `${address}，您垫着写，这样舒服一点。` },
-    { role: 'customer', text: faq2.question },
-    { role: 'sales', arousal: 0.9, text: `${answer2}${address}，给孩子订上！` },
-    { role: 'narrator', text: '说这句话的同时，要配合把笔从上往下落、并递给客户的肢体语言。' },
-    { role: 'narrator', text: '客户在邀请函上填下了姓名和电话，销售撕下回执单。此时销售应该对孩子说话。' },
-    {
-      role: 'sales',
-      arousal: 0.9,
-      text: `小朋友，${parent}给你花5块钱订了一张邀请函，你跟${parent}说一声谢谢，好不好啊？`,
-    },
-    { role: 'child', arousal: 0.6, text: `谢谢${parent}！` },
-    { role: 'sales', arousal: 0.9, text: `${address}，您是微信还是现金？` },
-    {
-      role: 'narrator',
-      text: '客户完成缴费以后，不要忘记说"谢谢你的信任和支持"，并且现场定下试听时间。到这里为止，跟客户道别，地推的演示就结束了。',
-    },
-    {
-      role: 'sales',
-      arousal: 0.9,
-      text: '谢谢您的信任和支持！那咱们就把试听时间定在本周六上午十点，到时候您带孩子直接过来就行！',
-    },
-    { role: 'narrator', text: '销售与客户道别，地推演示结束。' },
-  ];
-  // 销售台词激情拉满：arousal=1 × excitement=9 → 激情模式目标值：语速 1.15x（略快）、音调 1.1x（接近正常）、音量 65
-  return lines.map((l) => (l.role === 'sales' ? { ...l, arousal: 1, excitement: 9 } : l));
 }
 
 /** 再听一版关键词 */
@@ -210,7 +120,7 @@ export interface DemoFaqPoolItem {
   faq: string;
 }
 
-/** FAQ 池路由：池标识 → 客户提问问题库的分类集合；'ground-push-demo-faq' 走内置 28 条题库 */
+/** 旧版 faqPoolRef 别名映射（兼容存量指引配置）；新配置直接把 faqPoolRef 填示范问答库的分类名 */
 const FAQ_POOL_CATEGORIES: Record<string, string[]> = {
   'ground-push-demo-faq': ['地推示范'],
   'inquiry-demo-faq': ['咨询接待场景', '线下谈单场景', '通用场景'],
@@ -219,8 +129,9 @@ const FAQ_POOL_CATEGORIES: Record<string, string[]> = {
 
 /**
  * 按 faqPoolRef 解析 FAQ 池：
- * - 优先从客户提问问题库（CustomerQuestion）按 FAQ_POOL_CATEGORIES 分类读取，referenceAnswer 作为标准答案
- * - 库中取不足 need 条时回退 demo-faq.data.ts 内置 28 条地推 FAQ（保证 mock/空库可跑）
+ * 1. poolRef 直接当示范问答库（DemoFaq）的分类名读取，取够 need 条即用（referenceAnswer 作为标准答案）
+ * 2. 未取够时走 FAQ_POOL_CATEGORIES 旧映射，按映射的分类逐个读（兼容存量指引配置）
+ * 3. 都取不够 need 条时回退 demo-faq.data.ts 内置 28 条地推 FAQ（保证 mock/空库可跑）
  */
 export async function resolveFaqPool(
   store: Store,
@@ -228,13 +139,21 @@ export async function resolveFaqPool(
   poolRef: string | undefined,
   need: number
 ): Promise<DemoFaqPoolItem[]> {
-  const categories = poolRef ? FAQ_POOL_CATEGORIES[poolRef] : undefined;
-  if (categories) {
-    const questions = await store.listCustomerQuestions(tenantId);
-    const pool = questions
-      .filter((q) => categories.includes(q.category) && q.referenceAnswer?.trim())
+  const readCategories = async (categories: string[]): Promise<DemoFaqPoolItem[]> => {
+    const pools = await Promise.all(categories.map((category) => store.listDemoFaqs(tenantId, category)));
+    return pools
+      .flat()
+      .filter((q) => q.referenceAnswer?.trim())
       .map((q) => ({ question: q.question, faq: q.referenceAnswer!.trim() }));
-    if (pool.length >= need) return pool;
+  };
+  if (poolRef) {
+    const direct = await readCategories([poolRef]);
+    if (direct.length >= need) return direct;
+    const mapped = FAQ_POOL_CATEGORIES[poolRef];
+    if (mapped) {
+      const pool = await readCategories(mapped);
+      if (pool.length >= need) return pool;
+    }
   }
   return DEMO_FAQ_ITEMS.map((x) => ({ question: x.question, faq: x.faq }));
 }
@@ -286,7 +205,71 @@ export function renderDemoScript(template: DemoScriptTemplate, faqPool: DemoFaqP
   return template.lines.map((line) => ({ ...line, text: interpolate(line.text) }));
 }
 
-/** 加载场景引导资源包（无资源返回 undefined，调用方走兜底逻辑） */
+const DEMO_ROLES = new Set(['sales', 'customer', 'child', 'narrator']);
+
+/** 清洗 LLM 演绎输出的台词行；非法行返回 null */
+function sanitizePerformedLine(raw: unknown): DemoLine | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const line = raw as Record<string, unknown>;
+  if (typeof line.role !== 'string' || !DEMO_ROLES.has(line.role)) return null;
+  if (typeof line.text !== 'string' || !line.text.trim()) return null;
+  const out: DemoLine = { role: line.role as DemoLine['role'], text: line.text.trim() };
+  if (Number.isFinite(line.excitement)) out.excitement = Math.max(1, Math.min(10, Math.round(Number(line.excitement))));
+  if (Number.isFinite(line.arousal)) out.arousal = Math.max(0, Math.min(1, Number(line.arousal)));
+  return out;
+}
+
+/**
+ * 示范执行（第2步）：剧本库内容不照念，而是先确定性渲染成参照稿，再交给大模型理解演绎成自然的双人对话。
+ * 事实内容（称呼/年龄/FAQ 问答要点/流程顺序）以参照稿为准，措辞由 LLM 口语化演绎；
+ * version > 1（学员点"再听一版"）时要求换一种演绎风格。LLM 失败/输出不合法回退参照稿。
+ */
+export async function performDemoScript(
+  gateway: LLMGateway,
+  template: DemoScriptTemplate,
+  faqPool: DemoFaqPoolItem[],
+  version = 1
+): Promise<DemoLine[]> {
+  const reference = renderDemoScript(template, faqPool);
+  const scriptText = reference
+    .map((l) => `${{ sales: '销售', customer: '客户', child: '孩子', narrator: '旁白' }[l.role]}：${l.text}`)
+    .join('\n');
+  try {
+    const result = await gateway.forTask('actor').chat(
+      [
+        {
+          role: 'user',
+          content: [
+            '你是销售培训示范剧的演绎引擎。下面是一份销售示范剧本参照稿（角色：销售/客户/孩子/旁白）。',
+            '请理解剧本的流程、事实信息和问答要点，把它演绎成一段自然、口语化、像真实现场发生的双人对话。',
+            '要求：',
+            '1. 保持剧本的流程顺序和全部事实信息不变（称呼、年龄、课程信息、客户的提问与销售的应答要点必须保留原意）',
+            '2. 措辞可以自然发挥：加语气词、合理过渡、让客户反应更真实；不要机械照念',
+            '3. 可以微调台词拆分与顺序衔接，但总行数与参照稿接近，客户提问与对应应答必须成对出现',
+            version > 1 ? '4. 这是再听一版的请求：换一种演绎风格（节奏/用词/客户性格微调），事实不变' : '',
+            '只输出 JSON：{"lines":[{"role":"sales|customer|child|narrator","text":"台词","excitement":1-10 整数（情绪强度，销售开场高、旁白低）}]}',
+            '不要输出任何其他内容。',
+            '',
+            '【剧本参照稿】',
+            scriptText,
+          ].filter(Boolean).join('\n'),
+        },
+      ],
+      { jsonMode: true, temperature: 0.8 }
+    );
+    const parsed = JSON.parse(extractJson(result.content)) as { lines?: unknown };
+    const lines = (Array.isArray(parsed.lines) ? parsed.lines : [])
+      .map(sanitizePerformedLine)
+      .filter((l): l is DemoLine => !!l);
+    // 演绎结果行数过少视为失败（剧本被截断），回退参照稿
+    if (lines.length >= Math.max(4, Math.floor(reference.length / 2))) return lines;
+  } catch {
+    /* 落入兜底 */
+  }
+  return reference;
+}
+
+/** 加载新手指引流程配置（无配置返回 undefined，调用方走兜底逻辑） */
 export async function getGuidance(store: Store, scenarioId: string): Promise<ScenarioGuidance | undefined> {
   return store.getScenarioGuidance(scenarioId);
 }
@@ -294,20 +277,20 @@ export async function getGuidance(store: Store, scenarioId: string): Promise<Sce
 const CN_NUMERALS = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
 
 /**
- * 组装教练口播稿（第3步）：讲解要点 + 引用的分析标准库条目，按"第一/第二…"编号。
+ * 组装教练口播稿（第3步）：讲解要点 + 引用的讲解标准库条目，按"第一/第二…"编号。
  * 返回纯文本数组，每项一段口播。
  */
-export function composeBriefing(guidance: ScenarioGuidance, standards: AnalysisStandard[]): string[] {
-  const referenced = guidance.analysisStandardIds
+export function composeBriefing(guidance: ScenarioGuidance, standards: BriefingStandard[]): string[] {
+  const referenced = guidance.briefingStandardIds
     .map((id) => standards.find((s) => s.id === id))
-    .filter((s): s is AnalysisStandard => !!s);
+    .filter((s): s is BriefingStandard => !!s);
   const points = [
     ...guidance.keyPoints,
     ...referenced.map((s) => `${s.name}：${s.description}${s.example ? `例如：${s.example}` : ''}`),
   ];
   if (points.length === 0) return [];
-  // 无示范模式（demo=null）的场景没有"刚才这段示范"，开场与收尾问句相应调整
-  const hasDemo = guidance.demo != null;
+  // 无示范模式（demoScriptId=null）的场景没有"刚才这段示范"，开场与收尾问句相应调整
+  const hasDemo = guidance.demoScriptId != null;
   const lines = [hasDemo ? '先来讲解刚才这段示范的关键点。' : '先来讲解这个场景的关键要领。'];
   points.forEach((point, i) => {
     const numeral = CN_NUMERALS[i] ?? String(i + 1);

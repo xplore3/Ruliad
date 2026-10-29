@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import type {
-  AnalysisStandard,
+  BriefingStandard,
   ChatMessage,
-  CustomerQuestion,
+  DemoFaq,
+  DemoRole,
+  DemoScript,
   GoldenCase,
   RealismStandard,
   ScenarioGuidance,
@@ -12,20 +14,37 @@ import type {
 } from '@grasp-mvp/core';
 import type { RouteContext } from '../ctx.js';
 
-type ExtractTarget = 'scenario' | 'question' | 'score-item' | 'golden-case' | 'analysis-standard' | 'realism-standard';
+type ExtractTarget = 'scenario' | 'demo-faq' | 'score-item' | 'golden-case' | 'briefing-standard' | 'realism-standard';
 
 const EXTRACT_TARGETS: ExtractTarget[] = [
   'scenario',
-  'question',
+  'demo-faq',
   'score-item',
   'golden-case',
-  'analysis-standard',
+  'briefing-standard',
   'realism-standard',
 ];
 
 const SCORE_LAYERS = new Set<ScoreItemDef['layer']>(['company', 'team', 'personal']);
 
-/** 校验评分项请求体；返回错误消息，null 表示通过 */
+const DEMO_ROLES = new Set<DemoRole>(['sales', 'customer', 'child', 'narrator']);
+
+/** 校验示范剧本请求体；返回错误消息，null 表示通过 */
+function validateDemoScriptBody(body: Partial<DemoScript>): string | null {
+  if (!body.category?.trim()) return 'category 必填';
+  if (!body.name?.trim()) return 'name 必填';
+  if (!Array.isArray(body.lines) || body.lines.length === 0) return 'lines 必填且非空';
+  for (const [i, line] of body.lines.entries()) {
+    if (!line || !DEMO_ROLES.has(line.role)) return `lines[${i}] 的 role 仅支持 'sales' | 'customer' | 'child' | 'narrator'`;
+    if (!line.text?.trim()) return `lines[${i}] 的 text 必填`;
+  }
+  if (body.faqPick !== undefined && (!Number.isInteger(body.faqPick) || body.faqPick < 0)) {
+    return 'faqPick 须为非负整数';
+  }
+  return null;
+}
+
+/** 校验评分标准请求体；返回错误消息，null 表示通过 */
 function validateScoreItemBody(body: Partial<ScoreItemDef>): string | null {
   if (!body.skillPointId?.trim()) return 'skillPointId 必填';
   if (!body.name?.trim()) return 'name 必填';
@@ -41,8 +60,8 @@ function validateScoreItemBody(body: Partial<ScoreItemDef>): string | null {
   return null;
 }
 
-/** 校验客户提问请求体；返回错误消息，null 表示通过 */
-function validateQuestionBody(body: Partial<CustomerQuestion>): string | null {
+/** 校验示范问答请求体；返回错误消息，null 表示通过 */
+function validateDemoFaqBody(body: Partial<DemoFaq>): string | null {
   if (!body.category?.trim()) return 'category 必填';
   if (!body.question?.trim()) return 'question 必填';
   if (body.difficulty !== undefined && (!Number.isFinite(body.difficulty) || body.difficulty < 1 || body.difficulty > 3)) {
@@ -51,8 +70,8 @@ function validateQuestionBody(body: Partial<CustomerQuestion>): string | null {
   return null;
 }
 
-/** 归一化客户提问：trim 文本、过滤空可选字段 */
-function normalizeQuestion(body: Partial<CustomerQuestion>, tenantId: string, id?: string): CustomerQuestion {
+/** 归一化示范问答：trim 文本、过滤空可选字段 */
+function normalizeDemoFaq(body: Partial<DemoFaq>, tenantId: string, id?: string): DemoFaq {
   return {
     id: id ?? randomUUID(),
     tenantId,
@@ -82,46 +101,46 @@ function parseExtractResult(content: string): { reply?: string; rows?: Record<st
 export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Promise<void> {
   const { store, gateway } = ctx;
 
-  // ---- 客户提问问题库 ----
-  app.get<{ Querystring: { category?: string } }>('/library/questions', async (request) => ({
-    questions: await store.listCustomerQuestions(request.tenantId, request.query.category),
+  /** 示范问答库 —— 新手指引第2步「示范」的 FAQ 池，renderDemoScript 渲染示范剧本时抽取 */
+  app.get<{ Querystring: { category?: string } }>('/library/demo-faqs', async (request) => ({
+    faqs: await store.listDemoFaqs(request.tenantId, request.query.category),
   }));
 
-  app.post<{ Body: Partial<CustomerQuestion> }>('/library/questions', async (request, reply) => {
-    const error = validateQuestionBody(request.body ?? {});
+  app.post<{ Body: Partial<DemoFaq> }>('/library/demo-faqs', async (request, reply) => {
+    const error = validateDemoFaqBody(request.body ?? {});
     if (error) return reply.code(400).send({ error });
-    const q = normalizeQuestion(request.body ?? {}, request.tenantId);
-    await store.saveCustomerQuestion(q);
+    const q = normalizeDemoFaq(request.body ?? {}, request.tenantId);
+    await store.saveDemoFaq(q);
     return reply.code(201).send(q);
   });
 
   // 批量新建（表格粘贴 / AI 提炼确认后入库）；全量校验，任一不合法整体拒绝
-  app.post<{ Body: { items?: Partial<CustomerQuestion>[] } }>(
-    '/library/questions/batch',
+  app.post<{ Body: { items?: Partial<DemoFaq>[] } }>(
+    '/library/demo-faqs/batch',
     async (request, reply) => {
       const items = request.body?.items;
       if (!Array.isArray(items) || items.length === 0) {
         return reply.code(400).send({ error: 'items 必填且非空' });
       }
       for (const [i, item] of items.entries()) {
-        const error = validateQuestionBody(item);
+        const error = validateDemoFaqBody(item);
         if (error) return reply.code(400).send({ error: `items[${i}]: ${error}` });
       }
-      const saved = items.map((item) => normalizeQuestion(item, request.tenantId));
-      for (const q of saved) await store.saveCustomerQuestion(q);
-      return reply.code(201).send({ count: saved.length, questions: saved });
+      const saved = items.map((item) => normalizeDemoFaq(item, request.tenantId));
+      for (const q of saved) await store.saveDemoFaq(q);
+      return reply.code(201).send({ count: saved.length, faqs: saved });
     }
   );
 
-  app.put<{ Params: { id: string }; Body: Partial<CustomerQuestion> }>(
-    '/library/questions/:id',
+  app.put<{ Params: { id: string }; Body: Partial<DemoFaq> }>(
+    '/library/demo-faqs/:id',
     async (request, reply) => {
-      const existing = await store.getCustomerQuestion(request.params.id);
+      const existing = await store.getDemoFaq(request.params.id);
       if (!existing || existing.tenantId !== request.tenantId) {
-        return reply.code(404).send({ error: '问题不存在' });
+        return reply.code(404).send({ error: '示范问答不存在' });
       }
       const body = request.body ?? {};
-      const merged: CustomerQuestion = {
+      const merged: DemoFaq = {
         ...existing,
         category: body.category?.trim() ?? existing.category,
         question: body.question?.trim() ?? existing.question,
@@ -130,23 +149,79 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
         skillPointIds: body.skillPointIds !== undefined ? body.skillPointIds : existing.skillPointIds,
         frequency: body.frequency !== undefined ? body.frequency : existing.frequency,
       };
-      const error = validateQuestionBody(merged);
+      const error = validateDemoFaqBody(merged);
       if (error) return reply.code(400).send({ error });
-      await store.saveCustomerQuestion(merged);
+      await store.saveDemoFaq(merged);
       return merged;
     }
   );
 
-  app.delete<{ Params: { id: string } }>('/library/questions/:id', async (request, reply) => {
-    const existing = await store.getCustomerQuestion(request.params.id);
+  app.delete<{ Params: { id: string } }>('/library/demo-faqs/:id', async (request, reply) => {
+    const existing = await store.getDemoFaq(request.params.id);
     if (!existing || existing.tenantId !== request.tenantId) {
-      return reply.code(404).send({ error: '问题不存在' });
+      return reply.code(404).send({ error: '示范问答不存在' });
     }
-    await store.deleteCustomerQuestion(request.params.id);
+    await store.deleteDemoFaq(request.params.id);
     return { ok: true };
   });
 
-  // ---- 评分项定义 ----
+  /** 示范剧本库 —— 新手指引第2步「示范」的双人对戏剧本，demo 路由按 demoScriptId 引用后交给大模型演绎 */
+  app.get<{ Querystring: { category?: string } }>('/library/demo-scripts', async (request) => ({
+    items: await store.listDemoScripts(request.tenantId, request.query.category),
+  }));
+
+  app.post<{ Body: Partial<DemoScript> }>('/library/demo-scripts', async (request, reply) => {
+    const body = request.body ?? {};
+    const error = validateDemoScriptBody(body);
+    if (error) return reply.code(400).send({ error });
+    const script: DemoScript = {
+      id: body.id ?? randomUUID(),
+      tenantId: request.tenantId,
+      category: body.category!.trim(),
+      name: body.name!.trim(),
+      lines: body.lines!,
+      variables: body.variables ?? undefined,
+      faqPick: body.faqPick ?? undefined,
+      faqPoolRef: body.faqPoolRef?.trim() || undefined,
+    };
+    await store.saveDemoScript(script);
+    return reply.code(201).send(script);
+  });
+
+  app.put<{ Params: { id: string }; Body: Partial<DemoScript> }>(
+    '/library/demo-scripts/:id',
+    async (request, reply) => {
+      const existing = await store.getDemoScript(request.params.id);
+      if (!existing || existing.tenantId !== request.tenantId) {
+        return reply.code(404).send({ error: '示范剧本不存在' });
+      }
+      const body = request.body ?? {};
+      const merged: DemoScript = {
+        ...existing,
+        category: body.category?.trim() ?? existing.category,
+        name: body.name?.trim() ?? existing.name,
+        lines: body.lines ?? existing.lines,
+        variables: body.variables !== undefined ? body.variables : existing.variables,
+        faqPick: body.faqPick !== undefined ? body.faqPick : existing.faqPick,
+        faqPoolRef: body.faqPoolRef !== undefined ? body.faqPoolRef?.trim() || undefined : existing.faqPoolRef,
+      };
+      const error = validateDemoScriptBody(merged);
+      if (error) return reply.code(400).send({ error });
+      await store.saveDemoScript(merged);
+      return merged;
+    }
+  );
+
+  app.delete<{ Params: { id: string } }>('/library/demo-scripts/:id', async (request, reply) => {
+    const existing = await store.getDemoScript(request.params.id);
+    if (!existing || existing.tenantId !== request.tenantId) {
+      return reply.code(404).send({ error: '示范剧本不存在' });
+    }
+    await store.deleteDemoScript(request.params.id);
+    return { ok: true };
+  });
+
+  /** 评分标准库 —— 第5步「评分」逐项评分依据 */
   app.get<{ Querystring: { skillPointId?: string } }>('/library/score-items', async (request) => ({
     items: await store.listScoreItemDefs(request.tenantId, request.query.skillPointId),
   }));
@@ -179,7 +254,7 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     async (request, reply) => {
       const defs = await store.listScoreItemDefs(request.tenantId);
       const existing = defs.find((d) => d.id === request.params.id);
-      if (!existing) return reply.code(404).send({ error: '评分项不存在' });
+      if (!existing) return reply.code(404).send({ error: '评分标准不存在' });
       const body = request.body ?? {};
       const merged: ScoreItemDef = {
         ...existing,
@@ -202,13 +277,13 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
   app.delete<{ Params: { id: string } }>('/library/score-items/:id', async (request, reply) => {
     const defs = await store.listScoreItemDefs(request.tenantId);
     if (!defs.some((d) => d.id === request.params.id)) {
-      return reply.code(404).send({ error: '评分项不存在' });
+      return reply.code(404).send({ error: '评分标准不存在' });
     }
     await store.deleteScoreItemDef(request.params.id);
     return { ok: true };
   });
 
-  // ---- 金标准案例 ----
+  /** 评分回归案例库 —— 评分引擎回归测试用，不参与实时执行 */
   app.get('/library/golden-cases', async () => ({
     cases: await store.listGoldenCases(),
   }));
@@ -228,7 +303,7 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     async (request, reply) => {
       const cases = await store.listGoldenCases();
       const existing = cases.find((c) => c.id === request.params.id);
-      if (!existing) return reply.code(404).send({ error: '金标准案例不存在' });
+      if (!existing) return reply.code(404).send({ error: '评分回归案例不存在' });
       const body = request.body ?? {};
       const updated: GoldenCase = {
         ...existing,
@@ -247,23 +322,23 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
   app.delete<{ Params: { id: string } }>('/library/golden-cases/:id', async (request, reply) => {
     const cases = await store.listGoldenCases();
     if (!cases.some((c) => c.id === request.params.id)) {
-      return reply.code(404).send({ error: '金标准案例不存在' });
+      return reply.code(404).send({ error: '评分回归案例不存在' });
     }
     await store.deleteGoldenCase(request.params.id);
     return { ok: true };
   });
 
-  // ---- 分析标准库（场景引导第3步引用） ----
-  app.get('/library/analysis-standards', async (request) => ({
-    items: await store.listAnalysisStandards(request.tenantId),
+  /** 讲解标准库 —— 第3步「讲解」口播稿引用（composeBriefing） */
+  app.get('/library/briefing-standards', async (request) => ({
+    items: await store.listBriefingStandards(request.tenantId),
   }));
 
-  app.post<{ Body: Partial<AnalysisStandard> }>('/library/analysis-standards', async (request, reply) => {
+  app.post<{ Body: Partial<BriefingStandard> }>('/library/briefing-standards', async (request, reply) => {
     const body = request.body ?? {};
     if (!body.name?.trim()) return reply.code(400).send({ error: 'name 必填' });
     if (!body.category?.trim()) return reply.code(400).send({ error: 'category 必填' });
     if (!body.description?.trim()) return reply.code(400).send({ error: 'description 必填' });
-    const standard: AnalysisStandard = {
+    const standard: BriefingStandard = {
       id: body.id ?? randomUUID(),
       tenantId: request.tenantId,
       name: body.name.trim(),
@@ -271,20 +346,20 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
       description: body.description.trim(),
       example: body.example?.trim() || undefined,
     };
-    await store.saveAnalysisStandard(standard);
+    await store.saveBriefingStandard(standard);
     return reply.code(201).send(standard);
   });
 
-  app.delete<{ Params: { id: string } }>('/library/analysis-standards/:id', async (request, reply) => {
-    const items = await store.listAnalysisStandards(request.tenantId);
+  app.delete<{ Params: { id: string } }>('/library/briefing-standards/:id', async (request, reply) => {
+    const items = await store.listBriefingStandards(request.tenantId);
     if (!items.some((s) => s.id === request.params.id)) {
-      return reply.code(404).send({ error: '分析标准不存在' });
+      return reply.code(404).send({ error: '讲解标准不存在' });
     }
-    await store.deleteAnalysisStandard(request.params.id);
+    await store.deleteBriefingStandard(request.params.id);
     return { ok: true };
   });
 
-  // ---- 真实度标准库（场景引导第4步引用） ----
+  /** 演练真实度标准库 —— 第4步「演练」AI 客户逼真度要求，runTurn 装配时注入 */
   app.get('/library/realism-standards', async (request) => ({
     items: await store.listRealismStandards(request.tenantId),
   }));
@@ -308,13 +383,13 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
   app.delete<{ Params: { id: string } }>('/library/realism-standards/:id', async (request, reply) => {
     const items = await store.listRealismStandards(request.tenantId);
     if (!items.some((s) => s.id === request.params.id)) {
-      return reply.code(404).send({ error: '真实度标准不存在' });
+      return reply.code(404).send({ error: '演练真实度标准不存在' });
     }
     await store.deleteRealismStandard(request.params.id);
     return { ok: true };
   });
 
-  // ---- 场景引导资源包 ----
+  /** 新手指引流程配置 —— 五步流程（资格提问→示范→讲解→演练→评分）的场景级总配置 */
   app.get('/library/scenario-guidance', async (request) => ({
     items: await store.listScenarioGuidances(request.tenantId),
   }));
@@ -330,18 +405,18 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
       ...body,
       id: body.id ?? randomUUID(),
       tenantId: request.tenantId,
-      demo: body.demo ?? null,
+      demoScriptId: body.demoScriptId ?? null,
       keyPoints: body.keyPoints ?? [],
-      analysisStandardIds: body.analysisStandardIds ?? [],
+      briefingStandardIds: body.briefingStandardIds ?? [],
       realismStandardIds: body.realismStandardIds ?? [],
       difficultyLevels: body.difficultyLevels ?? [],
       defaultDifficulty: body.defaultDifficulty ?? 1,
       scoringFocus: body.scoringFocus ?? [],
     } as ScenarioGuidance;
-    // 每场景只允许一条引导包（getScenarioGuidance 按 scenarioId 单条取值）
+    // 每场景只允许一条指引配置（getScenarioGuidance 按 scenarioId 单条取值）
     const existing = await store.getScenarioGuidance(guidance.scenarioId);
     if (existing && existing.id !== guidance.id) {
-      return reply.code(409).send({ error: '该场景已配置引导包，请编辑现有记录', existingId: existing.id });
+      return reply.code(409).send({ error: '该场景已有指引配置，请编辑现有记录', existingId: existing.id });
     }
     await store.saveScenarioGuidance(guidance);
     return reply.code(201).send(guidance);
@@ -350,7 +425,7 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
   app.delete<{ Params: { id: string } }>('/library/scenario-guidance/:id', async (request, reply) => {
     const items = await store.listScenarioGuidances(request.tenantId);
     if (!items.some((g) => g.id === request.params.id)) {
-      return reply.code(404).send({ error: '场景引导资源不存在' });
+      return reply.code(404).send({ error: '新手指引流程配置不存在' });
     }
     await store.deleteScenarioGuidance(request.params.id);
     return { ok: true };
@@ -385,8 +460,8 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
           '- methodology: 方法论标签（若提及）',
           '- coverageTopics: 需覆盖的话题点数组',
         ].join('\n'),
-        question: [
-          '把文本提炼为客户提问（高频异议/问答），rows 每项字段：',
+        'demo-faq': [
+          '把文本提炼为示范问答（新手指引第2步「示范」剧本中客户抛出的高频异议/问答），rows 每项字段：',
           '- category: 分类（如 价格 / 效果 / 竞品 / 服务 / 资质）',
           '- question: 客户提问原文',
           '- referenceAnswer: 参考应答要点',
@@ -395,8 +470,8 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
           '- skillPointNames: 应答涉及的技能点名称数组',
         ].join('\n'),
         'score-item': [
-          '把文本提炼为评分项定义（行为锚定评分标准），rows 每项字段：',
-          '- name: 评分项名称',
+          '把文本提炼为评分标准定义（行为锚定），rows 每项字段：',
+          '- name: 评分标准名称',
           '- skillPointName: 所属技能点名称',
           '- behaviorAnchor: 行为锚定描述',
           '- judgePrompt: 判定 prompt 模板',
@@ -406,20 +481,20 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
           '- levels: 档位数组，每项 { key, label, score, description }，score 为数字，按得分从高到低',
         ].join('\n'),
         'golden-case': [
-          '把文本提炼为金标准回归测试案例，rows 每项字段：',
+          '把文本提炼为评分回归测试案例，rows 每项字段：',
           '- name: 案例名称',
           '- transcript: 对话数组，每项 { seq: 轮次序号, speaker: "trainee"|"persona", text: 内容 }',
-          '- expected: 期望判定数组，每项 { itemName: 评分项名称, levelKey: 期望档位 key }',
+          '- expected: 期望判定数组，每项 { itemName: 评分标准名称, levelKey: 期望档位 key }',
         ].join('\n'),
-        'analysis-standard': [
-          '把文本提炼为示范讲解的分析标准（第3步讲解示范案例时引用的标准），rows 每项字段：',
+        'briefing-standard': [
+          '把文本提炼为讲解标准（新手指引第3步「讲解」口播稿引用的标准），rows 每项字段：',
           '- name: 标准名称（如 语调标准 / 语速标准 / 关键方法 / 礼仪标准）',
           '- category: "tone"（语调）| "pace"（语速）| "method"（关键方法）| "etiquette"（礼仪）',
           '- description: 标准的具体说明',
           '- example: 示例（若有）',
         ].join('\n'),
         'realism-standard': [
-          '把文本提炼为 AI 客户的真实度标准（第4步模拟演练的逼真度要求），rows 每项字段：',
+          '把文本提炼为 AI 客户的演练真实度标准（第4步模拟演练的逼真度要求），rows 每项字段：',
           '- name: 标准名称（如 反应自然度 / 拒绝行为 / 拖延行为 / 情绪变化）',
           '- category: "reaction"（反应自然度）| "objection"（拒绝行为）| "stalling"（拖延行为）| "emotion"（情绪变化）',
           '- description: 标准的具体说明',
@@ -449,7 +524,7 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
       const parsed = parseExtractResult(result.content);
       let rows = Array.isArray(parsed.rows) ? parsed.rows : [];
 
-      // 服务端名称 → id 关联解析：技能点 / 陪练角色 / 评分项；解析不到保留名称供前端人工处理
+      // 服务端名称 → id 关联解析：技能点 / 陪练角色 / 评分标准；解析不到保留名称供前端人工处理
       const skillByName = new Map(skillPoints.map((sp) => [sp.name, sp.id]));
       const resolveSkillIds = (names: unknown): { ids: string[]; unresolved: string[] } => {
         const ids: string[] = [];
@@ -477,7 +552,7 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
             ...(personaName && !personaConfigId ? { unresolvedPersona: personaName } : {}),
           };
         });
-      } else if (target === 'question') {
+      } else if (target === 'demo-faq') {
         rows = rows.map((r) => {
           const { ids, unresolved } = resolveSkillIds(r.skillPointNames);
           return {

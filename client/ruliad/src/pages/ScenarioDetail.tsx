@@ -18,7 +18,7 @@ export default function ScenarioDetail() {
   const [loadError, setLoadError] = useState('');
   const [starting, setStarting] = useState<StartTarget | null>(null);
   const [startError, setStartError] = useState('');
-  /** 各评估维度的真实权重百分比（与 skills 同序）；null = 无评分项数据，不展示权重 */
+  /** 各评估维度的真实权重百分比（与 skills 同序）；null = 无评分标准数据，不展示权重 */
   const [skillWeights, setSkillWeights] = useState<number[] | null>(null);
 
   useEffect(() => {
@@ -43,7 +43,7 @@ export default function ScenarioDetail() {
     };
   }, [id]);
 
-  // 按技能点取评分项定义，汇总各维度权重并归一化为百分比（评分引擎按 weight 加权平均）
+  // 按技能点取评分标准定义，汇总各维度权重并归一化为百分比（评分引擎按 weight 加权平均）
   useEffect(() => {
     if (!scenario) return;
     const ids = scenario.skillPointIds ?? [];

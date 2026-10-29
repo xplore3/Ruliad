@@ -12,11 +12,10 @@
     "db:deploy": "pnpm --filter @grasp-mvp/infra exec prisma migrate deploy",
     "db:generate": "pnpm --filter @grasp-mvp/infra exec prisma generate",
     "db:studio": "pnpm --filter @grasp-mvp/infra exec prisma studio",
-    "dev:all": "concurrently -n API,WEB,ADMIN -c blue,cyan,red \"pnpm --filter @grasp-mvp/api-gateway start\" \"pnpm --filter grasp-web dev\" \"pnpm --filter admin-web dev\"",
+    "dev:all": "concurrently -n API,WEB -c blue,cyan \"pnpm --filter @grasp-mvp/api-gateway start\" \"pnpm --filter grasp-ruliad dev\"",
     "dev:api": "pnpm --filter @grasp-mvp/api-gateway start",
     "seed": "pnpm --filter @grasp-mvp/api-gateway seed",
-    "dev:web": "concurrently -n API,WEB -c blue,cyan \"pnpm --filter @grasp-mvp/api-gateway start\" \"pnpm --filter grasp-web dev\"",
-    "dev:admin": "concurrently -n API,ADMIN -c blue,red \"pnpm --filter @grasp-mvp/api-gateway start\" \"pnpm --filter admin-web dev\"",
+    "dev:web": "concurrently -n API,WEB -c blue,cyan \"pnpm --filter @grasp-mvp/api-gateway start\" \"pnpm --filter grasp-ruliad dev\"",
     "dev:landing": "pnpm --filter grasp-landing dev",
     "stop:all": "npx kill-port 3060 5173 5174 5175 5180"
   },

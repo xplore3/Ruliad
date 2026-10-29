@@ -1,36 +1,43 @@
 import { createStore } from '@grasp-mvp/infra';
-import { ANALYSIS_STANDARDS, REALISM_STANDARDS, SCENARIO_GUIDANCES } from './seed-guidance.data.js';
+import { BRIEFING_STANDARDS, DEMO_SCRIPTS, REALISM_STANDARDS, SCENARIO_GUIDANCES } from './seed-guidance.data.js';
 import { DEMO_FAQ_ITEMS } from './demo-faq.data.js';
 
 const TENANT = 'tenant-demo';
 
 /**
- * 场景引导资源库灌数脚本：4 条分析标准 + 4 条真实度标准 + 4 个场景引导包 + 地推示范 FAQ 28 条入问题库。
+ * 新手指引流程配置灌数脚本：4 条讲解标准 + 4 条演练真实度标准 + 3 条示范剧本 + 4 个新手指引流程配置 + 地推示范 FAQ 28 条入示范问答库。
  * 用法：pnpm --filter @grasp-mvp/api-gateway seed:guidance
- * 幂等：全部走 upsert（saveXxx），可重复执行。
+ * 幂等：全部走 upsert（saveXxx），可重复执行；saveScenarioGuidance 为整行 data 覆盖语义，
+ * 会把 demoScriptId 写进现有行并覆盖掉旧的内嵌 demo JSON。
  */
 async function main() {
   const store = createStore();
 
-  for (const s of ANALYSIS_STANDARDS) {
-    await store.saveAnalysisStandard(s);
+  for (const s of BRIEFING_STANDARDS) {
+    await store.saveBriefingStandard(s);
   }
-  console.log(`[seed:guidance] 分析标准 upsert：${ANALYSIS_STANDARDS.length} 条`);
+  console.log(`[seed:guidance] 讲解标准 upsert：${BRIEFING_STANDARDS.length} 条`);
 
   for (const s of REALISM_STANDARDS) {
     await store.saveRealismStandard(s);
   }
-  console.log(`[seed:guidance] 真实度标准 upsert：${REALISM_STANDARDS.length} 条`);
+  console.log(`[seed:guidance] 演练真实度标准 upsert：${REALISM_STANDARDS.length} 条`);
+
+  // 示范剧本先入示范剧本库（指引配置的 demoScriptId 引用它们）
+  for (const s of DEMO_SCRIPTS) {
+    await store.saveDemoScript(s);
+  }
+  console.log(`[seed:guidance] 示范剧本 ${DEMO_SCRIPTS.length} 条入库`);
 
   for (const g of SCENARIO_GUIDANCES) {
     await store.saveScenarioGuidance(g);
   }
-  console.log(`[seed:guidance] 场景引导包 upsert：${SCENARIO_GUIDANCES.length} 个`);
+  console.log(`[seed:guidance] 新手指引流程配置 upsert：${SCENARIO_GUIDANCES.length} 个`);
 
-  // 地推示范 FAQ 28 条迁入问题库（分类"地推示范"，renderDemoScript 优先从问题库读取）
+  // 地推示范 FAQ 28 条迁入示范问答库（分类"地推示范"，renderDemoScript 优先从示范问答库读取）
   for (let i = 0; i < DEMO_FAQ_ITEMS.length; i++) {
     const item = DEMO_FAQ_ITEMS[i];
-    await store.saveCustomerQuestion({
+    await store.saveDemoFaq({
       id: `cq-demo-ground-push-${String(i + 1).padStart(2, '0')}`,
       tenantId: TENANT,
       category: '地推示范',
@@ -38,10 +45,10 @@ async function main() {
       referenceAnswer: item.faq,
     });
   }
-  console.log(`[seed:guidance] 地推示范 FAQ upsert 入问题库：${DEMO_FAQ_ITEMS.length} 条`);
+  console.log(`[seed:guidance] 地推示范 FAQ upsert 入示范问答库：${DEMO_FAQ_ITEMS.length} 条`);
 
   const guidances = await store.listScenarioGuidances(TENANT);
-  console.log(`[seed:guidance] 校验：库中场景引导包共 ${guidances.length} 个（${guidances.map((g) => g.scenarioId).join('、')}）`);
+  console.log(`[seed:guidance] 校验：库中新手指引流程配置共 ${guidances.length} 个（${guidances.map((g) => g.scenarioId).join('、')}）`);
 }
 
 main().catch((err) => {
