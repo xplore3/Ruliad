@@ -41,6 +41,7 @@ export default function Profile() {
   const [timeTab, setTimeTab] = useState<(typeof TIME_TABS)[number]>('全部');
   const [mode, setMode] = useState<(typeof MODE_OPTIONS)[number]>('全部模式');
   const [category, setCategory] = useState<string>('全部类别');
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     Promise.all([fetchCurrentUser(), fetchMySessions()])
@@ -87,6 +88,13 @@ export default function Profile() {
       alert('本次练习未完成，暂无报告');
     }
   };
+
+  // 筛选变化时重置折叠
+  useEffect(() => { setExpanded(false); }, [timeTab, mode, category]);
+
+  const SHOWN_MAX = 6;
+  const shownRecords = expanded ? filtered : filtered.slice(0, SHOWN_MAX);
+  const canFold = filtered.length > SHOWN_MAX;
 
   return (
     <main className="wrap">
@@ -165,7 +173,7 @@ export default function Profile() {
             </div>
           )}
 
-          {!loading && !error && filtered.map((r) => {
+          {!loading && !error && shownRecords.map((r) => {
             const done = r.status === 'completed' && r.totalScore != null;
             const modeLabel = MODE_LABEL[r.mode] ?? r.mode;
             const meta = [
@@ -216,6 +224,18 @@ export default function Profile() {
             </div>
           )}
         </div>
+
+        {/* 展开/收起 */}
+        {!loading && !error && canFold && (
+          <div style={{ textAlign: 'center', marginTop: 18 }}>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => setExpanded((v) => !v)}
+            >
+              {expanded ? '收起' : `展开全部 ${filtered.length} 条记录`}
+            </button>
+          </div>
+        )}
       </section>
 
       {/* 我的入口 */}

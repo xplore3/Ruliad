@@ -163,7 +163,23 @@ export default function Login() {
 
         {error && <p style={{ fontSize: 12, color: '#E85C62', margin: '4px 0 10px' }}>{error}</p>}
 
-        <a className="btn primary block" onClick={handleLogin} style={loading ? { pointerEvents: 'none', opacity: .7 } : undefined}>
+        <a onClick={handleLogin} style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '100%',
+          padding: '14px 32px',
+          fontSize: 16,
+          fontWeight: 700,
+          color: '#fff',
+          backgroundColor: '#FF6B5B',
+          borderRadius: 999,
+          boxShadow: '0 8px 24px -6px rgba(255,107,91,.5)',
+          transition: '.15s',
+          cursor: 'pointer',
+          textDecoration: 'none',
+          ...(loading ? { pointerEvents: 'none', opacity: .7 } : {}),
+        }}>
           {loading ? '登录中…' : '登录 / 注册'}
         </a>
 
