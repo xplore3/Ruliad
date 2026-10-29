@@ -28,7 +28,7 @@ const VOICE_MAP: Record<string, string> = {
   longwan_v2: 'coral', // 销售：明快有活力的女声
   longshu_v2: 'sage', // 教练：沉稳女声
   longhua_v2: 'onyx', // 旁白：低沉男声
-  longtong_v2: 'nova', // 小朋友：清亮年轻的声线
+  longhuhu_v3: 'nova', // 小朋友：清亮年轻的声线
   longxiaoxia_v2: 'shimmer', // 家长女声
   longxiaochun_v2: 'alloy', // 默认女声
   longxiaocheng_v2: 'echo', // 家长男声

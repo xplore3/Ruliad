@@ -16,6 +16,8 @@ export interface DemoLine {
   text: string;
   arousal?: number;
   excitement?: number;
+  /** 销售对小朋友说话的台词：TTS 播报时放轻放缓（避免吓到孩子） */
+  soft?: boolean;
 }
 
 /** 示范剧本变量：choice 随机选项 / intRange 随机整数 / map 由另一变量映射（如 address→parent） */

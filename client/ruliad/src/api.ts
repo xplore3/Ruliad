@@ -592,6 +592,8 @@ export interface DemoLine {
   arousal?: number;
   /** 激情倍率（销售=3）：等比放大语速/音调抬升 */
   excitement?: number;
+  /** 销售对小朋友说话的台词：播报放轻放缓 */
+  soft?: boolean;
 }
 
 /** 资格提问回答：raw PCM 上传，返回识别文本；最后一题时 experienced 给出结论 */
@@ -622,9 +624,16 @@ export async function demoChoice(sessionId: string, audio: ArrayBuffer) {
   return data as { text: string; choice: 'replay' | 'practice' };
 }
 
-/** 任意文本合成语音；voiceRole 选择音色（默认 persona），arousal 控制情绪唤醒度，excitement 为激情倍率；rate 取设置页默认语速偏好 */
-export async function ttsClip(sessionId: string, text: string, voiceRole: GuidanceVoiceRole = 'persona', arousal?: number, excitement?: number) {
-  const { data } = await api.post(`/sessions/${sessionId}/tts`, { text, voiceRole, arousal, excitement, rate: getPreferredSpeechRate() });
+/** 任意文本合成语音；voiceRole 选择音色（默认 persona），arousal 控制情绪唤醒度，excitement 为激情倍率；rate 取设置页默认语速偏好；soft 表示对小朋友说话（放轻放缓，避免吓到孩子） */
+export async function ttsClip(sessionId: string, text: string, voiceRole: GuidanceVoiceRole = 'persona', arousal?: number, excitement?: number, soft?: boolean) {
+  const rate = getPreferredSpeechRate();
+  const { data } = await api.post(`/sessions/${sessionId}/tts`, {
+    text,
+    voiceRole,
+    arousal,
+    excitement: soft ? Math.min(excitement ?? 4, 4) : excitement,
+    rate: soft ? Math.max(0.5, rate * 0.9) : rate,
+  });
   return data as { audioBase64: string; audioFormat: string };
 }
 
