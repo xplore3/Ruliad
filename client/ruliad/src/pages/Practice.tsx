@@ -178,8 +178,11 @@ export default function Practice() {
   const introClipRef = useRef<'persona' | null>(null);
   const personaAudioRef = useRef<string | undefined>(undefined);
   const introTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** 当前语音回合的音频是否已全部到达（收到 turn_complete）；全部播完才轮到用户 */
+  /** 当前语音回合的音频是否已全部到达（收到 turn_complete/tts_cancelled/error）；
+   *  仅在 reply_text 之后为 false，窗口外到达的 tts_sentence/tts_chunk 一律视为迟到包丢弃 */
   const turnAudioDoneRef = useRef(true);
+  /** 暂停/继续请求在途互斥：防止 pauseSession 未返回时用户又点继续，两个请求乱序落库 */
+  const pauseTogglingRef = useRef(false);
   /** 新手指引专用录音器（独立于语音回合的 VoiceSocket 链路） */
   const guidanceRecRef = useRef<PcmRecorder | null>(null);
   /** guidance 镜像（async 链路中读取最新值，避免闭包过期） */
@@ -966,6 +969,8 @@ export default function Practice() {
     setGuideRec('recording');
     const { audio, micError, micErrorMsg } = await autoListen();
     if (phaseRef.current !== 'guide' || (!audio && !micError)) return;
+    // 聆听期间可能被暂停（autoListen 被中断返回空音频，此处再兜一次）
+    if ((statusRef.current as PracticeStatus) === 'paused') return;
     setGuideRec('idle');
     if (micError) {
       setGuideHint(`${micErrorMsg || '麦克风不可用，请检查浏览器授权'}；也可点击下方按钮选择`);
@@ -1025,16 +1030,22 @@ export default function Practice() {
         if (!paused) setStatusBoth('speaking');
         break;
       case 'tts_sentence':
+        // 回合窗口外（reply_text 之前或 turn_complete/tts_cancelled 之后）到达的是
+        // 暂停 interrupt 后服务端在途合成的迟到包：丢弃，否则恢复后会播放已作废回合的 TTS
+        if (turnAudioDoneRef.current) break;
         // 暂停中也可入队：TtsPlayer 暂停时只缓冲不出声，恢复后接着播
         if (ev.audio) playerRef.current?.enqueue(ev.audio);
         if (!paused) setStatusBoth('speaking');
         break;
       case 'tts_chunk':
+        if (turnAudioDoneRef.current) break;
         if (ev.audio && typeof ev.seq === 'number') {
           playerRef.current?.enqueueChunk(ev.seq, ev.audio, !!ev.isFinal);
         }
         break;
       case 'tts_cancelled':
+        // 本回合音频已作废：标记回合音频结束，之后到达的迟到包直接丢弃
+        turnAudioDoneRef.current = true;
         playerRef.current?.stopAll();
         break;
       case 'turn_complete': {
@@ -1107,7 +1118,8 @@ export default function Practice() {
       socket.send({ type: 'interrupt' });
       playerRef.current.stopAll();
     }
-    turnAudioDoneRef.current = false;
+    // 注意不在此置 turnAudioDoneRef=false：打断后到 tts_cancelled 之间到达的旧回合
+    // TTS 必须被窗口守卫丢弃；新回合窗口由 reply_text 打开
     setErrorMsg('');
     setPartialText('');
     try {
@@ -1140,7 +1152,6 @@ export default function Practice() {
 
     if (isRecording) {
       recorder.stop();
-      turnAudioDoneRef.current = false;
       socket.send({ type: 'finish' });
       setIsRecording(false);
       setMicLevel(0);
@@ -1154,56 +1165,66 @@ export default function Practice() {
 
   // ===== 暂停 / 继续 =====
   const handlePauseToggle = async () => {
-    if (!sessionId) return;
-
-    if (statusRef.current === 'paused') {
-      try {
-        const res = await resumeSession(sessionId);
-        if (typeof res.remainingSeconds === 'number') setRemaining(Math.max(0, res.remainingSeconds));
-        const p = phaseRef.current;
-        if (p === 'live') {
-          playerRef.current?.resumePlayback();
-          setStatusBoth(
-            timeUpRef.current ? 'time_up' : playerRef.current?.busy ? 'speaking' : 'user_turn'
-          );
-        } else {
-          // 开场/指引阶段：恢复到该阶段当前步骤
-          setStatusBoth('loading');
-          if (p === 'qualify') void askQualifyQuestion(qualifyQ);
-          else if (p === 'guide') {
-            if (demoStage === 'ask') void askGuideChoice();
-            else if (demoStage === 'narration') startLive();
-            else void beginGuide(demoVersion);
-          }
-          // ready_wait：回到「我准备好了」界面即可，无需额外动作
-        }
-      } catch (err) {
-        setErrorMsg(apiError(err, '继续失败，请重试'));
-      }
-      return;
-    }
-
-    if (phaseRef.current === 'boot') return;
-    if (['failed', 'ended', 'evaluating', 'time_up'].includes(statusRef.current)) return;
-
-    // 冻结本地一切收发：录音停止、ASR/TTS 轮次取消、播放器暂停、指引阶段媒体中断
-    if (isRecording) {
-      recorderRef.current?.stop();
-      setIsRecording(false);
-      setMicLevel(0);
-    }
-    socketRef.current?.send({ type: 'interrupt' });
-    playerRef.current?.pause();
-    stopGuidanceMedia();
-    setPartialText('');
-
+    if (!sessionId || pauseTogglingRef.current) return;
+    pauseTogglingRef.current = true;
     try {
-      const res = await pauseSession(sessionId);
-      if (typeof res.remainingSeconds === 'number') setRemaining(Math.max(0, res.remainingSeconds));
+      if (statusRef.current === 'paused') {
+        try {
+          const res = await resumeSession(sessionId);
+          if (typeof res.remainingSeconds === 'number') setRemaining(Math.max(0, res.remainingSeconds));
+          const p = phaseRef.current;
+          if (p === 'live') {
+            playerRef.current?.resumePlayback();
+            setStatusBoth(
+              timeUpRef.current ? 'time_up' : playerRef.current?.busy ? 'speaking' : 'user_turn'
+            );
+          } else {
+            // 开场/指引阶段：恢复到该阶段当前步骤
+            setStatusBoth('loading');
+            if (p === 'qualify') void askQualifyQuestion(qualifyQ);
+            else if (p === 'guide') {
+              if (demoStage === 'ask') void askGuideChoice();
+              else if (demoStage === 'narration') startLive();
+              else void beginGuide(demoVersion);
+            }
+            // ready_wait：回到「我准备好了」界面即可，无需额外动作
+          }
+        } catch (err) {
+          setErrorMsg(apiError(err, '继续失败，请重试'));
+        }
+        return;
+      }
+
+      if (phaseRef.current === 'boot') return;
+      if (['failed', 'ended', 'evaluating', 'time_up'].includes(statusRef.current)) return;
+
+      const prevStatus = statusRef.current;
+      // 冻结本地一切收发：录音停止、ASR/TTS 轮次取消、播放器暂停、指引阶段媒体中断
+      if (isRecording) {
+        recorderRef.current?.stop();
+        setIsRecording(false);
+        setMicLevel(0);
+      }
+      socketRef.current?.send({ type: 'interrupt' });
+      playerRef.current?.pause();
+      stopGuidanceMedia();
+      setPartialText('');
+      // 本地媒体已冻结，先落 paused：pauseSession 在途期间，被打断的指引 async 链路
+      // （playClip 的 onended 回调等）以 statusRef 判断是否继续推进；若仍是旧状态，
+      // 会在已暂停的情况下重启录音/TTS，与恢复后的播放叠加
       setStatusBoth('paused');
-    } catch (err) {
-      setErrorMsg(apiError(err, '暂停失败，请重试'));
-      setStatusBoth(phaseRef.current === 'live' ? 'user_turn' : 'loading');
+
+      try {
+        const res = await pauseSession(sessionId);
+        if (typeof res.remainingSeconds === 'number') setRemaining(Math.max(0, res.remainingSeconds));
+      } catch (err) {
+        setErrorMsg(apiError(err, '暂停失败，请重试'));
+        // 回退原状态：播放器已被 pause()，必须恢复，否则一直停在缓冲态不再出声
+        playerRef.current?.resumePlayback();
+        setStatusBoth(prevStatus);
+      }
+    } finally {
+      pauseTogglingRef.current = false;
     }
   };
 
@@ -1505,20 +1526,20 @@ export default function Practice() {
                         {/* 三角色可视化：当前说话方高亮 + 声波动画 */}
                         <div className="flex items-center gap-8">
                           {([
-                            { role: 'sales' as const, label: 'AI 销售', badge: '销', bg: 'bg-coral' },
-                            { role: 'customer' as const, label: 'AI 客户', badge: '客', bg: 'bg-[#4B7BEC]' },
-                            { role: 'child' as const, label: 'AI 小朋友', badge: '童', bg: 'bg-[#22A06B]' },
-                          ]).map(({ role, label, badge, bg }) => {
+                            { role: 'sales' as const, label: 'AI 销售', badge: '销', bg: 'bg-[linear-gradient(150deg,#E85A4A,#FF6B5B)]', fg: 'text-white', wave: 'bg-white/85', size: 'w-[72px] h-[72px]', fs: 'text-[26px]', ring: '', inactive: '', layer: 1 },
+                            { role: 'child' as const, label: 'AI 小朋友', badge: '童', bg: 'bg-[#2FAE7B]', fg: 'text-white', wave: 'bg-white/85', size: 'w-14 h-14', fs: 'text-[18px]', ring: '', inactive: 'opacity-50', layer: 2 },
+                            { role: 'customer' as const, label: 'AI 客户', badge: '客', bg: 'bg-[#FFEFEB]', fg: 'text-coral', wave: 'bg-coral', size: 'w-12 h-12', fs: 'text-[16px]', ring: 'border border-coral/30', inactive: 'opacity-55', layer: 3 },
+                          ]).map(({ role, label, badge, bg, fg, wave, size, fs, ring, inactive, layer }) => {
                             const active = demoCurrentRole === role;
                             return (
-                              <div key={role} className="flex flex-col items-center gap-2">
-                                <div className={`w-16 h-16 rounded-full flex items-center justify-center text-[22px] font-bold text-white transition-all ${bg} ${active ? 'scale-110 shadow-[0_0_24px_rgba(255,255,255,.25)]' : 'opacity-40'}`}>
+                              <div key={role} className="flex flex-col items-center gap-2" style={{ order: layer }}>
+                                <div className={`${size} rounded-full flex items-center justify-center font-bold transition-all ${bg} ${fg} ${ring} ${active ? 'scale-110 shadow-[0_0_24px_rgba(255,255,255,.25)] ring-2 ring-white/30' : inactive}`}>
                                   {badge}
                                 </div>
                                 <div className="text-[12.5px] font-semibold opacity-85">{label}</div>
                                 <div className="flex items-end gap-[4px] h-6">
                                   {active && [0, 1, 2, 3, 4].map((i) => (
-                                    <span key={i} className="w-[4px] rounded-full bg-white/85 animate-pulse" style={{ height: `${8 + (i % 3) * 6}px`, animationDelay: `${i * 0.15}s` }} />
+                                    <span key={i} className={`w-[4px] rounded-full ${wave} animate-pulse`} style={{ height: `${8 + (i % 3) * 6}px`, animationDelay: `${i * 0.15}s` }} />
                                   ))}
                                 </div>
                               </div>
@@ -1711,7 +1732,7 @@ export default function Practice() {
                   <div key={`${m.seq}:${m.speaker}`} className={`msg ${m.speaker === 'trainee' ? 'msg-me' : ''}`}>
                     <div
                       className="bubble"
-                      style={m.speaker === 'coach' ? { background: '#FFF7E6', borderColor: '#FFE1B3', maxWidth: '100%' } : undefined}
+                      style={m.speaker === 'coach' ? { background: '#FFF0EE', borderColor: '#FFD9D2', maxWidth: '100%' } : undefined}
                     >
                       {m.text}
                       <div className="meta">

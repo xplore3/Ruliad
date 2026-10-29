@@ -252,12 +252,11 @@ export class TtsPlayer {
   }
 
   private async playNext(): Promise<void> {
-    if (this.paused) return;
+    if (this.paused || this.playing) return;
     const buf = this.queue.shift();
     if (!buf) {
-      this.playing = false;
       // 还有句子在解码：不是真正空闲，等解码完成后再判断
-      if (this.decoding === 0 && !this.paused) this.onIdle?.();
+      if (this.decoding === 0) this.onIdle?.();
       return;
     }
     this.playing = true;
@@ -268,10 +267,12 @@ export class TtsPlayer {
     this.currentSource = src;
     this.currentBuffer = buf;
     src.onended = () => {
-      if (this.currentSource === src) {
-        this.currentSource = null;
-        this.currentBuffer = null;
-      }
+      // 被 pause/stopAll 停掉的 source 不推进队列：其 onended 异步触发时可能已有新 source
+      // 在播，若无守卫重入 playNext 会再启一条播放链，导致多路 TTS 同时发声
+      if (this.currentSource !== src) return;
+      this.currentSource = null;
+      this.currentBuffer = null;
+      this.playing = false;
       void this.playNext();
     };
     src.start();
