@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import type {
-  AnalysisStandard,
+  BriefingStandard,
   Appeal,
   CalibrationEvent,
   CertRecord,
-  CustomerQuestion,
+  DemoFaq,
   DataConsent,
   DomainEvent,
   Element,
@@ -132,9 +132,9 @@ export class PrismaStore implements Store {
   private sessions;
   private scoreReports;
   private scoreItemDefs;
-  private customerQuestions;
+  private demoFaqs;
   private scenarioGuidances;
-  private analysisStandards;
+  private briefingStandards;
   private realismStandards;
   private appeals;
   private examWindows;
@@ -164,9 +164,9 @@ private domainEvents;
     this.sessions = docTable<Session>(this.prisma.session, ['id', 'tenantId', 'userId', 'scenarioId', 'mode', 'status', 'examWindowId', 'startedAt', 'endedAt']);
     this.scoreReports = docTable<ScoreReport>(this.prisma.scoreReport, ['id', 'sessionId', 'totalScore', 'passed', 'createdAt']);
     this.scoreItemDefs = docTable<ScoreItemDef>(this.prisma.scoreItemDef, ['id', 'tenantId', 'skillPointId', 'name', 'layer']);
-    this.customerQuestions = docTable<CustomerQuestion>(this.prisma.customerQuestion, ['id', 'tenantId', 'category']);
+    this.demoFaqs = docTable<DemoFaq>(this.prisma.demoFaq, ['id', 'tenantId', 'category']);
     this.scenarioGuidances = docTable<ScenarioGuidance>(this.prisma.scenarioGuidance, ['id', 'tenantId', 'scenarioId', 'name']);
-    this.analysisStandards = docTable<AnalysisStandard>(this.prisma.analysisStandard, ['id', 'tenantId', 'name', 'category']);
+    this.briefingStandards = docTable<BriefingStandard>(this.prisma.briefingStandard, ['id', 'tenantId', 'name', 'category']);
     this.realismStandards = docTable<RealismStandard>(this.prisma.realismStandard, ['id', 'tenantId', 'name', 'category']);
     this.appeals = docTable<Appeal>(this.prisma.appeal, ['id', 'sessionId', 'userId', 'status', 'createdAt']);
     this.examWindows = docTable<ExamWindow>(this.prisma.examWindow, ['id', 'tenantId', 'name', 'status', 'startsAt', 'endsAt']);
@@ -337,21 +337,21 @@ this.domainEvents = docTable<DomainEvent>(this.prisma.domainEvent, ['id', 'type'
     return this.scoreItemDefs.delete(id);
   }
 
-  // ---- 客户提问问题库 ----
-  getCustomerQuestion(id: string) {
-    return this.customerQuestions.get(id);
+  // ---- 示范问答库 ----
+  getDemoFaq(id: string) {
+    return this.demoFaqs.get(id);
   }
-  listCustomerQuestions(tenantId: string, category?: string) {
-    return this.customerQuestions.list({ tenantId, ...(category ? { category } : {}) });
+  listDemoFaqs(tenantId: string, category?: string) {
+    return this.demoFaqs.list({ tenantId, ...(category ? { category } : {}) });
   }
-  saveCustomerQuestion(q: CustomerQuestion) {
-    return this.customerQuestions.upsertById(q);
+  saveDemoFaq(q: DemoFaq) {
+    return this.demoFaqs.upsertById(q);
   }
-  deleteCustomerQuestion(id: string) {
-    return this.customerQuestions.delete(id);
+  deleteDemoFaq(id: string) {
+    return this.demoFaqs.delete(id);
   }
 
-  // ---- 场景引导资源库 ----
+  // ---- 新手指引流程配置 ----
   async getScenarioGuidance(scenarioId: string) {
     const rows = await this.scenarioGuidances.list({ scenarioId });
     return rows[0];
@@ -368,14 +368,14 @@ this.domainEvents = docTable<DomainEvent>(this.prisma.domainEvent, ['id', 'type'
   deleteScenarioGuidance(id: string) {
     return this.scenarioGuidances.delete(id);
   }
-  listAnalysisStandards(tenantId: string) {
-    return this.analysisStandards.list({ tenantId });
+  listBriefingStandards(tenantId: string) {
+    return this.briefingStandards.list({ tenantId });
   }
-  saveAnalysisStandard(s: AnalysisStandard) {
-    return this.analysisStandards.upsertById(s);
+  saveBriefingStandard(s: BriefingStandard) {
+    return this.briefingStandards.upsertById(s);
   }
-  deleteAnalysisStandard(id: string) {
-    return this.analysisStandards.delete(id);
+  deleteBriefingStandard(id: string) {
+    return this.briefingStandards.delete(id);
   }
   listRealismStandards(tenantId: string) {
     return this.realismStandards.list({ tenantId });
@@ -542,7 +542,7 @@ await this.quizQuestions.delete(id);
     for (const k of data.productKBs) await this.productKBs.upsertById(k);
     for (const w of data.examWindows ?? []) await this.examWindows.upsertById(w);
     for (const p of data.extractionProjects ?? []) await this.extractionProjects.upsertById(p);
-    for (const s of data.analysisStandards ?? []) await this.analysisStandards.upsertById(s);
+    for (const s of data.briefingStandards ?? []) await this.briefingStandards.upsertById(s);
     for (const s of data.realismStandards ?? []) await this.realismStandards.upsertById(s);
     for (const g of data.scenarioGuidance ?? []) await this.scenarioGuidances.upsertById(g);
   }

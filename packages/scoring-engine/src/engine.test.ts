@@ -129,7 +129,7 @@ describe('scoreSession', () => {
     expect(report.sessionId).toBe(session.id);
   });
 
-  it('只评 scenario.skillPointIds 覆盖的评分项；观察项不计分', async () => {
+  it('只评 scenario.skillPointIds 覆盖的评分标准；观察项不计分', async () => {
     const extraDefs: ScoreItemDef[] = [
       ...defs,
       {

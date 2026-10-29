@@ -1,4 +1,4 @@
-import { EventTypes, type QuizQuestion, type QuizQuestionPublic, type Scenario, type Session, type TranscriptTurn } from '@grasp-mvp/core';
+import { EventTypes, type DurationParams, type QuizQuestion, type QuizQuestionPublic, type Scenario, type ScenarioGuidance, type Session, type TranscriptTurn } from '@grasp-mvp/core';
 import { bandFor, checkConsistency, compilePersona, EmotionTracker, PersonaActor } from '@grasp-mvp/role-engine';
 import type { RouteContext } from '../ctx.js';
 import { mkEvent } from '../events.js';
@@ -11,28 +11,41 @@ const CONSISTENCY_CORRECTION = '（注意：上一次回复出戏或泄露了不
 /** 系统级开场白触发词：电话接通后自动播放问候，不存入 transcript */
 const SYSTEM_GREETING_TOKEN = '__SYSTEM_GREETING__';
 
-export function remainingSeconds(session: Session, scenario: Scenario, overrideMinutes?: number): number {
-  const minutes = overrideMinutes ?? scenario.durationMinutes;
+export function remainingSeconds(session: Session, scenario: Scenario, overrideSeconds?: number): number {
+  const totalSeconds = overrideSeconds ?? scenario.durationMinutes * 60;
   // 倒计时从进入正式对练（live）起算；开场/新手指引阶段不消耗时长
-  if (!session.liveStartedAt) return minutes * 60;
+  if (!session.liveStartedAt) return totalSeconds;
   const nowMs = Date.now();
   const pausedMs =
     (session.pausedMs ?? 0) +
     (session.pausedAt ? nowMs - new Date(session.pausedAt).getTime() : 0);
   const elapsedMs = nowMs - new Date(session.liveStartedAt).getTime() - pausedMs;
   return Math.min(
-    minutes * 60,
-    Math.max(0, Math.round(minutes * 60 - elapsedMs / 1000))
+    totalSeconds,
+    Math.max(0, Math.round(totalSeconds - elapsedMs / 1000))
   );
 }
 
-/** 场景有效时长（分钟）：场景引导包的时长参数优先于场景自身 durationMinutes */
-export async function effectiveDurationMinutes(
+/** 演练倒计时总秒数：guidance.duration.countdownSeconds 优先，其次 targetMinutes 换算，缺省用场景 durationMinutes */
+export function countdownSecondsOf(scenario: Scenario, guidance?: ScenarioGuidance): number {
+  const d = guidance?.duration;
+  return d?.countdownSeconds ?? Math.round((d?.targetMinutes ?? scenario.durationMinutes) * 60);
+}
+
+/** 读新手指引流程配置并计算倒计时总秒数（无指引配置或读取失败时回退场景时长，行为与原来一致） */
+export async function effectiveCountdownSeconds(
   store: RouteContext['store'],
   scenario: Scenario
 ): Promise<number> {
   const guidance = await store.getScenarioGuidance(scenario.id).catch(() => undefined);
-  return guidance?.duration?.targetMinutes ?? scenario.durationMinutes;
+  return countdownSecondsOf(scenario, guidance);
+}
+
+/** 是否走超时收口：学员轮数达 maxTurns 立即收口；时间用尽但轮数未达 minTurns 则继续对练 */
+function shouldCloseLive(remaining: number, traineeTurns: number, duration?: DurationParams): boolean {
+  if (duration?.maxTurns !== undefined && traineeTurns >= duration.maxTurns) return true;
+  if (remaining <= 0 && (duration?.minTurns === undefined || traineeTurns >= duration.minTurns)) return true;
+  return false;
 }
 
 /** 加载 persona 运行时（编译后的 bundle + 原始配置），配置缺失返回 undefined */
@@ -53,7 +66,7 @@ export async function loadRuntime(ctx: RouteContext, scenario: Scenario, difficu
 
   const bundle = compilePersona(personaConfig, elements, productKB, scenario);
 
-  // 注入场景引导包的第4步参数：难度系数说明（选定档位的客户行为要求）+ 真实度标准库
+  // 注入新手指引流程配置的第4步参数：难度系数说明（选定档位的客户行为要求）+ 演练真实度标准库
   const guidance = await ctx.store.getScenarioGuidance(scenario.id).catch(() => undefined);
   if (guidance) {
     const level =
@@ -69,6 +82,9 @@ export async function loadRuntime(ctx: RouteContext, scenario: Scenario, difficu
     }
     if (realism.length > 0) {
       parts.push(`真实度要求：${realism.map((s) => `${s.name}——${s.description}`).join('；')}`);
+    }
+    if (guidance.liveIntro?.goal) {
+      parts.push(`本场演练目标：${guidance.liveIntro.goal}`);
     }
     if (parts.length > 0) {
       bundle.systemPrompt = `${bundle.systemPrompt}\n\n【演练要求】\n${parts.join('\n')}`;
@@ -169,12 +185,14 @@ export async function runTurn(
     text: displayText,
     at: now,
   };
-  const minutes = await effectiveDurationMinutes(store, scenario);
-  const remaining = remainingSeconds(session, scenario, minutes);
+  const guidance = await store.getScenarioGuidance(scenario.id).catch(() => undefined);
+  const totalSeconds = countdownSecondsOf(scenario, guidance);
+  const remaining = remainingSeconds(session, scenario, totalSeconds);
   const lastTrace = session.emotionTrace[session.emotionTrace.length - 1];
+  const traineeTurnCount = session.transcript.filter((t) => t.speaker === 'trainee').length;
 
-  // 超时：固定收口文案，不再调 LLM
-  if (remaining <= 0) {
+  // 超时或学员轮数达上限：固定收口文案，不再调 LLM（轮数未达 minTurns 时超时也不收口）
+  if (shouldCloseLive(remaining, traineeTurnCount, guidance?.duration)) {
     const personaTurn: TranscriptTurn = {
       seq: traineeTurn.seq + 1,
       speaker: 'persona',
@@ -284,7 +302,7 @@ traineeTurn,
 personaTurn,
 arousal: snapshot.arousal,
 bandKey: snapshot.bandKey,
-remainingSeconds: remainingSeconds(session, scenario, minutes),
+remainingSeconds: remainingSeconds(session, scenario, totalSeconds),
 pendingQuizzes: pendingQuizzes.length > 0 ? pendingQuizzes.map(toPublicQuiz) : undefined,
 };
 }

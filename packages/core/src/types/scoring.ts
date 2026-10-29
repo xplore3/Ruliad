@@ -2,7 +2,7 @@
 
 import type { QuizScore } from './quiz.js';
 
-/** 评分项档位定义 */
+/** 评分标准档位定义 */
 export interface ScoreLevel {
   key: string;
   label: string;
@@ -10,7 +10,7 @@ export interface ScoreLevel {
   description: string;
 }
 
-/** 评分项定义（行为锚定） */
+/** 评分标准定义（行为锚定） */
 export interface ScoreItemDef {
   id: string;
   tenantId: string;
@@ -28,7 +28,7 @@ export interface ScoreItemDef {
   isObservation: boolean;
 }
 
-/** 单个评分项判定结果 */
+/** 单个评分标准判定结果 */
 export interface ScoreItemResult {
   itemId: string;
   itemName: string;
@@ -126,9 +126,9 @@ export type AppealTargetType = 'score_item' | 'violation' | 'overall';
 export interface Appeal {
   id: string;
   sessionId: string;
-  /** 申诉目标类型：score_item=评分项 | violation=红线/违规 | overall=整体评价 */
+  /** 申诉目标类型：score_item=评分标准 | violation=红线/违规 | overall=整体评价 */
   targetType: AppealTargetType;
-  /** 评分项索引（targetType=score_item 时使用，-1 表示不适用） */
+  /** 评分标准索引（targetType=score_item 时使用，-1 表示不适用） */
   scoreItemResultIndex: number;
   /** 违规项索引（targetType=violation 时使用，-1 表示不适用） */
   violationIndex: number;

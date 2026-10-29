@@ -1,16 +1,16 @@
-import type { AnalysisStandard, RealismStandard, ScenarioGuidance } from '@grasp-mvp/core';
+import type { BriefingStandard, RealismStandard, ScenarioGuidance } from '@grasp-mvp/core';
 
 const TENANT = 'tenant-demo';
 
-/** 分析标准库 id（场景引导包引用） */
-export const ANALYSIS_STANDARD_IDS = {
+/** 讲解标准库 id（新手指引流程配置引用） */
+export const BRIEFING_STANDARD_IDS = {
   tone: 'std-analysis-tone',
   pace: 'std-analysis-pace',
   method: 'std-analysis-method',
   etiquette: 'std-analysis-etiquette',
 } as const;
 
-/** 真实度标准库 id（场景引导包引用） */
+/** 演练真实度标准库 id（新手指引流程配置引用） */
 export const REALISM_STANDARD_IDS = {
   reaction: 'std-realism-reaction',
   objection: 'std-realism-objection',
@@ -18,10 +18,10 @@ export const REALISM_STANDARD_IDS = {
   emotion: 'std-realism-emotion',
 } as const;
 
-/** 分析标准库（第3步：讲解示范案例时引用的标准） */
-export const ANALYSIS_STANDARDS: AnalysisStandard[] = [
+/** 讲解标准库（第3步「讲解」口播稿引用的标准） */
+export const BRIEFING_STANDARDS: BriefingStandard[] = [
   {
-    id: ANALYSIS_STANDARD_IDS.tone,
+    id: BRIEFING_STANDARD_IDS.tone,
     tenantId: TENANT,
     name: '语调标准',
     category: 'tone',
@@ -30,7 +30,7 @@ export const ANALYSIS_STANDARDS: AnalysisStandard[] = [
     example: '地推开场："大哥，您好！像您这么有气质的家长，肯定不会拒绝孩子一次成长的机会！"',
   },
   {
-    id: ANALYSIS_STANDARD_IDS.pace,
+    id: BRIEFING_STANDARD_IDS.pace,
     tenantId: TENANT,
     name: '语速标准',
     category: 'pace',
@@ -38,7 +38,7 @@ export const ANALYSIS_STANDARDS: AnalysisStandard[] = [
       '地推场景语速中等偏快，抢在客户走开之前说完价值主张；咨询接待语速中等，吐字清晰从容；电话销售语速中等偏慢，给客户留出思考和回应的时间。',
   },
   {
-    id: ANALYSIS_STANDARD_IDS.method,
+    id: BRIEFING_STANDARD_IDS.method,
     tenantId: TENANT,
     name: '关键方法标准',
     category: 'method',
@@ -47,7 +47,7 @@ export const ANALYSIS_STANDARDS: AnalysisStandard[] = [
     example: '"太好了！6岁就是孩子学习英语的黄金年龄！"',
   },
   {
-    id: ANALYSIS_STANDARD_IDS.etiquette,
+    id: BRIEFING_STANDARD_IDS.etiquette,
     tenantId: TENANT,
     name: '礼仪标准',
     category: 'etiquette',
@@ -56,7 +56,7 @@ export const ANALYSIS_STANDARDS: AnalysisStandard[] = [
   },
 ];
 
-/** 真实度标准库（第4步：AI 客户逼真度标准） */
+/** 演练真实度标准库（第4步：AI 客户逼真度标准） */
 export const REALISM_STANDARDS: RealismStandard[] = [
   {
     id: REALISM_STANDARD_IDS.reaction,
@@ -94,15 +94,15 @@ const GROUND_PUSH_REALISM = [
   REALISM_STANDARD_IDS.stalling,
   REALISM_STANDARD_IDS.emotion,
 ];
-const ALL_ANALYSIS = [
-  ANALYSIS_STANDARD_IDS.tone,
-  ANALYSIS_STANDARD_IDS.pace,
-  ANALYSIS_STANDARD_IDS.method,
-  ANALYSIS_STANDARD_IDS.etiquette,
+const ALL_BRIEFING = [
+  BRIEFING_STANDARD_IDS.tone,
+  BRIEFING_STANDARD_IDS.pace,
+  BRIEFING_STANDARD_IDS.method,
+  BRIEFING_STANDARD_IDS.etiquette,
 ];
 
 /**
- * 4 个场景引导资源包（scenarioId 对应 infra seed.ts 的 4 个 drill 场景）。
+ * 4 个新手指引流程配置（scenarioId 对应 infra seed.ts 的 4 个 drill 场景）。
  * 地推剧本迁移自 services/guidance.ts 原 generateDemoScript（销售行 arousal:1 / excitement:9 已写死）；
  * 咨询接待与电话销售剧本来自培训大纲对白，客户提问处用 FAQ 池占位。
  */
@@ -202,7 +202,7 @@ export const SCENARIO_GUIDANCES: ScenarioGuidance[] = [
       '蹲下与孩子互动玩小游戏，让孩子主动要求家长订邀请函',
       '成交后必须致谢，并现场定下试听时间再道别',
     ],
-    analysisStandardIds: ALL_ANALYSIS,
+    briefingStandardIds: ALL_BRIEFING,
     voiceProfile: { style: '激情', arousal: 0.9, excitement: 9, rate: 1.15 },
     liveIntro: {
       narration:
@@ -233,7 +233,7 @@ export const SCENARIO_GUIDANCES: ScenarioGuidance[] = [
       },
     ],
     defaultDifficulty: 1,
-    duration: { targetMinutes: 5, minTurns: 6, maxTurns: 30, countdownSeconds: 3 },
+    duration: { targetMinutes: 5, minTurns: 6, maxTurns: 30, countdownSeconds: 300 },
     scoringFocus: ['破冰开场', '异议处理', '促单时机', '致谢收尾'],
   },
   // ══ 2. 咨询接待 ══
@@ -287,7 +287,7 @@ export const SCENARIO_GUIDANCES: ScenarioGuidance[] = [
       '顺着客户的需求锁定试听时间，给客户二选一而不是开放题',
       '主动要微信发地址，把联系方式留下来',
     ],
-    analysisStandardIds: ALL_ANALYSIS,
+    briefingStandardIds: ALL_BRIEFING,
     voiceProfile: { style: '亲切温和', arousal: 0.5, rate: 1.0 },
     liveIntro: {
       narration: '现在你将扮演咨询师的角色，由AI训练员扮演你的客户。三秒之后开始模拟演练。',
@@ -315,7 +315,7 @@ export const SCENARIO_GUIDANCES: ScenarioGuidance[] = [
       },
     ],
     defaultDifficulty: 1,
-    duration: { targetMinutes: 4, minTurns: 6, maxTurns: 24, countdownSeconds: 3 },
+    duration: { targetMinutes: 4, minTurns: 6, maxTurns: 24, countdownSeconds: 240 },
     scoringFocus: ['接待礼仪', '需求承接', '预约锁定', '联系方式获取'],
   },
   // ══ 3. 现场成交（无示范模式） ══
@@ -332,7 +332,7 @@ export const SCENARIO_GUIDANCES: ScenarioGuidance[] = [
       '克服顾客拒绝：先认同再转折，用案例和保障降低客户风险感',
       '价格异议处理：不直接降价，用价值拆解和分期方案回应',
     ],
-    analysisStandardIds: [ANALYSIS_STANDARD_IDS.method, ANALYSIS_STANDARD_IDS.etiquette],
+    briefingStandardIds: [BRIEFING_STANDARD_IDS.method, BRIEFING_STANDARD_IDS.etiquette],
     voiceProfile: { style: '沉稳专业', arousal: 0.7, rate: 1.0 },
     liveIntro: {
       narration: '现在你将扮演销售的角色，由AI训练员扮演你的客户。三秒钟以后，你将进入现场谈判语音对话。',
@@ -360,7 +360,7 @@ export const SCENARIO_GUIDANCES: ScenarioGuidance[] = [
       },
     ],
     defaultDifficulty: 1,
-    duration: { targetMinutes: 6, minTurns: 8, maxTurns: 40, countdownSeconds: 3 },
+    duration: { targetMinutes: 6, minTurns: 8, maxTurns: 40, countdownSeconds: 360 },
     scoringFocus: ['需求确认', '价格异议处理', '临门一脚', '成交收尾'],
   },
   // ══ 4. 电话销售 ══
@@ -436,7 +436,7 @@ export const SCENARIO_GUIDANCES: ScenarioGuidance[] = [
       '指导客户在大众点评下单，一步步带着操作',
       '下单后留取孩子的姓名、年龄、基础、试听时间等信息',
     ],
-    analysisStandardIds: ALL_ANALYSIS,
+    briefingStandardIds: ALL_BRIEFING,
     voiceProfile: { style: '温柔有激情', arousal: 0.6, rate: 0.9 },
     liveIntro: {
       narration: '现在你将扮演销售的角色，由AI训练员扮演你的客户。三秒钟以后，你将拨通客户的电话。',
@@ -464,7 +464,7 @@ export const SCENARIO_GUIDANCES: ScenarioGuidance[] = [
       },
     ],
     defaultDifficulty: 1,
-    duration: { targetMinutes: 4, minTurns: 6, maxTurns: 24, countdownSeconds: 3 },
+    duration: { targetMinutes: 4, minTurns: 6, maxTurns: 24, countdownSeconds: 240 },
     scoringFocus: ['开场破冰', '异议处理', '孩子互动', '下单指导', '信息留取'],
   },
 ];

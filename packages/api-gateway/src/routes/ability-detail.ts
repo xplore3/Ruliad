@@ -53,7 +53,7 @@ interface AbilityDetailResponse {
 }
 
 /**
- * 计算某个评分项在对话中的时间戳（相对会话开始）。
+ * 计算某个评分标准在对话中的时间戳（相对会话开始）。
  * 返回 mm:ss 格式。
  */
 function calcTime(turnSeq: number, transcript: { seq: number; at: string }[], startedAt: string): string {
@@ -113,7 +113,7 @@ export async function abilityDetailRoutes(app: FastifyInstance, ctx: RouteContex
       } satisfies AbilityDetailResponse;
     }
 
-    // 2. 聚合各会话中该技能点的评分项
+    // 2. 聚合各会话中该技能点的评分标准
     const evidenceList: EvidenceItem[] = [];
     const rationales: string[] = [];
     const betterScripts: string[] = [];
@@ -131,7 +131,7 @@ export async function abilityDetailRoutes(app: FastifyInstance, ctx: RouteContex
         scoreCount++;
       }
 
-      // 该技能点下的评分项
+      // 该技能点下的评分标准
       const items = report.items.filter((item) => item.skillPointId === skillPointId);
 
       for (const item of items) {

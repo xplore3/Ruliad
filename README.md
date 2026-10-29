@@ -151,7 +151,7 @@ pnpm test
 | `GET /executive/summary` / `GET /executive/org-teams?orgId=` | 高管：组织热力图 / 达标趋势 / 合规 / POC 对照；组织下钻到团队热力图 |
 | `GET /admin/analytics` / `GET /admin/report-export` | 数据中心聚合（含考核完成漏斗）/ 自包含 HTML 汇报页（可打印） |
 | `GET/POST /workshop/extraction-projects` / `POST .../advance` | 内容工坊：要素提取流水线（collecting→done） |
-| `GET/POST /workshop/score-items` / `GET/POST /workshop/golden-cases` | 评分规则 / 金标准用例 |
+| `GET/POST /library/score-items` / `GET/POST /library/golden-cases` | 评分标准库（第5步评分依据）/ 评分回归案例库 |
 | `GET /workshop/product-kb` / `PUT /workshop/product-kb` / `POST /workshop/product-kb/entries` | 产品知识库：读取 / 整体替换（版本自增）/ 条目批量导入（按 id 覆盖或追加） |
 | `POST /users/import` | 用户批量导入（admin）：orgName/teamName 按名解析、不存在自动创建；username 冲突更新，逐行容错 |
 | `POST /workshop/regression-runs/run` / `GET /workshop/regression-runs` / `GET /workshop/observations` | 回归跑分（0.8 发布闸门）/ 历史 / 观察项聚合 |
@@ -180,7 +180,7 @@ curl -X POST http://localhost:3060/api/v1/users/import \
   -d '{"users":[{"username":"zhangsan","name":"张三","role":"trainee","orgName":"华东一区","teamName":"直营二组"}]}'
 ```
 
-角色/场景/评分项/金标准用例等其余主数据经对应 POST 端点逐条接入（见 API 概览）；
+角色/场景/评分标准/评分回归案例等其余主数据经对应 POST 端点逐条接入（见 API 概览）；资源库各库与新手指引五步执行环节的对应关系见 `packages/core/src/types/guidance.ts` 文件头注释；
 录音萃取流水线暂只接受外部转写后的文本引用（`recordingRefs`），录音上传与 ASR 转写未实现。
 
 ## 约定

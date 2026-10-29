@@ -70,7 +70,7 @@ const VAD_MAX_RECORD_MS = 15000;
 /** 自动聆听识别失败的重试上限，超过后给出文字提示 */
 const GUIDANCE_MAX_RETRY = 2;
 
-/** 资格问题：优先引导包；guidance 拉取失败/为 null 且命中地推关键词时回退硬编码题库 */
+/** 资格问题：优先指引配置；guidance 拉取失败/为 null 且命中地推关键词时回退硬编码题库 */
 function resolveQualifyQuestions(g: ScenarioGuidance | null, s: ScenarioInfo | null): string[] {
   if (g?.qualifyQuestions?.length) return g.qualifyQuestions;
   if (s && GROUND_PUSH_KEYWORDS.some((k) => `${s.name} ${(s.coverageTopics ?? []).join(' ')}`.includes(k))) {
@@ -114,7 +114,7 @@ export default function Practice() {
   const [autoMic, setAutoMic] = useState(() => localStorage.getItem(AUTO_MIC_KEY) !== '0');
 
   // ===== 新手指引状态 =====
-  /** 场景引导包（拉取失败/为 null 时回退到地推关键词 + 硬编码题库的旧逻辑） */
+  /** 场景指引配置（拉取失败/为 null 时回退到地推关键词 + 硬编码题库的旧逻辑） */
   const [guidance, setGuidance] = useState<ScenarioGuidance | null>(null);
   const [qualifyQ, setQualifyQ] = useState<number>(1);
   const [qualifyStage, setQualifyStage] = useState<'asking' | 'recording' | 'uploading' | 'error'>('asking');
@@ -224,7 +224,7 @@ export default function Practice() {
         setPersona(p);
         setScenario(s);
         setSessionMode(session.mode);
-        // 并行拉取场景引导包；失败/为 null 时回退到本地关键词判定（见 resolveQualifyQuestions）
+        // 并行拉取场景指引配置；失败/为 null 时回退到本地关键词判定（见 resolveQualifyQuestions）
         guidanceReqRef.current = fetchGuidance(session.scenarioId)
           .then((res) => {
             if (cancelled) return;
@@ -433,7 +433,7 @@ export default function Practice() {
     setPhaseBoth('live');
     // 通知服务端从此刻起倒计时（开场/新手指引不消耗时长）；失败时回退为按会话创建时间计时
     if (sessionId) {
-      // 引导包给了倒计时秒数：先用它，服务端响应回来再校正
+      // 指引配置给了倒计时秒数：先用它，服务端响应回来再校正
       const cd = guidanceRef.current?.duration?.countdownSeconds;
       if (typeof cd === 'number' && cd > 0) setRemaining(cd);
       markLiveStart(sessionId)
@@ -454,7 +454,7 @@ export default function Practice() {
     }
   };
 
-  /** 进 live 入口：有引导包旁白时先播第4步开场旁白，播完（或失败）再正式进场 */
+  /** 进 live 入口：有指引配置旁白时先播第4步开场旁白，播完（或失败）再正式进场 */
   const startLive = () => {
     stopGuidanceMedia();
     const narration = isVoice ? guidanceRef.current?.liveIntro?.narration : undefined;
@@ -1193,9 +1193,9 @@ export default function Practice() {
   /** 示范对话当前说话的角色（用于双角色可视化高亮） */
   const demoCurrentRole =
     demoIndex >= 0 && demoIndex < demoLines.length ? demoLines[demoIndex].role : null;
-  /** 资格问题总数（引导包优先，回退硬编码题库；为空表示本场景无新手指引） */
+  /** 资格问题总数（指引配置优先，回退硬编码题库；为空表示本场景无新手指引） */
   const qualifyQuestions = resolveQualifyQuestions(guidance, scenario);
-  /** 页面展示的时长：引导包给了 targetMinutes 时以它为准 */
+  /** 页面展示的时长：指引配置给了 targetMinutes 时以它为准 */
   const durationMinutes = guidance?.duration?.targetMinutes ?? scenario?.durationMinutes;
 
   return (

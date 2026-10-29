@@ -15,8 +15,8 @@ interface JudgeParsed {
   betterScript: string;
 }
 
-/** 组装 judge prompt：评分项定义 + 档位 JSON + 场景考核点 + 带 seq 的转写 */
-function buildJudgePrompt(def: ScoreItemDef, session: Session, scenario?: Scenario): string {
+/** 组装 judge prompt：评分标准定义 + 档位 JSON + 场景考核点 + 带 seq 的转写（+ 可选的重点评分维度） */
+function buildJudgePrompt(def: ScoreItemDef, session: Session, scenario?: Scenario, scoringFocus?: string[]): string {
   const transcriptLines = session.transcript
     .filter((t) => t.speaker !== 'coach')
     .map((t) => `[${t.seq}] ${t.speaker === 'trainee' ? '学员' : '客户'}：${t.text}`)
@@ -31,14 +31,17 @@ function buildJudgePrompt(def: ScoreItemDef, session: Session, scenario?: Scenar
   }
   return [
     def.judgePrompt,
-    `评分项：${def.name}`,
+    `评分标准：${def.name}`,
     `行为锚定：${def.behaviorAnchor}`,
     ...scenarioLines,
     `可选档位（JSON）：${JSON.stringify(def.levels)}`,
     '对话记录：',
     transcriptLines,
     '请只输出 JSON：{"levelKey":"档位key","quote":"引用原文","quoteTurnSeq":数字,"rationale":"判定理由","betterScript":"更优话术示范"}',
-    'betterScript 要求：针对该评分项的扣分点，给一句学员当时可以直接说的中文话术示范，不超过 60 字；若判定为最高档（无扣分）则给空字符串。',
+    'betterScript 要求：针对该评分标准的扣分点，给一句学员当时可以直接说的中文话术示范，不超过 60 字；若判定为最高档（无扣分）则给空字符串。',
+    ...(scoringFocus?.length
+      ? [`本次演练重点评分维度：${scoringFocus.join('、')}。打分时对这些维度从严、并明确指出该维度表现。`]
+      : []),
   ].join('\n');
 }
 
@@ -79,7 +82,7 @@ async function runJudge(
 }
 
 /**
- * 双 judge 判定单个评分项：
+ * 双 judge 判定单个评分标准：
  * 主 judge 与 judge_secondary 独立判定；levelKey 一致则高置信，
  * 不一致取主 judge 结果并标记 isReference（复盘中标注"参考"）。
  */
@@ -87,9 +90,10 @@ export async function judgeItem(
   def: ScoreItemDef,
   session: Session,
   gateway: LLMGateway,
-  scenario?: Scenario
+  scenario?: Scenario,
+  scoringFocus?: string[]
 ): Promise<ScoreItemResult> {
-  const prompt = buildJudgePrompt(def, session, scenario);
+  const prompt = buildJudgePrompt(def, session, scenario, scoringFocus);
   const primary = await runJudge(gateway.forTask('judge'), prompt, def);
   const secondary = await runJudge(gateway.forTask('judge_secondary'), prompt, def);
 

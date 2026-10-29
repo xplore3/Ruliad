@@ -28,8 +28,8 @@ export interface DemoScriptTemplate {
   faqPoolRef?: string;
 }
 
-/** 分析标准库条目（第3步：讲解示范案例时引用的标准） */
-export interface AnalysisStandard {
+/** 讲解标准库条目（第3步：讲解示范案例时引用的标准） */
+export interface BriefingStandard {
   id: string;
   tenantId: string;
   name: string;
@@ -39,7 +39,7 @@ export interface AnalysisStandard {
   example?: string;
 }
 
-/** 真实度标准库条目（第4步：AI 客户逼真度标准） */
+/** 演练真实度标准库条目（第4步：AI 客户逼真度标准） */
 export interface RealismStandard {
   id: string;
   tenantId: string;
@@ -82,7 +82,7 @@ export interface LiveIntro {
   goal: string;
 }
 
-/** 场景引导资源包：五步流程的场景级配置（GET /scenarios/:id/guidance、/library/scenario-guidance） */
+/** 新手指引流程配置：五步流程的场景级配置（GET /scenarios/:id/guidance、/library/scenario-guidance） */
 export interface ScenarioGuidance {
   id: string;
   tenantId: string;
@@ -94,12 +94,12 @@ export interface ScenarioGuidance {
   demo: DemoScriptTemplate | null;
   /** 第3步 讲解要点 */
   keyPoints: string[];
-  /** 第3步 分析标准库引用 */
-  analysisStandardIds: string[];
+  /** 第3步 讲解标准库引用 */
+  briefingStandardIds: string[];
   voiceProfile: VoiceProfile;
   /** 第4步 演练旁白+目标 */
   liveIntro: LiveIntro;
-  /** 第4步 真实度标准库引用 */
+  /** 第4步 演练真实度标准库引用 */
   realismStandardIds: string[];
   /** 第4步 难度系数说明参数 */
   difficultyLevels: DifficultyLevel[];

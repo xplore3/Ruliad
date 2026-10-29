@@ -13,9 +13,11 @@ import {
   extractScenarioFromAudio,
   getStoredUser,
   apiError,
+  listScenarioGuidances,
 } from '../api';
 import type { ScenarioExtractResult } from '../api';
 import type { Scenario, ScenarioParticipant, SkillPoint } from '../types';
+import type { ScenarioGuidance } from '../lib/guidance';
 import { PcmRecorder, pcmToWav } from '../voice';
 
 type EditorStep = 'base' | 'goal' | 'role' | 'params' | 'eval' | 'script' | 'participants';
@@ -223,6 +225,10 @@ export default function Build() {
   const [skillPoints, setSkillPoints] = useState<SkillPoint[]>([]);
   const [editingScenarioId, setEditingScenarioId] = useState<string | null>(null);
   const [editingPersonaConfigId, setEditingPersonaConfigId] = useState<string | null>(null);
+  /** 新建场景保存成功后，提示条提供「立即配置新手指引」直达动作 */
+  const [newSavedScenario, setNewSavedScenario] = useState<{ id: string; name: string } | null>(null);
+  /** 编辑中场景已有的新手指引配置（用于时长字段的真相源提示） */
+  const [editingGuidance, setEditingGuidance] = useState<ScenarioGuidance | null>(null);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [trial, setTrial] = useState<{ open: boolean; messages: TrialMsg[]; input: string; sending: boolean }>({
@@ -482,6 +488,8 @@ export default function Build() {
     setForm(EMPTY_FORM);
     setEditingScenarioId(null);
     setEditingPersonaConfigId(null);
+    setNewSavedScenario(null);
+    setEditingGuidance(null);
     resetTrial();
   };
 
@@ -512,6 +520,11 @@ export default function Build() {
     setActiveStep('base');
     setEditorMode('form');
     setActiveTab('editor');
+    setNewSavedScenario(null);
+    // 拉一次指引配置，用于时长字段的「以指引配置为准」提示
+    listScenarioGuidances()
+      .then((r) => setEditingGuidance(r.items.find((g) => g.scenarioId === scenario.id) ?? null))
+      .catch(() => setEditingGuidance(null));
   };
 
   const handleDuplicate = async (scenario: Scenario) => {
@@ -679,7 +692,13 @@ export default function Build() {
         setEditingPersonaConfigId(persona.id);
       }
       if (scenarioId) saveWeights(scenarioId, form.dimensionWeights);
-      setNotice(editingScenarioId ? '场景已更新' : '场景已保存，可在「我的场景」中查看；可到资源库配置引导包（资格提问/示范/讲解/难度/时长）');
+      if (editingScenarioId) {
+        setNewSavedScenario(null);
+        setNotice('场景已更新');
+      } else {
+        setNewSavedScenario(scenarioId ? { id: scenarioId, name: form.name.trim() } : null);
+        setNotice('场景已保存，可在「我的场景」中查看；可到资源库配置新手指引（资格提问/示范/讲解/难度/时长）');
+      }
       await loadMine();
     } catch (err) {
       setNotice(apiError(err, '保存失败'));
@@ -750,9 +769,23 @@ export default function Build() {
       </div>
 
       {notice && (
-        <div className="card" style={{ padding: '10px 16px', marginBottom: 16, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="card" style={{ padding: '10px 16px', marginBottom: 16, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
           <span>{notice}</span>
-          <button className="act-btn" onClick={() => setNotice(null)}>✕</button>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            {newSavedScenario && (
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() =>
+                  navigate('/library', {
+                    state: { guidanceFocus: { scenarioId: newSavedScenario.id, name: newSavedScenario.name } },
+                  })
+                }
+              >
+                立即配置新手指引 →
+              </button>
+            )}
+            <button className="act-btn" onClick={() => { setNotice(null); setNewSavedScenario(null); }}>✕</button>
+          </span>
         </div>
       )}
 
@@ -1008,6 +1041,13 @@ export default function Build() {
                       <input type="number" min={1} max={60} value={form.duration} onChange={(e) => updateForm({ duration: Number(e.target.value) })} className="input" />
                       <span style={{ fontSize: '14px', color: '#6B7280', flexShrink: 0 }}>分钟</span>
                     </div>
+                    {editingScenarioId && (
+                      <div className="hint">
+                        {editingGuidance
+                          ? `该场景已配置新手指引流程，对练实际时长以指引配置为准（当前：目标 ${editingGuidance.duration.targetMinutes} 分钟 / 倒计时 ${editingGuidance.duration.countdownSeconds} 秒）`
+                          : '创建后可在资源库配置新手指引，届时以指引配置的时长为准'}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

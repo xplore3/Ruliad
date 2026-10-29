@@ -239,7 +239,7 @@ check('E13 已删场景的复盘降级（报告仍在）', s == 200 and d.get('r
       and d.get('scenario') is None, f'{s} scenario={d.get("scenario")}')
 
 # ═════════ F. 安全与回归新增用例 ═════════
-print('\n── F. 归属越权 / persona 部分更新 / 试聊 / 评分项只读 / description ──')
+print('\n── F. 归属越权 / persona 部分更新 / 试聊 / 评分标准只读 / description ──')
 # F1 水平越权：另一学员不能操作/查看他人会话
 uname2 = 'e2e_' + uuid.uuid4().hex[:8]
 s, d = call('POST', '/auth/register', {'username': uname2, 'name': 'E2E学员乙', 'password': '123456'})
@@ -280,11 +280,11 @@ check('F3.1 试聊 200', s == 200 and bool(d.get('reply')), f'{s} {str(d)[:120]}
 s, d = call('POST', f'/persona-configs/{PERSONA}/trial-chat', {'history': []}, ADMIN)
 check('F3.2 缺 text → 400', s == 400, f'{s} {d}')
 
-# F4 评分项定义：GET 全员可读，写仍限 admin
+# F4 评分标准定义：GET 全员可读，写仍限 admin
 s, d = call('GET', '/library/score-items', token=TRAINEE)
-check('F4.1 学员读评分项 200', s == 200, f'{s} {str(d)[:100]}')
+check('F4.1 学员读评分标准 200', s == 200, f'{s} {str(d)[:100]}')
 s, d = call('POST', '/library/score-items', {'name': 'x', 'skillPointId': SP1}, TRAINEE)
-check('F4.2 学员写评分项 → 403', s == 403, f'{s} {d}')
+check('F4.2 学员写评分标准 → 403', s == 403, f'{s} {d}')
 
 # F5 description 字段闭环
 s, d = call('POST', '/scenarios', {**BODY, 'name': 'E2E描述测试', 'description': '客户对孩子成绩很焦虑'}, ADMIN)

@@ -131,9 +131,10 @@ model ScenarioTask {
   @@index([userId, status])
 }
 
-// ---------------- 客户提问问题库 ----------------
+// ---------------- 示范问答库 ----------------
 
-model CustomerQuestion {
+/// 示范问答库：新手指引第2步「示范」环节的 FAQ 池
+model DemoFaq {
   id       String @id @default(uuid())
   tenantId String
   category String @default("")
@@ -142,8 +143,9 @@ model CustomerQuestion {
   @@index([tenantId])
 }
 
-// ---------------- 场景引导资源库 ----------------
+// ---------------- 新手指引流程配置 ----------------
 
+/// 新手指引流程配置：五步流程（资格提问→示范→讲解→演练→评分）的场景级配置
 model ScenarioGuidance {
   id         String @id @default(uuid())
   tenantId   String
@@ -155,7 +157,8 @@ model ScenarioGuidance {
   @@index([scenarioId])
 }
 
-model AnalysisStandard {
+/// 讲解标准库：第3步「讲解」环节口播稿引用
+model BriefingStandard {
   id       String @id @default(uuid())
   tenantId String
   name     String
@@ -165,6 +168,7 @@ model AnalysisStandard {
   @@index([tenantId])
 }
 
+/// 演练真实度标准库：第4步「演练」AI 客户逼真度要求
 model RealismStandard {
   id       String @id @default(uuid())
   tenantId String
@@ -203,6 +207,7 @@ model ScoreReport {
   createdAt   DateTime @default(now())
 }
 
+/// 评分标准库：第5步「评分」的逐项评分依据
 model ScoreItemDef {
   id          String @id @default(uuid())
   tenantId    String
@@ -291,6 +296,7 @@ model DataConsent {
   @@index([tenantId])
 }
 
+/// 评分回归案例库：评分引擎回归测试用，不参与实时执行
 model GoldenCase {
   id   String @id @default(uuid())
   name String

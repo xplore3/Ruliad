@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type { ASRStream } from '@grasp-mvp/speech-gateway';
+import type { ASRStream, TTSOptions } from '@grasp-mvp/speech-gateway';
 import type { RouteContext } from '../ctx.js';
 import { tokenFailReason, verifyToken } from '../auth.js';
 import { runTurn } from '../services/turn.js';
@@ -45,15 +45,33 @@ function formatFromMime(mime: string | undefined): string {
   return f || 'pcm';
 }
 
-/** 取人设配置的 TTS 音色（voiceProfile.voice）；未配置返回 undefined，由 provider 用全局默认 SPEECH_TTS_VOICE */
+/**
+ * 解析 TTS 音色参数，三级回退：新手指引流程配置 voiceProfile → 人设 voiceProfile → provider 全局默认。
+ * 字段口径（两种 VoiceProfile 结构不同，保守映射）：
+ * - voice（音色名）只在人设 voiceProfile 里，guidance 的 VoiceProfile 无此字段，始终取自人设；
+ * - excitement / rate：guidance 配了就覆盖人设（人设 voiceProfile 是自由 Record，仅取数字字段）；
+ * - guidance.style / arousal：TTSOptions 无 style 字段；arousal 由每轮情绪快照实时传入，均不在此合并。
+ */
 export async function personaVoice(
   store: RouteContext['store'],
+  scenarioId: string,
   personaConfigId: string,
   log?: { info(obj: object, msg: string): void }
-): Promise<string | undefined> {
+): Promise<Pick<TTSOptions, 'voice' | 'excitement' | 'rate'>> {
   const persona = await store.getPersonaConfig(personaConfigId);
-  const v = persona?.voiceProfile?.voice;
-  const voice = typeof v === 'string' && v ? v : undefined;
+  const guidance = await store.getScenarioGuidance(scenarioId).catch(() => undefined);
+
+  const pv = persona?.voiceProfile ?? {};
+  const voice = typeof pv.voice === 'string' && pv.voice ? pv.voice : undefined;
+  const personaExcitement = typeof pv.excitement === 'number' ? pv.excitement : undefined;
+  const personaRate = typeof pv.rate === 'number' ? pv.rate : undefined;
+
+  const gv = guidance?.voiceProfile;
+  const profile = {
+    voice,
+    excitement: gv?.excitement ?? personaExcitement,
+    rate: gv?.rate ?? personaRate,
+  };
   log?.info(
     {
       personaConfigId,
@@ -61,11 +79,12 @@ export async function personaVoice(
       age: persona?.age,
       occupation: persona?.occupation,
       voiceProfile: persona?.voiceProfile ?? null,
+      guidanceVoiceProfile: gv ?? null,
       voiceUsed: voice ?? '(全局默认)',
     },
     'TTS 说话人属性'
   );
-  return voice;
+  return profile;
 }
 
 /**
@@ -111,10 +130,10 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
     const result = await runTurn(ctx, session, scenario, userText);
     if (!result) return reply.code(500).send({ error: '场景对应的 persona 配置缺失' });
 
-    const voice = await personaVoice(store, scenario.personaConfigId, request.log);
+    const ttsProfile = await personaVoice(store, scenario.id, scenario.personaConfigId, request.log);
     const tts = await speech.tts.synthesize(result.personaTurn.text, {
       arousal: result.arousal ?? undefined,
-      voice,
+      ...ttsProfile,
     });
 
     return {
@@ -165,15 +184,16 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
       }
       const scenario = await store.getScenario(session.scenarioId);
       if (!scenario) return reply.code(500).send({ error: '场景缺失' });
-      const voice =
+      // 试听端点：请求显式传入的 excitement/rate 优先于场景/人设配置
+      const ttsProfile: Pick<TTSOptions, 'voice' | 'excitement' | 'rate'> =
         voiceRole === 'persona'
-          ? await personaVoice(store, scenario.personaConfigId, request.log)
-          : ROLE_VOICES[voiceRole];
+          ? await personaVoice(store, scenario.id, scenario.personaConfigId, request.log)
+          : { voice: ROLE_VOICES[voiceRole] };
       const tts = await speech.tts.synthesize(text, {
-        voice,
+        voice: ttsProfile.voice,
         arousal: request.body?.arousal,
-        excitement: request.body?.excitement,
-        rate,
+        excitement: request.body?.excitement ?? ttsProfile.excitement,
+        rate: rate ?? ttsProfile.rate,
       });
       return { audioBase64: tts.audio.toString('base64'), audioFormat: tts.format };
     }
@@ -271,14 +291,14 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
 
           // 逐句合成逐句发：客户端收到即可开始播放，实现边合成边播
           ttsPlaying = true;
-          const voice = await personaVoice(store, scenario.personaConfigId, req.log);
+          const ttsProfile = await personaVoice(store, scenario.id, scenario.personaConfigId, req.log);
           const sentences = splitSentences(replyText);
           for (let seq = 0; seq < sentences.length; seq++) {
             if (myRound !== round) return; // 被打断
             try {
               const tts = await speech.tts.synthesize(sentences[seq], {
                 arousal: result.arousal ?? undefined,
-                voice,
+                ...ttsProfile,
               });
               if (myRound !== round) return;
               send({ type: 'tts_sentence', seq, audio: tts.audio.toString('base64'), format: tts.format });
@@ -519,8 +539,8 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
           // 流式 TTS 播放开场白
           ttsPlaying = true;
           ttsAborted = false;
-          const voice = await personaVoice(store, scenario.personaConfigId, req.log);
-          console.log(`[VoiceCall][greeting] voice=${voice ?? '(default)'}`);
+          const ttsProfile = await personaVoice(store, scenario.id, scenario.personaConfigId, req.log);
+          console.log(`[VoiceCall][greeting] voice=${ttsProfile.voice ?? '(default)'}`);
           const sentences = splitSentences(replyText);
           console.log(`[VoiceCall][greeting] sentences=${sentences.length}: ${JSON.stringify(sentences.map(s => s.slice(0, 30)))}`);
           let seq = 0;
@@ -535,7 +555,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
               let totalBytes = 0;
               for await (const chunk of speech.tts.synthesizeStream(sentence, {
                 arousal: result.arousal ?? undefined,
-                voice,
+                ...ttsProfile,
               })) {
                 if (myRound !== round || ttsAborted || closed) return;
                 chunkCount++;
@@ -558,7 +578,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
               try {
                 const tts = await speech.tts.synthesize(sentence, {
                   arousal: result.arousal ?? undefined,
-                  voice,
+                  ...ttsProfile,
                 });
                 console.log(`[VoiceCall][greeting] fallback synthesize done: bytes=${tts.audio.length}`);
                 if (myRound !== round || ttsAborted || closed) return;
@@ -743,7 +763,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
           // 流式 TTS：逐句合成，使用 synthesizeStream 分块发送
           ttsPlaying = true;
           ttsAborted = false;
-          const voice = await personaVoice(store, scenario.personaConfigId, req.log);
+          const ttsProfile = await personaVoice(store, scenario.id, scenario.personaConfigId, req.log);
           const sentences = splitSentences(replyText);
           let seq = 0;
 
@@ -753,7 +773,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
             try {
               for await (const chunk of speech.tts.synthesizeStream(sentence, {
                 arousal: result.arousal ?? undefined,
-                voice,
+                ...ttsProfile,
               })) {
                 if (myRound !== round || ttsAborted || closed) return;
                 if (chunk.audio.length > 0) {
@@ -773,7 +793,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
               try {
                 const tts = await speech.tts.synthesize(sentence, {
                   arousal: result.arousal ?? undefined,
-                  voice,
+                  ...ttsProfile,
                 });
                 if (myRound !== round || ttsAborted || closed) return;
                 send({

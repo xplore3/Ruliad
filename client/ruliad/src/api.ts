@@ -12,7 +12,7 @@ import type {
   SceneType,
   ScenarioScript,
   ScenarioParticipant,
-  CustomerQuestion,
+  DemoFaq,
   GoldenCase,
   ScoreItemDef,
 } from './types';
@@ -347,21 +347,21 @@ export async function extractScenarioFromAudio(wav: Blob, current?: Record<strin
 
 // ====== 资源库管理 API（admin） ======
 
-// ---- 分析标准库 / 真实度标准库 / 场景引导包（新手指引五步流程配套） ----
+// ---- 讲解标准库 / 演练真实度标准库 / 场景指引配置（新手指引五步流程配套） ----
 
-export async function listAnalysisStandards() {
-  const { data } = await api.get('/library/analysis-standards');
-  return data as { items: import('./lib/guidance').AnalysisStandard[] };
+export async function listBriefingStandards() {
+  const { data } = await api.get('/library/briefing-standards');
+  return data as { items: import('./lib/guidance').BriefingStandard[] };
 }
 
 /** upsert：body 带 id 则更新，否则新建 */
-export async function saveAnalysisStandard(payload: Partial<import('./lib/guidance').AnalysisStandard>) {
-  const { data } = await api.post('/library/analysis-standards', payload);
-  return data as import('./lib/guidance').AnalysisStandard;
+export async function saveBriefingStandard(payload: Partial<import('./lib/guidance').BriefingStandard>) {
+  const { data } = await api.post('/library/briefing-standards', payload);
+  return data as import('./lib/guidance').BriefingStandard;
 }
 
-export async function deleteAnalysisStandard(id: string) {
-  await api.delete(`/library/analysis-standards/${id}`);
+export async function deleteBriefingStandard(id: string) {
+  await api.delete(`/library/briefing-standards/${id}`);
 }
 
 export async function listRealismStandards() {
@@ -399,7 +399,7 @@ export async function fetchPersonaConfigs() {
   return data as { personaConfigs: PersonaConfig[] };
 }
 
-export type LibraryExtractTarget = 'scenario' | 'question' | 'score-item' | 'golden-case' | 'analysis-standard' | 'realism-standard';
+export type LibraryExtractTarget = 'scenario' | 'demo-faq' | 'score-item' | 'golden-case' | 'briefing-standard' | 'realism-standard';
 
 export interface LibraryExtractResult {
   reply: string;
@@ -412,33 +412,33 @@ export async function extractLibraryRows(target: LibraryExtractTarget, text: str
   return data as LibraryExtractResult;
 }
 
-// ---- 客户提问库 ----
+// ---- 示范问答库 ----
 
-export async function listCustomerQuestions(category?: string) {
-  const { data } = await api.get('/library/questions', { params: category ? { category } : {} });
-  return data as { questions: CustomerQuestion[] };
+export async function listDemoFaqs(category?: string) {
+  const { data } = await api.get('/library/demo-faqs', { params: category ? { category } : {} });
+  return data as { faqs: DemoFaq[] };
 }
 
-export async function createCustomerQuestion(payload: Partial<CustomerQuestion>) {
-  const { data } = await api.post('/library/questions', payload);
-  return data as CustomerQuestion;
+export async function createDemoFaq(payload: Partial<DemoFaq>) {
+  const { data } = await api.post('/library/demo-faqs', payload);
+  return data as DemoFaq;
 }
 
-export async function batchCreateCustomerQuestions(items: Partial<CustomerQuestion>[]) {
-  const { data } = await api.post('/library/questions/batch', { items });
-  return data as { count: number; questions: CustomerQuestion[] };
+export async function batchCreateDemoFaqs(items: Partial<DemoFaq>[]) {
+  const { data } = await api.post('/library/demo-faqs/batch', { items });
+  return data as { count: number; faqs: DemoFaq[] };
 }
 
-export async function updateCustomerQuestion(id: string, payload: Partial<CustomerQuestion>) {
-  const { data } = await api.put(`/library/questions/${id}`, payload);
-  return data as CustomerQuestion;
+export async function updateDemoFaq(id: string, payload: Partial<DemoFaq>) {
+  const { data } = await api.put(`/library/demo-faqs/${id}`, payload);
+  return data as DemoFaq;
 }
 
-export async function deleteCustomerQuestion(id: string) {
-  await api.delete(`/library/questions/${id}`);
+export async function deleteDemoFaq(id: string) {
+  await api.delete(`/library/demo-faqs/${id}`);
 }
 
-// ---- 评分项定义 ----
+// ---- 评分标准定义 ----
 
 export async function listScoreItems(skillPointId?: string) {
   const { data } = await api.get('/library/score-items', { params: skillPointId ? { skillPointId } : {} });
@@ -459,7 +459,7 @@ export async function deleteScoreItem(id: string) {
   await api.delete(`/library/score-items/${id}`);
 }
 
-// ---- 金标准案例 ----
+// ---- 评分回归案例 ----
 
 export async function listGoldenCases() {
   const { data } = await api.get('/library/golden-cases');

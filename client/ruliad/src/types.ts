@@ -186,8 +186,8 @@ export interface SkillPoint {
 
 /** ===== 资源库管理 ===== */
 
-/** 客户提问问题库条目 */
-export interface CustomerQuestion {
+/** 示范问答库条目 */
+export interface DemoFaq {
   id: string;
   tenantId: string;
   category: string;

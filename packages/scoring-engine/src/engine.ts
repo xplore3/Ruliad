@@ -28,6 +28,8 @@ export interface ScoreOptions {
   log?: ScoreLogger;
   /** 技能点 id → 名称映射（用于报告中的 skillPointName）；缺省回退为 id */
   skillPointNames?: Record<string, string>;
+  /** 新手指引流程配置的重点评分维度（第5步）；有值时 judge prompt 追加从严要求，缺省行为不变 */
+  scoringFocus?: string[];
 }
 
 /** 评分过程日志器最小接口 */
@@ -36,7 +38,7 @@ export interface ScoreLogger {
 }
 
 /**
- * 评分主流程：规则层 + 双 judge 评分项 + 汇总报告。
+ * 评分主流程：规则层 + 双 judge 评分标准 + 汇总报告。
  * 只评 defs 中属于 scenario.skillPointIds 的项；观察项进 items 但不计分。
  * options.videoFrames 存在时附带视频表现评审（videoReview，独立维度不计总分）。
  */
@@ -66,7 +68,7 @@ export async function scoreSession(
   const items: ScoreItemResult[] = [];
   for (const [i, def] of relevantDefs.entries()) {
     const itemStart = Date.now();
-    const item = await judgeItem(def, session, gateway, scenario);
+    const item = await judgeItem(def, session, gateway, scenario, options.scoringFocus);
     log?.info(
       {
         sessionId: session.id,
@@ -77,7 +79,7 @@ export async function scoreSession(
         judgeAgree: item.judgeAgree,
         ms: Date.now() - itemStart,
       },
-      '评分项完成'
+      '评分标准完成'
     );
     items.push(item);
   }

@@ -2,14 +2,12 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import type {
   ExtractionProject,
-  GoldenCase,
   ProductKB,
   ProductKBEntry,
   QuizQuestion,
   QuizType,
   QuizTrigger,
   RegressionRun,
-  ScoreItemDef,
   Session,
 } from '@grasp-mvp/core';
 import { scoreSession } from '@grasp-mvp/scoring-engine';
@@ -238,34 +236,7 @@ export async function workshopRoutes(app: FastifyInstance, ctx: RouteContext): P
     }
   );
 
-  // ---- 评分项定义 ----
-  app.get<{ Querystring: { skillPointId?: string } }>('/workshop/score-items', async (request) => ({
-    items: await store.listScoreItemDefs(request.tenantId, request.query.skillPointId),
-  }));
-
-  app.post<{ Body: ScoreItemDef }>('/workshop/score-items', async (request, reply) => {
-    const def = request.body;
-    if (!def?.id || !def.skillPointId || !def.name || !def.levels?.length) {
-      return reply.code(400).send({ error: 'id / skillPointId / name / levels 必填' });
-    }
-    await store.upsertScoreItemDef({ ...def, tenantId: def.tenantId ?? request.tenantId });
-    return reply.code(201).send(def);
-  });
-
-  // ---- 金标准案例 ----
-  app.get('/workshop/golden-cases', async () => ({
-    cases: await store.listGoldenCases(),
-  }));
-
-  app.post<{ Body: GoldenCase }>('/workshop/golden-cases', async (request, reply) => {
-    const body = request.body;
-    if (!body?.name || !body.transcript?.length || !body.expected?.length) {
-      return reply.code(400).send({ error: 'name / transcript / expected 必填' });
-    }
-    const goldenCase: GoldenCase = { ...body, id: body.id ?? randomUUID() };
-    await store.saveGoldenCase(goldenCase);
-    return reply.code(201).send(goldenCase);
-  });
+  // 评分标准库/评分回归案例库的 CRUD 已收敛至 /library/score-items 与 /library/golden-cases
 
   // ---- 回归测试 ----
   app.post<{ Body: { scenarioId?: string } }>(

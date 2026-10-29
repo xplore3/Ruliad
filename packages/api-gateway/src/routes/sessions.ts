@@ -5,7 +5,7 @@ import { bandFor, PersonaActor } from '@grasp-mvp/role-engine';
 import { scoreSession } from '@grasp-mvp/scoring-engine';
 import type { RouteContext } from '../ctx.js';
 import { mkEvent } from '../events.js';
-import { effectiveDurationMinutes, loadRuntime, remainingSeconds, runTurn } from '../services/turn.js';
+import { effectiveCountdownSeconds, loadRuntime, remainingSeconds, runTurn } from '../services/turn.js';
 import { personaVoice } from './voice.js';
 import { readFramesAsDataUrls } from '../services/video-store.js';
 
@@ -92,6 +92,8 @@ async function finalizeSession(session: Session, ctx: RouteContext, log?: Fastif
     const defs = await store.listScoreItemDefs(session.tenantId);
     const skillPoints = await store.listSkillPoints(session.tenantId);
     const skillPointNames = Object.fromEntries(skillPoints.map((sp) => [sp.id, sp.name]));
+    // 新手指引流程配置的重点评分维度（第5步）：有值时 judge 对这些维度从严
+    const guidance = await store.getScenarioGuidance(session.scenarioId).catch(() => undefined);
     // 有录像关键帧时附带视频表现评审（无视觉模型/评审失败时自动跳过，不影响文字评分）
     const framesStart = Date.now();
     const videoFrames = completed.videoFrames?.length
@@ -99,11 +101,11 @@ async function finalizeSession(session: Session, ctx: RouteContext, log?: Fastif
       : undefined;
     log?.info(
       { sessionId: session.id, scoreItems: defs.length, videoFrames: videoFrames?.length ?? 0, ms: Date.now() - framesStart },
-      '结束会话：评分前准备完成（评分项定义 + 视频关键帧）'
+      '结束会话：评分前准备完成（评分标准定义 + 视频关键帧）'
     );
 
     const scoringStart = Date.now();
-    report = await scoreSession(completed, scenario, defs, gateway, { videoFrames, log, skillPointNames });
+    report = await scoreSession(completed, scenario, defs, gateway, { videoFrames, log, skillPointNames, scoringFocus: guidance?.scoringFocus });
     log?.info(
       { sessionId: session.id, reportId: report.id, totalScore: report.totalScore, passed: report.passed, ms: Date.now() - scoringStart },
       '结束会话：评分完成'
@@ -343,7 +345,7 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
           script: scenario.script,
           participants: scenario.participants,
         },
-        remainingSeconds: remainingSeconds(session, scenario, await effectiveDurationMinutes(store, scenario)),
+        remainingSeconds: remainingSeconds(session, scenario, await effectiveCountdownSeconds(store, scenario)),
       });
     }
   );
@@ -381,7 +383,7 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
           }
         : null,
       remainingSeconds: scenario
-        ? remainingSeconds(session, scenario, await effectiveDurationMinutes(store, scenario))
+        ? remainingSeconds(session, scenario, await effectiveCountdownSeconds(store, scenario))
         : null,
     };
   });
@@ -526,14 +528,14 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
       let coachAudio: string | undefined;
       let personaAudio: string | undefined;
       if (request.query.voice === '1') {
-        const voice = await personaVoice(store, scenario.personaConfigId, request.log);
-        coachAudio = (await ctx.speech.tts.synthesize(coachText, { voice })).audio.toString('base64');
+        const ttsProfile = await personaVoice(store, scenario.id, scenario.personaConfigId, request.log);
+        coachAudio = (await ctx.speech.tts.synthesize(coachText, { ...ttsProfile })).audio.toString('base64');
         const personaOpening = session.transcript.find((t) => t.speaker === 'persona');
         if (personaOpening) {
           personaAudio = (
             await ctx.speech.tts.synthesize(personaOpening.text, {
               arousal: personaOpening.emotion?.arousal,
-              voice,
+              ...ttsProfile,
             })
           ).audio.toString('base64');
         }
@@ -559,7 +561,7 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
     return {
       pausedAt,
       remainingSeconds: scenario
-        ? remainingSeconds({ ...session, pausedAt }, scenario, await effectiveDurationMinutes(store, scenario))
+        ? remainingSeconds({ ...session, pausedAt }, scenario, await effectiveCountdownSeconds(store, scenario))
         : null,
     };
   });
@@ -580,7 +582,7 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
     const scenario = await store.getScenario(session.scenarioId);
     return {
       remainingSeconds: scenario
-        ? remainingSeconds(updated, scenario, await effectiveDurationMinutes(store, scenario))
+        ? remainingSeconds(updated, scenario, await effectiveCountdownSeconds(store, scenario))
         : null,
     };
   });
@@ -601,10 +603,13 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
       await store.updateSession(session.id, { liveStartedAt: updated.liveStartedAt, pausedMs: 0 });
     }
     const scenario = await store.getScenario(session.scenarioId);
+    // 第4步演练旁白+目标：无新手指引流程配置时为 null
+    const guidance = await store.getScenarioGuidance(session.scenarioId).catch(() => undefined);
     return {
       remainingSeconds: scenario
-        ? remainingSeconds(updated, scenario, await effectiveDurationMinutes(store, scenario))
+        ? remainingSeconds(updated, scenario, await effectiveCountdownSeconds(store, scenario))
         : null,
+      liveIntro: guidance?.liveIntro ?? null,
     };
   });
 
