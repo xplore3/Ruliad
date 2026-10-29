@@ -90,8 +90,8 @@ export interface ScenarioGuidance {
   name: string;
   /** 第1步 资格提问 */
   qualifyQuestions: string[];
-  /** 第2步 示范剧本；null=无示范模式 */
-  demo: DemoScriptTemplate | null;
+  /** 第2步 示范剧本引用（示范剧本库条目 id）；null=无示范模式 */
+  demoScriptId: string | null;
   /** 第3步 讲解要点 */
   keyPoints: string[];
   /** 第3步 讲解标准库引用 */

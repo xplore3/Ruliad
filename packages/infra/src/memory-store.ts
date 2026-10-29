@@ -4,6 +4,7 @@ import type {
   CalibrationEvent,
   CertRecord,
   DemoFaq,
+  DemoScript,
   DataConsent,
   DomainEvent,
   Element,
@@ -52,6 +53,7 @@ export class MemoryStore implements Store {
   private scoreReports = new Map<string, ScoreReport>();
   private scoreItemDefs = new Map<string, ScoreItemDef>();
   private demoFaqs = new Map<string, DemoFaq>();
+  private demoScripts = new Map<string, DemoScript>();
   private scenarioGuidances = new Map<string, ScenarioGuidance>();
   private briefingStandards = new Map<string, BriefingStandard>();
   private realismStandards = new Map<string, RealismStandard>();
@@ -238,6 +240,22 @@ private events: DomainEvent[] = [];
   }
   async deleteDemoFaq(id: string) {
     this.demoFaqs.delete(id);
+  }
+
+  // ---- 示范剧本库 ----
+  async getDemoScript(id: string) {
+    return this.demoScripts.get(id);
+  }
+  async listDemoScripts(tenantId: string, category?: string) {
+    return [...this.demoScripts.values()].filter(
+      (s) => s.tenantId === tenantId && (!category || s.category === category)
+    );
+  }
+  async saveDemoScript(s: DemoScript) {
+    this.demoScripts.set(s.id, s);
+  }
+  async deleteDemoScript(id: string) {
+    this.demoScripts.delete(id);
   }
 
   // ---- 新手指引流程配置 ----

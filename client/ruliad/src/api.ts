@@ -438,6 +438,27 @@ export async function deleteDemoFaq(id: string) {
   await api.delete(`/library/demo-faqs/${id}`);
 }
 
+// ---- 示范剧本库 ----
+
+export async function listDemoScripts(category?: string) {
+  const { data } = await api.get('/library/demo-scripts', { params: category ? { category } : {} });
+  return data as { items: import('./types').DemoScript[] };
+}
+
+export async function createDemoScript(payload: Partial<import('./types').DemoScript>) {
+  const { data } = await api.post('/library/demo-scripts', payload);
+  return data as import('./types').DemoScript;
+}
+
+export async function updateDemoScript(id: string, payload: Partial<import('./types').DemoScript>) {
+  const { data } = await api.put(`/library/demo-scripts/${id}`, payload);
+  return data as import('./types').DemoScript;
+}
+
+export async function deleteDemoScript(id: string) {
+  await api.delete(`/library/demo-scripts/${id}`);
+}
+
 // ---- 评分标准定义 ----
 
 export async function listScoreItems(skillPointId?: string) {

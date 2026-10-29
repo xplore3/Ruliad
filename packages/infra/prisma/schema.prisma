@@ -143,6 +143,17 @@ model DemoFaq {
   @@index([tenantId])
 }
 
+/// 示范剧本库：新手指引第2步「示范」的双人对戏剧本，按业务线分支（地推/电销/接待咨询/课程顾问）；指引配置以 demoScriptId 引用
+model DemoScript {
+  id       String @id @default(uuid())
+  tenantId String
+  category String @default("")
+  name     String
+  data     String
+
+  @@index([tenantId])
+}
+
 // ---------------- 新手指引流程配置 ----------------
 
 /// 新手指引流程配置：五步流程（资格提问→示范→讲解→演练→评分）的场景级配置

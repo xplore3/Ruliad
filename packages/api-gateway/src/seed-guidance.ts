@@ -1,13 +1,14 @@
 import { createStore } from '@grasp-mvp/infra';
-import { BRIEFING_STANDARDS, REALISM_STANDARDS, SCENARIO_GUIDANCES } from './seed-guidance.data.js';
+import { BRIEFING_STANDARDS, DEMO_SCRIPTS, REALISM_STANDARDS, SCENARIO_GUIDANCES } from './seed-guidance.data.js';
 import { DEMO_FAQ_ITEMS } from './demo-faq.data.js';
 
 const TENANT = 'tenant-demo';
 
 /**
- * 新手指引流程配置灌数脚本：4 条讲解标准 + 4 条演练真实度标准 + 4 个新手指引流程配置 + 地推示范 FAQ 28 条入示范问答库。
+ * 新手指引流程配置灌数脚本：4 条讲解标准 + 4 条演练真实度标准 + 3 条示范剧本 + 4 个新手指引流程配置 + 地推示范 FAQ 28 条入示范问答库。
  * 用法：pnpm --filter @grasp-mvp/api-gateway seed:guidance
- * 幂等：全部走 upsert（saveXxx），可重复执行。
+ * 幂等：全部走 upsert（saveXxx），可重复执行；saveScenarioGuidance 为整行 data 覆盖语义，
+ * 会把 demoScriptId 写进现有行并覆盖掉旧的内嵌 demo JSON。
  */
 async function main() {
   const store = createStore();
@@ -21,6 +22,12 @@ async function main() {
     await store.saveRealismStandard(s);
   }
   console.log(`[seed:guidance] 演练真实度标准 upsert：${REALISM_STANDARDS.length} 条`);
+
+  // 示范剧本先入示范剧本库（指引配置的 demoScriptId 引用它们）
+  for (const s of DEMO_SCRIPTS) {
+    await store.saveDemoScript(s);
+  }
+  console.log(`[seed:guidance] 示范剧本 ${DEMO_SCRIPTS.length} 条入库`);
 
   for (const g of SCENARIO_GUIDANCES) {
     await store.saveScenarioGuidance(g);

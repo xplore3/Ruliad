@@ -5,7 +5,7 @@ import {
   getGuidance,
   judgeDemoChoice,
   judgeExperience,
-  renderDemoScript,
+  performDemoScript,
   resolveFaqPool,
   QUALIFY_QUESTIONS,
 } from '../services/guidance.js';
@@ -33,7 +33,7 @@ async function extractAudio(request: FastifyRequest): Promise<{ audio?: Buffer; 
  * 新手指引流程路由（不写入 transcript，不影响评分与复盘）：
  * - GET  /scenarios/:id/guidance        新手指引流程配置（无配置返回 guidance=null）
  * - POST /sessions/:id/qualify-answer?q=N  资格提问的语音回答 → ASR → LLM 判断是否做过（最后一题给结论并落库）
- * - POST /sessions/:id/demo             渲染场景示范对话剧本（无资源时声明无示范，前端跳过该步骤）
+ * - POST /sessions/:id/demo             示范剧本交给大模型理解演绎成双人对话（无资源时声明无示范，前端跳过该步骤）
  * - POST /sessions/:id/briefing         教练讲解口播稿（keyPoints + 讲解标准库）
  * - POST /sessions/:id/demo-choice      示范后的语音选择 → 再听一版 / 开始练习
  */
@@ -97,16 +97,20 @@ export async function guidanceRoutes(app: FastifyInstance, ctx: RouteContext): P
     }
   );
 
-  // 渲染示范对话剧本：有资源按模板渲染（demo=null 表示无示范模式）；无资源 → 声明无示范，前端跳过该步骤
-  app.post<{ Params: { id: string } }>('/sessions/:id/demo', async (request, reply) => {
+  // 示范对话演绎：示范剧本库按 demoScriptId 引用取剧本，渲染参照稿后交给大模型理解演绎成自然双人对话
+  // （无引用或剧本已被删除 → 声明无示范，前端跳过该步骤；version>1 表示"再听一版"，LLM 换风格演绎）
+  app.post<{ Params: { id: string }; Body: { version?: number } }>('/sessions/:id/demo', async (request, reply) => {
     const session = await store.getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: '会话不存在' });
     if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
 
     const guidance = await getGuidance(store, session.scenarioId);
-    if (!guidance?.demo) return { lines: [], hasDemo: false };
-    const pool = await resolveFaqPool(store, session.tenantId, guidance.demo.faqPoolRef, guidance.demo.faqPick ?? 0);
-    return { lines: renderDemoScript(guidance.demo, pool), hasDemo: true };
+    if (!guidance?.demoScriptId) return { lines: [], hasDemo: false };
+    const script = await store.getDemoScript(guidance.demoScriptId);
+    if (!script) return { lines: [], hasDemo: false };
+    const pool = await resolveFaqPool(store, session.tenantId, script.faqPoolRef, script.faqPick ?? 0);
+    const version = Math.max(1, Math.floor(Number(request.body?.version ?? 1)) || 1);
+    return { lines: await performDemoScript(gateway, script, pool, version), hasDemo: true };
   });
 
   // 教练讲解口播稿：keyPoints + 引用的讲解标准库条目；无资源返回空口播

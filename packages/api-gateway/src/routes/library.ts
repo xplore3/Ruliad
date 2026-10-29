@@ -4,6 +4,8 @@ import type {
   BriefingStandard,
   ChatMessage,
   DemoFaq,
+  DemoRole,
+  DemoScript,
   GoldenCase,
   RealismStandard,
   ScenarioGuidance,
@@ -24,6 +26,23 @@ const EXTRACT_TARGETS: ExtractTarget[] = [
 ];
 
 const SCORE_LAYERS = new Set<ScoreItemDef['layer']>(['company', 'team', 'personal']);
+
+const DEMO_ROLES = new Set<DemoRole>(['sales', 'customer', 'child', 'narrator']);
+
+/** 校验示范剧本请求体；返回错误消息，null 表示通过 */
+function validateDemoScriptBody(body: Partial<DemoScript>): string | null {
+  if (!body.category?.trim()) return 'category 必填';
+  if (!body.name?.trim()) return 'name 必填';
+  if (!Array.isArray(body.lines) || body.lines.length === 0) return 'lines 必填且非空';
+  for (const [i, line] of body.lines.entries()) {
+    if (!line || !DEMO_ROLES.has(line.role)) return `lines[${i}] 的 role 仅支持 'sales' | 'customer' | 'child' | 'narrator'`;
+    if (!line.text?.trim()) return `lines[${i}] 的 text 必填`;
+  }
+  if (body.faqPick !== undefined && (!Number.isInteger(body.faqPick) || body.faqPick < 0)) {
+    return 'faqPick 须为非负整数';
+  }
+  return null;
+}
 
 /** 校验评分标准请求体；返回错误消息，null 表示通过 */
 function validateScoreItemBody(body: Partial<ScoreItemDef>): string | null {
@@ -143,6 +162,62 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
       return reply.code(404).send({ error: '示范问答不存在' });
     }
     await store.deleteDemoFaq(request.params.id);
+    return { ok: true };
+  });
+
+  /** 示范剧本库 —— 新手指引第2步「示范」的双人对戏剧本，demo 路由按 demoScriptId 引用后交给大模型演绎 */
+  app.get<{ Querystring: { category?: string } }>('/library/demo-scripts', async (request) => ({
+    items: await store.listDemoScripts(request.tenantId, request.query.category),
+  }));
+
+  app.post<{ Body: Partial<DemoScript> }>('/library/demo-scripts', async (request, reply) => {
+    const body = request.body ?? {};
+    const error = validateDemoScriptBody(body);
+    if (error) return reply.code(400).send({ error });
+    const script: DemoScript = {
+      id: body.id ?? randomUUID(),
+      tenantId: request.tenantId,
+      category: body.category!.trim(),
+      name: body.name!.trim(),
+      lines: body.lines!,
+      variables: body.variables ?? undefined,
+      faqPick: body.faqPick ?? undefined,
+      faqPoolRef: body.faqPoolRef?.trim() || undefined,
+    };
+    await store.saveDemoScript(script);
+    return reply.code(201).send(script);
+  });
+
+  app.put<{ Params: { id: string }; Body: Partial<DemoScript> }>(
+    '/library/demo-scripts/:id',
+    async (request, reply) => {
+      const existing = await store.getDemoScript(request.params.id);
+      if (!existing || existing.tenantId !== request.tenantId) {
+        return reply.code(404).send({ error: '示范剧本不存在' });
+      }
+      const body = request.body ?? {};
+      const merged: DemoScript = {
+        ...existing,
+        category: body.category?.trim() ?? existing.category,
+        name: body.name?.trim() ?? existing.name,
+        lines: body.lines ?? existing.lines,
+        variables: body.variables !== undefined ? body.variables : existing.variables,
+        faqPick: body.faqPick !== undefined ? body.faqPick : existing.faqPick,
+        faqPoolRef: body.faqPoolRef !== undefined ? body.faqPoolRef?.trim() || undefined : existing.faqPoolRef,
+      };
+      const error = validateDemoScriptBody(merged);
+      if (error) return reply.code(400).send({ error });
+      await store.saveDemoScript(merged);
+      return merged;
+    }
+  );
+
+  app.delete<{ Params: { id: string } }>('/library/demo-scripts/:id', async (request, reply) => {
+    const existing = await store.getDemoScript(request.params.id);
+    if (!existing || existing.tenantId !== request.tenantId) {
+      return reply.code(404).send({ error: '示范剧本不存在' });
+    }
+    await store.deleteDemoScript(request.params.id);
     return { ok: true };
   });
 
@@ -330,7 +405,7 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
       ...body,
       id: body.id ?? randomUUID(),
       tenantId: request.tenantId,
-      demo: body.demo ?? null,
+      demoScriptId: body.demoScriptId ?? null,
       keyPoints: body.keyPoints ?? [],
       briefingStandardIds: body.briefingStandardIds ?? [],
       realismStandardIds: body.realismStandardIds ?? [],

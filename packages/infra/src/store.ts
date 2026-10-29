@@ -4,6 +4,7 @@ import type {
   CalibrationEvent,
   CertRecord,
   DemoFaq,
+  DemoScript,
   DataConsent,
   DomainEvent,
   Element,
@@ -136,6 +137,12 @@ export interface Store {
   listDemoFaqs(tenantId: string, category?: string): Promise<DemoFaq[]>;
   saveDemoFaq(q: DemoFaq): Promise<void>;
   deleteDemoFaq(id: string): Promise<void>;
+
+  // ---- 示范剧本库（第2步「示范」双人对戏剧本，按业务线分支） ----
+  getDemoScript(id: string): Promise<DemoScript | undefined>;
+  listDemoScripts(tenantId: string, category?: string): Promise<DemoScript[]>;
+  saveDemoScript(s: DemoScript): Promise<void>;
+  deleteDemoScript(id: string): Promise<void>;
 
   // ---- 新手指引流程配置 ----
   getScenarioGuidance(scenarioId: string): Promise<ScenarioGuidance | undefined>;

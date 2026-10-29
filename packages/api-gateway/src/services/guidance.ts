@@ -9,10 +9,11 @@ import type { Store } from '@grasp-mvp/infra';
 import { DEMO_FAQ_ITEMS } from '../demo-faq.data.js';
 
 /**
- * 新手指引流程：资格判断 + 示范剧本渲染 + 讲解口播稿组装。
- * 资源库化以后，示范剧本由各场景的 ScenarioGuidance.demo 模板渲染（占位符 + FAQ 池抽取），
- * 不依赖 LLM；资格判断与示范选择的 LLM 调用失败/解析失败均有确定性兜底，保证 mock 环境可跑通。
- * 场景无指引配置时不再提供兜底示范剧本，由路由声明无示范（hasDemo=false），前端跳过示范步骤。
+ * 新手指引流程：资格判断 + 示范剧本演绎 + 讲解口播稿组装。
+ * 资源库化以后，示范剧本存示范剧本库（DemoScript），由 ScenarioGuidance.demoScriptId 引用。
+ * 示范执行方式：先把模板确定性渲染成参照稿（变量 + FAQ 池抽取），再交给大模型理解演绎成自然对话；
+ * LLM 失败/输出不合法时回退参照稿，保证 mock/弱网环境可跑通。
+ * 场景无指引配置或剧本引用失效时不提供兜底示范剧本，由路由声明无示范（hasDemo=false），前端跳过示范步骤。
  */
 
 /** 资格提问兜底（场景无引导资源时的默认两问） */
@@ -204,6 +205,70 @@ export function renderDemoScript(template: DemoScriptTemplate, faqPool: DemoFaqP
   return template.lines.map((line) => ({ ...line, text: interpolate(line.text) }));
 }
 
+const DEMO_ROLES = new Set(['sales', 'customer', 'child', 'narrator']);
+
+/** 清洗 LLM 演绎输出的台词行；非法行返回 null */
+function sanitizePerformedLine(raw: unknown): DemoLine | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const line = raw as Record<string, unknown>;
+  if (typeof line.role !== 'string' || !DEMO_ROLES.has(line.role)) return null;
+  if (typeof line.text !== 'string' || !line.text.trim()) return null;
+  const out: DemoLine = { role: line.role as DemoLine['role'], text: line.text.trim() };
+  if (Number.isFinite(line.excitement)) out.excitement = Math.max(1, Math.min(10, Math.round(Number(line.excitement))));
+  if (Number.isFinite(line.arousal)) out.arousal = Math.max(0, Math.min(1, Number(line.arousal)));
+  return out;
+}
+
+/**
+ * 示范执行（第2步）：剧本库内容不照念，而是先确定性渲染成参照稿，再交给大模型理解演绎成自然的双人对话。
+ * 事实内容（称呼/年龄/FAQ 问答要点/流程顺序）以参照稿为准，措辞由 LLM 口语化演绎；
+ * version > 1（学员点"再听一版"）时要求换一种演绎风格。LLM 失败/输出不合法回退参照稿。
+ */
+export async function performDemoScript(
+  gateway: LLMGateway,
+  template: DemoScriptTemplate,
+  faqPool: DemoFaqPoolItem[],
+  version = 1
+): Promise<DemoLine[]> {
+  const reference = renderDemoScript(template, faqPool);
+  const scriptText = reference
+    .map((l) => `${{ sales: '销售', customer: '客户', child: '孩子', narrator: '旁白' }[l.role]}：${l.text}`)
+    .join('\n');
+  try {
+    const result = await gateway.forTask('actor').chat(
+      [
+        {
+          role: 'user',
+          content: [
+            '你是销售培训示范剧的演绎引擎。下面是一份销售示范剧本参照稿（角色：销售/客户/孩子/旁白）。',
+            '请理解剧本的流程、事实信息和问答要点，把它演绎成一段自然、口语化、像真实现场发生的双人对话。',
+            '要求：',
+            '1. 保持剧本的流程顺序和全部事实信息不变（称呼、年龄、课程信息、客户的提问与销售的应答要点必须保留原意）',
+            '2. 措辞可以自然发挥：加语气词、合理过渡、让客户反应更真实；不要机械照念',
+            '3. 可以微调台词拆分与顺序衔接，但总行数与参照稿接近，客户提问与对应应答必须成对出现',
+            version > 1 ? '4. 这是再听一版的请求：换一种演绎风格（节奏/用词/客户性格微调），事实不变' : '',
+            '只输出 JSON：{"lines":[{"role":"sales|customer|child|narrator","text":"台词","excitement":1-10 整数（情绪强度，销售开场高、旁白低）}]}',
+            '不要输出任何其他内容。',
+            '',
+            '【剧本参照稿】',
+            scriptText,
+          ].filter(Boolean).join('\n'),
+        },
+      ],
+      { jsonMode: true, temperature: 0.8 }
+    );
+    const parsed = JSON.parse(extractJson(result.content)) as { lines?: unknown };
+    const lines = (Array.isArray(parsed.lines) ? parsed.lines : [])
+      .map(sanitizePerformedLine)
+      .filter((l): l is DemoLine => !!l);
+    // 演绎结果行数过少视为失败（剧本被截断），回退参照稿
+    if (lines.length >= Math.max(4, Math.floor(reference.length / 2))) return lines;
+  } catch {
+    /* 落入兜底 */
+  }
+  return reference;
+}
+
 /** 加载新手指引流程配置（无配置返回 undefined，调用方走兜底逻辑） */
 export async function getGuidance(store: Store, scenarioId: string): Promise<ScenarioGuidance | undefined> {
   return store.getScenarioGuidance(scenarioId);
@@ -224,8 +289,8 @@ export function composeBriefing(guidance: ScenarioGuidance, standards: BriefingS
     ...referenced.map((s) => `${s.name}：${s.description}${s.example ? `例如：${s.example}` : ''}`),
   ];
   if (points.length === 0) return [];
-  // 无示范模式（demo=null）的场景没有"刚才这段示范"，开场与收尾问句相应调整
-  const hasDemo = guidance.demo != null;
+  // 无示范模式（demoScriptId=null）的场景没有"刚才这段示范"，开场与收尾问句相应调整
+  const hasDemo = guidance.demoScriptId != null;
   const lines = [hasDemo ? '先来讲解刚才这段示范的关键点。' : '先来讲解这个场景的关键要领。'];
   points.forEach((point, i) => {
     const numeral = CN_NUMERALS[i] ?? String(i + 1);

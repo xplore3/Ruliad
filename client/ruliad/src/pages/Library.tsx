@@ -5,11 +5,13 @@ import {
   apiError,
   batchCreateDemoFaqs,
   createDemoFaq,
+  createDemoScript,
   createGoldenCase,
   createScenario,
   createScoreItem,
   deleteBriefingStandard,
   deleteDemoFaq,
+  deleteDemoScript,
   deleteGoldenCase,
   deleteRealismStandard,
   deleteScenario,
@@ -22,6 +24,7 @@ import {
   getStoredUser,
   listBriefingStandards,
   listDemoFaqs,
+  listDemoScripts,
   listGoldenCases,
   listRealismStandards,
   listScenarioGuidances,
@@ -30,12 +33,14 @@ import {
   saveRealismStandard,
   saveScenarioGuidance,
   updateDemoFaq,
+  updateDemoScript,
   updateGoldenCase,
   updateScenario,
   updateScoreItem,
 } from '../api';
 import type {
   DemoFaq,
+  DemoScript,
   GoldenCase,
   PersonaConfig,
   Scenario,
@@ -46,9 +51,9 @@ import type {
 } from '../types';
 import type {
   BriefingStandard,
-  DemoScriptTemplate,
   DifficultyLevel,
   DurationParams,
+  GuidanceDemoLine,
   RealismStandard,
   ScenarioGuidance,
 } from '../lib/guidance';
@@ -567,11 +572,12 @@ function ParticipantsEditor({ participants, onChange }: {
 
 /** ===== 页面 ===== */
 
-type TabKey = 'scenarios' | 'questions' | 'score-items' | 'golden-cases' | 'analysis-standards' | 'realism-standards' | 'guidance';
+type TabKey = 'scenarios' | 'questions' | 'demo-scripts' | 'score-items' | 'golden-cases' | 'analysis-standards' | 'realism-standards' | 'guidance';
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'scenarios', label: '对练场景库' },
   { key: 'questions', label: '示范问答库' },
+  { key: 'demo-scripts', label: '示范剧本库' },
   { key: 'score-items', label: '评分标准库' },
   { key: 'golden-cases', label: '评分回归案例库' },
   { key: 'analysis-standards', label: '讲解标准库' },
@@ -665,6 +671,7 @@ export default function Library() {
         <ScenarioTab skillPoints={skillPoints} personas={personas} guidances={guidances} onConfigureGuidance={configureGuidance} setNotice={setNotice} />
       )}
       {tab === 'questions' && <DemoFaqTab skillPoints={skillPoints} setNotice={setNotice} />}
+      {tab === 'demo-scripts' && <DemoScriptTab setNotice={setNotice} />}
       {tab === 'score-items' && (
         <ScoreItemTab skillPoints={skillPoints} setNotice={setNotice} onChanged={() => listScoreItems().then((r) => setScoreItems(r.items)).catch(() => {})} />
       )}
@@ -1515,6 +1522,265 @@ function DemoFaqTab({ skillPoints, setNotice }: { skillPoints: SkillPoint[]; set
   );
 }
 
+/** ===== Tab 2.5：示范剧本库 ===== */
+
+/** 已知业务线分支（新建下拉候选；行内可自定义） */
+const DEMO_SCRIPT_CATEGORIES = ['地推', '电销', '接待咨询', '课程顾问'];
+
+type DemoScriptRowData = Omit<DemoScript, 'id' | 'tenantId'> & { id?: string };
+
+/** 台词结构化编辑：每行 role 下拉 / text / arousal / excitement，可增删 */
+function DemoLinesEditor({ lines, onChange }: { lines: GuidanceDemoLine[]; onChange: (l: GuidanceDemoLine[]) => void }) {
+  const update = (idx: number, patch: Partial<GuidanceDemoLine>) =>
+    onChange(lines.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
+  return (
+    <div>
+      <table className="lib-table">
+        <thead><tr><th>#</th><th>角色</th><th>台词</th><th>唤醒度</th><th>激情</th><th></th></tr></thead>
+        <tbody>
+          {lines.map((l, idx) => (
+            <tr key={idx}>
+              <td>{idx + 1}</td>
+              <td>
+                <select className="lib-cell" value={l.role} onChange={(e) => update(idx, { role: e.target.value as GuidanceDemoLine['role'] })}>
+                  {DEMO_ROLES.map((r) => <option key={r} value={r}>{DEMO_ROLE_LABELS[r]}</option>)}
+                </select>
+              </td>
+              <td style={{ minWidth: 320 }}><CellTextarea rows={1} value={l.text} onChange={(v) => update(idx, { text: v })} /></td>
+              <td style={{ width: 90 }}><CellInput type="number" value={l.arousal} onChange={(v) => update(idx, { arousal: v === '' ? undefined : Number(v) })} /></td>
+              <td style={{ width: 90 }}><CellInput type="number" value={l.excitement} onChange={(v) => update(idx, { excitement: v === '' ? undefined : Number(v) })} /></td>
+              <td><button className="btn btn-ghost btn-sm" onClick={() => onChange(lines.filter((_, i) => i !== idx))}>✕</button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <button
+        className="btn btn-ghost btn-sm"
+        style={{ marginTop: 8 }}
+        onClick={() => onChange([...lines, { role: 'sales', text: '' }])}
+      >
+        ＋ 加一句
+      </button>
+    </div>
+  );
+}
+
+/** variables JSON 编辑：本地草稿 + 实时格式校验，仅合法 JSON 对象才提交上行数据 */
+function VariablesEditor({ value, onChange }: {
+  value: DemoScript['variables'];
+  onChange: (v: DemoScript['variables']) => void;
+}) {
+  const [text, setText] = useState(value ? JSON.stringify(value, null, 2) : '');
+  const [err, setErr] = useState<string | null>(null);
+  const handle = (t: string) => {
+    setText(t);
+    const s = t.trim();
+    if (!s) {
+      setErr(null);
+      onChange(undefined);
+      return;
+    }
+    try {
+      const parsed: unknown = JSON.parse(s);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        setErr('variables 必须是 JSON 对象，如 {"name":{"kind":"choice","options":["小明","小红"]}}');
+        return;
+      }
+      setErr(null);
+      onChange(parsed as DemoScript['variables']);
+    } catch {
+      setErr('JSON 格式错误，请检查括号与引号');
+    }
+  };
+  return (
+    <div>
+      <MTextarea
+        rows={5}
+        value={text}
+        placeholder={'留空表示无变量；示例：{"name":{"kind":"choice","options":["小明","小红"]},"age":{"kind":"intRange","min":3,"max":6}}'}
+        onChange={handle}
+      />
+      {err
+        ? <p style={{ fontSize: 13, color: '#E85A4A', margin: '6px 0 0' }}>{err}</p>
+        : <p className="lib-hint" style={{ margin: '6px 0 0' }}>台词中可用 {'${变量名}'} 占位；kind 支持 choice / intRange / map</p>}
+    </div>
+  );
+}
+
+function DemoScriptTab({ setNotice }: { setNotice: (s: string | null) => void }) {
+  const { rows, setRows, loadRows, addDrafts, updateRow, markSaved, markError, toggleDelete } = useRows<DemoScriptRowData>();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [savingOne, setSavingOne] = useState(false);
+  const [detailKey, setDetailKey] = useState<string | null>(null);
+  const [branch, setBranch] = useState('全部');
+  /** 示范问答库的去重分类列表（faqPoolRef 提示用） */
+  const [faqCategories, setFaqCategories] = useState<string[]>([]);
+
+  const reload = () => {
+    setLoading(true);
+    listDemoScripts()
+      .then((r) => loadRows(r.items))
+      .catch((err) => setNotice(apiError(err, '加载示范剧本库失败')))
+      .finally(() => setLoading(false));
+  };
+  useEffect(reload, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    listDemoFaqs()
+      .then((r) => setFaqCategories([...new Set(r.faqs.map((f) => f.category).filter(Boolean))]))
+      .catch(() => {});
+  }, []);
+
+  const validate = (d: DemoScriptRowData) => {
+    if (!d.category?.trim()) return '分支必填';
+    if (!d.name?.trim()) return '名称必填';
+    if (!d.lines?.length) return '至少一行台词（详情中编辑）';
+    if (d.lines.some((l) => !l.text?.trim())) return '台词内容不能为空';
+    return null;
+  };
+
+  const handlers: SaveHandlers<DemoScriptRowData> = {
+    validate,
+    create: (d) => createDemoScript(d),
+    update: (id, d) => updateDemoScript(id, d),
+    remove: (id) => deleteDemoScript(id),
+  };
+
+  const pendingCount = rows.filter((r) => r.status !== 'clean').length;
+
+  const saveAll = async () => {
+    setSaving(true);
+    const { saved, failed } = await saveRows(rows, handlers, setRows);
+    setSaving(false);
+    setNotice(`保存完成：成功 ${saved} 项${failed ? `，失败 ${failed} 项（见行内提示）` : ''}`);
+    if (saved > 0) reload();
+  };
+
+  const saveOne = async (row: Row<DemoScriptRowData>) => {
+    const invalid = validate(row.data);
+    if (invalid) return markError(row.key, invalid);
+    setSavingOne(true);
+    try {
+      const saved = row.status === 'draft'
+        ? await handlers.create(row.data)
+        : await handlers.update(row.data.id!, row.data);
+      markSaved(row.key, saved);
+      setNotice('已保存此行');
+    } catch (err) {
+      markError(row.key, apiError(err, '保存失败'));
+    } finally {
+      setSavingOne(false);
+    }
+  };
+
+  const isKnownBranch = (c: string | undefined) => !!c && DEMO_SCRIPT_CATEGORIES.includes(c);
+  const visibleRows = rows.filter((r) => {
+    if (branch === '全部') return true;
+    if (branch === '其他') return !isKnownBranch(r.data.category);
+    return r.data.category === branch;
+  });
+
+  const detailRow = rows.find((r) => r.key === detailKey);
+
+  return (
+    <div className="card lib-card">
+      <Toolbar
+        pendingCount={pendingCount}
+        saving={saving}
+        onAdd={() => addDrafts([{ data: { category: isKnownBranch(branch) ? branch : '地推', name: '', lines: [{ role: 'sales' as const, text: '' }] } }])}
+        onReload={reload}
+        onSave={saveAll}
+      />
+      <div className="pick" style={{ padding: '0 16px 12px' }}>
+        {['全部', ...DEMO_SCRIPT_CATEGORIES, '其他'].map((c) => (
+          <button key={c} className={`chip${branch === c ? ' on' : ''}`} onClick={() => setBranch(c)}>{c}</button>
+        ))}
+      </div>
+      {loading ? (
+        <p style={{ padding: 16, color: '#6B7280', fontSize: 13 }}>加载中…</p>
+      ) : visibleRows.length === 0 ? (
+        <p style={{ padding: 16, color: '#6B7280', fontSize: 13 }}>
+          {branch === '全部' ? '暂无示范剧本，点击「新增行」上传' : '该分支暂无示范剧本，点击「新增」上传'}
+        </p>
+      ) : (
+        <div className="lib-table-wrap">
+          <table className="lib-table">
+            <thead>
+              <tr><th>状态</th><th>分支</th><th>名称</th><th>台词</th><th>FAQ 抽取</th><th>操作</th></tr>
+            </thead>
+            <tbody>
+              {visibleRows.map((row) => (
+                <tr key={row.key} className={`lib-row-${row.status}`}>
+                  <td><RowStatusChip row={row} />{row.error && <div className="lib-err">{row.error}</div>}</td>
+                  <td>
+                    <select className="lib-cell" value={row.data.category} onChange={(e) => updateRow(row.key, { category: e.target.value })}>
+                      {DEMO_SCRIPT_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                      {row.data.category && !isKnownBranch(row.data.category) && (
+                        <option value={row.data.category}>{row.data.category}（自定义）</option>
+                      )}
+                    </select>
+                  </td>
+                  <td style={{ minWidth: 200 }}><CellInput value={row.data.name} onChange={(v) => updateRow(row.key, { name: v })} /></td>
+                  <td>{row.data.lines?.length ?? 0} 句</td>
+                  <td>{row.data.faqPick ? `${row.data.faqPick} 条${row.data.faqPoolRef ? ` · ${row.data.faqPoolRef}` : ''}` : '-'}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    {row.status !== 'deleted' && (
+                      <button className="btn btn-ghost btn-sm" onClick={() => setDetailKey(row.key)}>详情</button>
+                    )}
+                    <button className="btn btn-ghost btn-sm" onClick={() => toggleDelete(row.key)}>
+                      {row.status === 'deleted' ? '恢复' : '删除'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {detailRow && (
+        <DetailModal
+          title={`示范剧本：${detailRow.data.name || '（未命名）'}`}
+          saving={savingOne}
+          onSave={() => saveOne(detailRow)}
+          onClose={() => setDetailKey(null)}
+        >
+          <Field label="剧本名称" wide><MInput value={detailRow.data.name} onChange={(v) => updateRow(detailRow.key, { name: v })} placeholder="如：地推开场标准示范" /></Field>
+          <Field label="业务线分支">
+            <input
+              className="input"
+              list="demo-script-branch-options"
+              value={detailRow.data.category}
+              placeholder="选择分支，或直接输入自定义"
+              onChange={(e) => updateRow(detailRow.key, { category: e.target.value })}
+            />
+            <datalist id="demo-script-branch-options">
+              {DEMO_SCRIPT_CATEGORIES.map((c) => <option key={c} value={c} />)}
+            </datalist>
+          </Field>
+          <Field label="FAQ 抽取条数 faqPick">
+            <MInput type="number" value={detailRow.data.faqPick} onChange={(v) => updateRow(detailRow.key, { faqPick: v === '' ? undefined : Number(v) })} />
+          </Field>
+          <Field label="FAQ 池分类 faqPoolRef" wide>
+            <MInput value={detailRow.data.faqPoolRef} onChange={(v) => updateRow(detailRow.key, { faqPoolRef: v || undefined })} placeholder="示范问答库分类名" />
+            <p className="lib-hint" style={{ margin: '6px 0 0' }}>
+              可用的示范问答库分类：{faqCategories.length ? faqCategories.join('、') : '（暂无）'}
+            </p>
+          </Field>
+          <div className="lib-fieldset">
+            <h4>台词（lines）</h4>
+            <DemoLinesEditor lines={detailRow.data.lines ?? []} onChange={(lines) => updateRow(detailRow.key, { lines })} />
+          </div>
+          <div className="lib-fieldset">
+            <h4>变量（variables，JSON）</h4>
+            <VariablesEditor value={detailRow.data.variables} onChange={(variables) => updateRow(detailRow.key, { variables })} />
+          </div>
+        </DetailModal>
+      )}
+    </div>
+  );
+}
+
 /** ===== Tab 3：评分标准 ===== */
 
 const DEFAULT_LEVELS: ScoreLevel[] = [
@@ -2010,7 +2276,7 @@ function newGuidanceDraft(scenarioId = '', name = ''): GuidanceRowData {
     scenarioId,
     name,
     qualifyQuestions: [],
-    demo: null,
+    demoScriptId: null,
     keyPoints: [],
     briefingStandardIds: [],
     realismStandardIds: [],
@@ -2029,7 +2295,7 @@ function toGuidanceRow(g: ScenarioGuidance): GuidanceRowData {
     scenarioId: g.scenarioId,
     name: g.name,
     qualifyQuestions: g.qualifyQuestions ?? [],
-    demo: g.demo ?? null,
+    demoScriptId: g.demoScriptId ?? null,
     keyPoints: g.keyPoints ?? [],
     briefingStandardIds: g.briefingStandardIds ?? [],
     realismStandardIds: g.realismStandardIds ?? [],
@@ -2098,11 +2364,15 @@ function IdNameChecks({ value, onChange, options }: {
   );
 }
 
-/** 示范剧本 line.role 的合法取值 */
+/** 示范剧本 line.role 的合法取值与中文名 */
 const DEMO_ROLES = ['sales', 'customer', 'child', 'narrator'] as const;
 
-/** faqPoolRef 兼容的旧值（现直接以示范问答库分类名解析） */
-const LEGACY_FAQ_POOL_REFS = ['ground-push-demo-faq', 'inquiry-demo-faq', 'phone-sales-demo-faq'];
+const DEMO_ROLE_LABELS: Record<(typeof DEMO_ROLES)[number], string> = {
+  sales: '销售',
+  customer: '客户',
+  child: '孩子',
+  narrator: '旁白',
+};
 
 function GuidanceTab({ focus, onFocusHandled, onChanged, setNotice }: {
   focus: GuidanceFocus | null;
@@ -2118,14 +2388,8 @@ function GuidanceTab({ focus, onFocusHandled, onChanged, setNotice }: {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [briefingStandards, setBriefingStandards] = useState<BriefingStandard[]>([]);
   const [realismStandards, setRealismStandards] = useState<RealismStandard[]>([]);
-  /** 编辑器内示范剧本的 JSON 草稿（完成/保存时解析回 demo 字段） */
-  const [demoText, setDemoText] = useState('');
-  const [noDemo, setNoDemo] = useState(false);
-  const [demoErr, setDemoErr] = useState<string | null>(null);
-  /** faqPoolRef 未匹配示范问答库分类时的警告（不阻断暂存/保存） */
-  const [demoWarn, setDemoWarn] = useState<string | null>(null);
-  /** 示范问答库的去重分类列表（faqPoolRef 提示与校验用） */
-  const [faqCategories, setFaqCategories] = useState<string[]>([]);
+  /** 示范剧本库条目（第2步示范模式下拉与预览用） */
+  const [demoScripts, setDemoScripts] = useState<DemoScript[]>([]);
 
   const reload = () => {
     setLoading(true);
@@ -2140,17 +2404,10 @@ function GuidanceTab({ focus, onFocusHandled, onChanged, setNotice }: {
     fetchScenarios().then((r) => setScenarios(r.scenarios)).catch(() => {});
     listBriefingStandards().then((r) => setBriefingStandards(r.items)).catch(() => {});
     listRealismStandards().then((r) => setRealismStandards(r.items)).catch(() => {});
-    listDemoFaqs()
-      .then((r) => setFaqCategories([...new Set(r.faqs.map((f) => f.category).filter(Boolean))]))
-      .catch(() => {});
+    listDemoScripts().then((r) => setDemoScripts(r.items)).catch(() => {});
   }, []);
 
   const openEditor = (row: Row<GuidanceRowData>) => {
-    const text = row.data.demo ? JSON.stringify(row.data.demo, null, 2) : '';
-    setDemoText(text);
-    setNoDemo(row.data.demo === null);
-    setDemoErr(null);
-    syncDemoWarn(text);
     setDetailKey(row.key);
   };
 
@@ -2168,76 +2425,12 @@ function GuidanceTab({ focus, onFocusHandled, onChanged, setNotice }: {
     onFocusHandled();
   }, [focus, loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** faqPoolRef 未匹配示范问答库分类（且非兼容旧值）时的警告文案；不匹配返回 null */
-  const faqPoolWarning = (ref: unknown): string | null => {
-    if (typeof ref !== 'string' || !ref.trim()) return null;
-    if (faqCategories.includes(ref) || LEGACY_FAQ_POOL_REFS.includes(ref)) return null;
-    return `faqPoolRef '${ref}' 未匹配示范问答库任何分类，示范时将回退内置 FAQ 池`;
-  };
-
-  /** 解析编辑器里的示范 JSON；无示范模式 → demo=null。结构非法 → error；faqPoolRef 未匹配分类 → warning（不阻断） */
-  const parseDemoInput = (): { demo: DemoScriptTemplate | null; warning?: string } | { error: string } => {
-    if (noDemo) return { demo: null };
-    const text = demoText.trim();
-    if (!text) return { error: '示范 JSON 不能为空；若无示范请勾选「无示范模式」' };
-    let parsed: DemoScriptTemplate;
-    try {
-      parsed = JSON.parse(text) as DemoScriptTemplate;
-    } catch {
-      return { error: '示范 JSON 解析失败，请检查格式' };
-    }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { error: '示范 JSON 需为对象' };
-    if (!Array.isArray(parsed.lines)) return { error: '示范 JSON 需包含 lines 数组' };
-    for (let i = 0; i < parsed.lines.length; i++) {
-      const line = parsed.lines[i] as unknown as Record<string, unknown> | null;
-      if (!line || typeof line !== 'object') return { error: `lines[${i}] 需为对象` };
-      if (!DEMO_ROLES.includes(line.role as (typeof DEMO_ROLES)[number])) {
-        return { error: `lines[${i}].role 非法：${String(line.role)}（需为 sales/customer/child/narrator）` };
-      }
-      if (typeof line.text !== 'string' || !line.text.trim()) return { error: `lines[${i}].text 必须是非空字符串` };
-    }
-    if (parsed.faqPick !== undefined && (!Number.isInteger(parsed.faqPick) || (parsed.faqPick as number) < 0)) {
-      return { error: 'faqPick 必须是非负整数' };
-    }
-    if (parsed.faqPoolRef !== undefined && typeof parsed.faqPoolRef !== 'string') {
-      return { error: 'faqPoolRef 必须是字符串' };
-    }
-    if (parsed.variables !== undefined && (typeof parsed.variables !== 'object' || parsed.variables === null || Array.isArray(parsed.variables))) {
-      return { error: 'variables 必须是对象' };
-    }
-    const warning = faqPoolWarning(parsed.faqPoolRef);
-    return warning ? { demo: parsed, warning } : { demo: parsed };
-  };
-
-  /** 编辑器挂载/草稿变化时同步 faqPoolRef 警告（JSON 解析失败时不重复报错，留给保存校验） */
-  const syncDemoWarn = (text: string) => {
-    try {
-      setDemoWarn(faqPoolWarning((JSON.parse(text) as DemoScriptTemplate)?.faqPoolRef));
-    } catch {
-      setDemoWarn(null);
-    }
-  };
-
-  /** 「完成」：尽力把示范 JSON 暂存进行数据；解析失败保留原值并提示 */
-  const closeEditor = () => {
-    const row = rows.find((r) => r.key === detailKey);
-    if (row) {
-      const d = parseDemoInput();
-      if ('error' in d) {
-        // 未填且原本就没示范时不算错误
-        if (!(demoText.trim() === '' && row.data.demo === null && !noDemo)) setNotice(`示范 JSON 未暂存：${d.error}`);
-      } else {
-        updateRow(row.key, { demo: d.demo });
-        if (d.warning) setNotice(d.warning);
-      }
-    }
-    setDetailKey(null);
-  };
-
+  /** 示范剧本校验：null=无示范模式；未勾选无示范时必须选一个剧本 */
   const validate = (d: GuidanceRowData) => {
     if (!d.scenarioId) return '请选择绑定场景';
     if (!d.name?.trim()) return '名称必填';
     if (!d.qualifyQuestions?.length) return '资格问题至少一题（编辑器中每行一条）';
+    if (d.demoScriptId !== null && !d.demoScriptId) return '请选择示范剧本，或勾选「无示范模式」';
     const dur = d.duration;
     if (![dur.targetMinutes, dur.minTurns, dur.maxTurns, dur.countdownSeconds].every(Number.isFinite)) {
       return '时长参数必须为数字';
@@ -2261,20 +2454,13 @@ function GuidanceTab({ focus, onFocusHandled, onChanged, setNotice }: {
   };
 
   const saveOne = async (row: Row<GuidanceRowData>) => {
-    const d = parseDemoInput();
-    if ('error' in d) {
-      setDemoErr(d.error);
-      return;
-    }
-    setDemoErr(null);
-    const payload = { ...row.data, demo: d.demo };
-    const invalid = validate(payload);
+    const invalid = validate(row.data);
     if (invalid) return markError(row.key, invalid);
     setSavingOne(true);
     try {
-      const saved = await saveScenarioGuidance(row.status === 'draft' ? payload : { ...payload, id: row.data.id });
+      const saved = await saveScenarioGuidance(row.status === 'draft' ? row.data : { ...row.data, id: row.data.id });
       markSaved(row.key, toGuidanceRow(saved));
-      setNotice(d.warning ? `已保存此行；${d.warning}` : '已保存此行');
+      setNotice('已保存此行');
       onChanged();
     } catch (err) {
       markError(row.key, apiError(err, '保存失败'));
@@ -2285,6 +2471,15 @@ function GuidanceTab({ focus, onFocusHandled, onChanged, setNotice }: {
 
   const detailRow = rows.find((r) => r.key === detailKey);
   const scenarioName = (id: string) => scenarios.find((s) => s.id === id)?.name ?? id;
+  /** 剧本下拉按分支分组：已知分支在前，其余归为「其他」 */
+  const demoScriptGroups: [string, DemoScript[]][] = (() => {
+    const groups = DEMO_SCRIPT_CATEGORIES
+      .map((c) => [c, demoScripts.filter((s) => s.category === c)] as [string, DemoScript[]])
+      .filter(([, items]) => items.length > 0);
+    const other = demoScripts.filter((s) => !DEMO_SCRIPT_CATEGORIES.includes(s.category));
+    if (other.length > 0) groups.push(['其他', other]);
+    return groups;
+  })();
 
   return (
     <div className="card lib-card">
@@ -2318,7 +2513,7 @@ function GuidanceTab({ focus, onFocusHandled, onChanged, setNotice }: {
                     </select>
                   </td>
                   <td>{row.data.qualifyQuestions.length} 题</td>
-                  <td>{row.data.demo ? `有（${row.data.demo.lines.length} 句）` : '无示范模式'}</td>
+                  <td>{row.data.demoScriptId ? (demoScripts.find((s) => s.id === row.data.demoScriptId)?.name ?? '剧本已删除') : '无示范模式'}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
                     {row.status !== 'deleted' && (
                       <button className="btn btn-ghost btn-sm" onClick={() => openEditor(row)}>编辑</button>
@@ -2338,7 +2533,7 @@ function GuidanceTab({ focus, onFocusHandled, onChanged, setNotice }: {
           title={`指引配置：${detailRow.data.name || '（未命名）'}${detailRow.data.scenarioId ? ` · ${scenarioName(detailRow.data.scenarioId)}` : ''}`}
           saving={savingOne}
           onSave={() => saveOne(detailRow)}
-          onClose={closeEditor}
+          onClose={() => setDetailKey(null)}
         >
           <Field label="绑定场景">
             <select className="input" value={detailRow.data.scenarioId} onChange={(e) => updateRow(detailRow.key, { scenarioId: e.target.value })}>
@@ -2396,25 +2591,46 @@ function GuidanceTab({ focus, onFocusHandled, onChanged, setNotice }: {
           <div className="lib-fieldset">
             <h4>示范剧本（第2步）</h4>
             <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, marginBottom: 8 }}>
-              <input type="checkbox" checked={noDemo} onChange={(e) => { setNoDemo(e.target.checked); setDemoErr(null); setDemoWarn(null); }} />
+              <input
+                type="checkbox"
+                checked={detailRow.data.demoScriptId === null}
+                onChange={(e) => updateRow(detailRow.key, { demoScriptId: e.target.checked ? null : '' })}
+              />
               无示范模式（如现场成交，保存为 null，练习页跳过示范直接进讲解）
             </label>
-            {!noDemo && (
-              <MTextarea
-                rows={10}
-                value={demoText}
-                placeholder={'{"lines":[{"role":"sales","text":"您好！","excitement":3}],"faqPick":2,"faqPoolRef":"..."}'}
-                onChange={(v) => { setDemoText(v); setDemoErr(null); syncDemoWarn(v); }}
-              />
+            {detailRow.data.demoScriptId !== null && (
+              <>
+                <select
+                  className="input"
+                  value={detailRow.data.demoScriptId}
+                  onChange={(e) => updateRow(detailRow.key, { demoScriptId: e.target.value })}
+                >
+                  <option value="">选择示范剧本…</option>
+                  {demoScriptGroups.map(([cat, items]) => (
+                    <optgroup key={cat} label={cat}>
+                      {items.map((s) => <option key={s.id} value={s.id}>[{s.category}] {s.name}</option>)}
+                    </optgroup>
+                  ))}
+                  {detailRow.data.demoScriptId && !demoScripts.some((s) => s.id === detailRow.data.demoScriptId) && (
+                    <option value={detailRow.data.demoScriptId}>{detailRow.data.demoScriptId}（未匹配，剧本可能已删除）</option>
+                  )}
+                </select>
+                {(() => {
+                  const script = demoScripts.find((s) => s.id === detailRow.data.demoScriptId);
+                  if (!script) return null;
+                  return (
+                    <div className="lib-sub" style={{ marginTop: 8, fontSize: 13 }}>
+                      {script.lines.slice(0, 5).map((l, i) => (
+                        <div key={i} style={{ padding: '2px 0' }}>
+                          <b>{DEMO_ROLE_LABELS[l.role] ?? l.role}：</b>{l.text}
+                        </div>
+                      ))}
+                      {script.lines.length > 5 && <div className="lib-hint">…共 {script.lines.length} 句</div>}
+                    </div>
+                  );
+                })()}
+              </>
             )}
-            {!noDemo && (
-              <p className="lib-hint" style={{ margin: '6px 0 0' }}>
-                可用的示范问答库分类：{faqCategories.length ? faqCategories.join('、') : '（暂无）'}
-                （faqPoolRef 填分类名；兼容旧值 ground-push-demo-faq / inquiry-demo-faq / phone-sales-demo-faq）
-              </p>
-            )}
-            {demoErr && <p style={{ fontSize: 13, color: '#E85A4A', margin: '6px 0 0' }}>{demoErr}</p>}
-            {!demoErr && demoWarn && <p style={{ fontSize: 13, color: '#B45309', margin: '6px 0 0' }}>{demoWarn}</p>}
           </div>
         </DetailModal>
       )}

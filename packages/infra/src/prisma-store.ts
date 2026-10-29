@@ -6,6 +6,7 @@ import type {
   CalibrationEvent,
   CertRecord,
   DemoFaq,
+  DemoScript,
   DataConsent,
   DomainEvent,
   Element,
@@ -133,6 +134,7 @@ export class PrismaStore implements Store {
   private scoreReports;
   private scoreItemDefs;
   private demoFaqs;
+  private demoScripts;
   private scenarioGuidances;
   private briefingStandards;
   private realismStandards;
@@ -165,6 +167,7 @@ private domainEvents;
     this.scoreReports = docTable<ScoreReport>(this.prisma.scoreReport, ['id', 'sessionId', 'totalScore', 'passed', 'createdAt']);
     this.scoreItemDefs = docTable<ScoreItemDef>(this.prisma.scoreItemDef, ['id', 'tenantId', 'skillPointId', 'name', 'layer']);
     this.demoFaqs = docTable<DemoFaq>(this.prisma.demoFaq, ['id', 'tenantId', 'category']);
+    this.demoScripts = docTable<DemoScript>(this.prisma.demoScript, ['id', 'tenantId', 'name', 'category']);
     this.scenarioGuidances = docTable<ScenarioGuidance>(this.prisma.scenarioGuidance, ['id', 'tenantId', 'scenarioId', 'name']);
     this.briefingStandards = docTable<BriefingStandard>(this.prisma.briefingStandard, ['id', 'tenantId', 'name', 'category']);
     this.realismStandards = docTable<RealismStandard>(this.prisma.realismStandard, ['id', 'tenantId', 'name', 'category']);
@@ -349,6 +352,20 @@ this.domainEvents = docTable<DomainEvent>(this.prisma.domainEvent, ['id', 'type'
   }
   deleteDemoFaq(id: string) {
     return this.demoFaqs.delete(id);
+  }
+
+  // ---- 示范剧本库 ----
+  getDemoScript(id: string) {
+    return this.demoScripts.get(id);
+  }
+  listDemoScripts(tenantId: string, category?: string) {
+    return this.demoScripts.list({ tenantId, ...(category ? { category } : {}) });
+  }
+  saveDemoScript(s: DemoScript) {
+    return this.demoScripts.upsertById(s);
+  }
+  deleteDemoScript(id: string) {
+    return this.demoScripts.delete(id);
   }
 
   // ---- 新手指引流程配置 ----

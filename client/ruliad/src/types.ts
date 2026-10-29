@@ -225,6 +225,21 @@ export interface GoldenCase {
   expected: { itemId: string; levelKey: string }[];
 }
 
+/** 示范剧本库条目（新手指引第2步示范模式引用的独立资源） */
+export interface DemoScript {
+  id: string;
+  tenantId: string;
+  /** 业务线分支：地推 / 电销 / 接待咨询 / 课程顾问（可自定义） */
+  category: string;
+  name: string;
+  lines: import('./lib/guidance').GuidanceDemoLine[];
+  variables?: Record<string, import('./lib/guidance').DemoVariable>;
+  /** 从示范问答库随机抽取条数 */
+  faqPick?: number;
+  /** 示范问答库分类名 */
+  faqPoolRef?: string;
+}
+
 export interface UserSkillState {
   skillPointId: string;
   name: string;
