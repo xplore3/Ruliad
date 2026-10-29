@@ -6,12 +6,14 @@ import type { ExamWindow, Scenario } from '../types';
 import { CATEGORY_RULES, categoryOf, matchCategory } from '../lib/categories';
 
 /** 实战训练模块卡片配置（后续增删卡片改这里即可） */
+/* 辅助色统一：图标背景用 slate-100 slate-500 色系，保持商务克制感 */
 const TRAINING_MODULES = [
   {
     key: 'ground-push',
     label: '地推引流课',
     icon: '👋',
-    color: '#2FAE7B',
+    color: '#64748B',
+    image: '/field-promotion.png',
     desc: '陌生拜访与破冰开场，练在街头商场快速建立对话',
     entry: 'practice',
     categoryLabel: '地推引流课',
@@ -20,7 +22,8 @@ const TRAINING_MODULES = [
     key: 'phone',
     label: '电话销售',
     icon: '📞',
-    color: '#FF6B5B',
+    color: '#64748B',
+    image: '/telephone-sale.png',
     desc: '外呼开场与异议应对，练在 30 秒内抓住客户注意力',
     entry: 'call',
     categoryLabel: '电话销售',
@@ -29,7 +32,8 @@ const TRAINING_MODULES = [
     key: 'inquiry',
     label: '咨询接待',
     icon: '💬',
-    color: '#4B7BEC',
+    color: '#64748B',
+    image: '/client-reception.png',
     desc: '承接主动咨询与询价比价，练需求挖掘与专业解答',
     entry: 'practice',
     categoryLabel: '咨询接待',
@@ -38,7 +42,8 @@ const TRAINING_MODULES = [
     key: 'deal',
     label: '现场成交',
     icon: '🤝',
-    color: '#F5A623',
+    color: '#64748B',
+    image: '/negotiation.png',
     desc: '价格谈判与签约推进，练临门一脚的成交能力',
     entry: 'practice',
     categoryLabel: '现场成交',
@@ -51,22 +56,6 @@ const CATEGORIES = [
   { label: '全部', value: '', color: '' },
   ...CATEGORY_RULES.map((r) => ({ label: r.label, value: r.label, color: r.color })),
 ];
-
-/** 封面预设：按场景 id hash 选取浅色渐变与 emoji */
-const COVERS = [
-  { g: 'linear-gradient(135deg, #FFF1EE 0%, #FDF5E9 100%)', em: '📞' },
-  { g: 'linear-gradient(135deg, #EDF3FE 0%, #F3EFFF 100%)', em: '💬' },
-  { g: 'linear-gradient(135deg, #FCF3E2 0%, #FCEEEB 100%)', em: '🤝' },
-  { g: 'linear-gradient(135deg, #E8F6F0 0%, #EDF3FE 100%)', em: '👋' },
-  { g: 'linear-gradient(135deg, #F1EEFC 0%, #FBEEEF 100%)', em: '🎯' },
-  { g: 'linear-gradient(135deg, #E9F5EF 0%, #FAF2E1 100%)', em: '🚀' },
-];
-
-function hashId(id: string): number {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
-  return h;
-}
 
 function difficultyLabel(d: number): string {
   if (d <= 2) return '初级';
@@ -240,15 +229,20 @@ export default function Home() {
                   className={`card train-card${available && !startingId ? '' : ' disabled'}`}
                   onClick={() => startTraining(mod)}
                 >
-                  <div className="train-icon" style={{ background: `${mod.color}14`, color: mod.color }}>
-                    {mod.icon}
+                  <div className="train-left">
+                    <div className="train-icon">
+                      {mod.icon}
+                    </div>
+                    <h3>{mod.label}</h3>
+                    <p className="desc">{available ? mod.desc : '该类别暂无可用场景'}</p>
+                    <div className="train-meta">
+                      <span className="train-go">
+                        {starting ? '创建会话中…' : mod.entry === 'call' ? '发起通话 →' : '开始练习 →'}
+                      </span>
+                    </div>
                   </div>
-                  <h3>{mod.label}</h3>
-                  <p className="desc">{available ? mod.desc : '该类别暂无可用场景'}</p>
-                  <div className="train-meta">
-                    <span className="train-go" style={{ background: `${mod.color}12`, color: mod.color }}>
-                      {starting ? '创建会话中…' : mod.entry === 'call' ? '发起通话 →' : '开始练习 →'}
-                    </span>
+                  <div className="train-visual">
+                    <img className="train-illus" src={mod.image} alt={mod.label} />
                   </div>
                 </div>
               );
@@ -288,7 +282,6 @@ export default function Home() {
           ) : (
             <div className="scene-grid">
               {filteredScenes.map((scene) => {
-                const cover = COVERS[hashId(scene.id) % COVERS.length];
                 const cat = categoryOf(scene);
                 const score = bestScores.get(scene.id);
                 const examWindow = examWindowFor(examWindows, scene.id);
@@ -301,22 +294,8 @@ export default function Home() {
                     style={busy ? { opacity: 0.6, pointerEvents: 'none' } : undefined}
                   >
                     {/* 封面 */}
-                    <div className="cover" style={{ background: cover.g }}>
-                      <span
-                        style={{
-                          fontSize: 17,
-                          lineHeight: 1,
-                          width: 34,
-                          height: 34,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          background: 'rgba(255,255,255,.72)',
-                          borderRadius: 10,
-                        }}
-                      >
-                        {cover.em}
-                      </span>
+                    <div className="cover">
+                      <span className="scene-dot" />
                       <span className="chip cat">
                         <i className="cdot" style={{ background: cat?.color ?? '#8A8F98' }} />
                         {cat?.label ?? '综合场景'}

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react';
 import { useParams, useNavigate, useSearchParams, Navigate } from 'react-router-dom';
 import {
   fetchSession,
@@ -85,6 +85,36 @@ function formatTime(seconds: number) {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
+/** 提示屏进度条：像视频播放器一样展示播放进度，向后拖动重播对应句（语音+文字），向前拖动不生效 */
+function GuideProgress({ index, total, onSeek }: { index: number; total: number; onSeek: (i: number) => void }) {
+  const current = Math.max(0, index);
+  const pct = total > 1 ? (current / (total - 1)) * 100 : 100;
+  const seekFromEvent = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const ratio = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1);
+    const target = Math.round(ratio * (total - 1));
+    if (target < current) onSeek(target);
+  };
+  return (
+    <div className="gprogress">
+      <div
+        className="gprogress-track"
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          seekFromEvent(e);
+        }}
+        onPointerMove={(e) => {
+          if (e.buttons & 1) seekFromEvent(e);
+        }}
+      >
+        <div className="gprogress-fill" style={{ width: `${pct}%` }} />
+        <div className="gprogress-thumb" style={{ left: `${pct}%` }} />
+      </div>
+      <span className="gprogress-count">{current + 1} / {total}</span>
+    </div>
+  );
+}
+
 export default function Practice() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -169,6 +199,8 @@ export default function Practice() {
   const guideSrcRef = useRef<AudioBufferSourceNode | null>(null);
   /** 播放代数：打断后丢弃在途解码结果 */
   const guidePlayGenRef = useRef(0);
+  /** 提示屏进度条回拖的目标句下标（示范/讲解播放循环消费；null = 无回拖请求） */
+  const guideSeekRef = useRef<number | null>(null);
   /** 示范播放代数：重播/进入练习时使在途播放循环失效 */
   const demoTokenRef = useRef(0);
   /** 本场已选择「稍后再答」的考题 id（避免每轮重复弹出） */
@@ -571,6 +603,7 @@ export default function Practice() {
   const stopGuidanceMedia = () => {
     demoTokenRef.current += 1;
     guidePlayGenRef.current += 1;
+    guideSeekRef.current = null;
     if (guideSrcRef.current) {
       try { guideSrcRef.current.stop(); } catch { /* 已停止 */ }
       guideSrcRef.current = null;
@@ -585,6 +618,26 @@ export default function Practice() {
     guidanceRecRef.current?.stop();
     guidanceRecRef.current = null;
     setGuideRec('idle');
+  };
+
+  /**
+   * 提示屏进度条回拖：打断当前句的播放/解码，示范/讲解播放循环随即从目标句重播（语音+文字）。
+   * 仅支持向后拖动重播；拖到当前句之后（向前）直接忽略。
+   */
+  const seekGuidance = (i: number) => {
+    if (phaseRef.current !== 'guide') return;
+    const total = demoStage === 'playing' ? demoLines.length : demoStage === 'briefing' ? briefLines.length : 0;
+    if (total === 0) return;
+    const current = demoStage === 'playing' ? demoIndex : briefIndex;
+    const target = Math.min(Math.max(0, i), total - 1);
+    if (target >= current) return;
+    guideSeekRef.current = target;
+    // 打断在播/在解码的当前句：src.stop 触发 playClip 的 onended，gen 递增使在途解码结果被丢弃
+    guidePlayGenRef.current += 1;
+    if (guideSrcRef.current) {
+      try { guideSrcRef.current.stop(); } catch { /* 已停止 */ }
+      guideSrcRef.current = null;
+    }
   };
 
   /** 拼接已采集的 PCM 分块为一个 ArrayBuffer */
@@ -777,20 +830,41 @@ export default function Practice() {
       prefetch(0);
       prefetch(1);
       prefetch(2);
-      // 逐句播放：前一句播完再播下一句
-      for (let i = 0; i < lines.length; i++) {
+      // 音频缓存：进度条回拖重播时直接复用，不再重新合成
+      const audioCache = new Map<number, string>();
+      guideSeekRef.current = null;
+      // 逐句播放：前一句播完再播下一句；进度条回拖时跳到目标句重播
+      let i = 0;
+      while (i < lines.length) {
         if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
-        setDemoIndex(i);
-        const pending = inflight.get(i) ?? synthLine(lines[i]);
-        inflight.delete(i);
-        prefetch(i + 3);
-        try {
-          const clip = await pending;
-          if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
-          if (clip) await playClip(clip.audioBase64);
-        } catch {
-          /* 单句音频失败：文字已展示，继续下一句 */
+        if (guideSeekRef.current != null) {
+          i = Math.min(Math.max(0, guideSeekRef.current), lines.length - 1);
+          guideSeekRef.current = null;
         }
+        setDemoIndex(i);
+        let clipB64 = audioCache.get(i);
+        if (!clipB64) {
+          const pending = inflight.get(i) ?? synthLine(lines[i]);
+          inflight.delete(i);
+          prefetch(i + 3);
+          try {
+            const clip = await pending;
+            if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
+            if (clip) {
+              audioCache.set(i, clip.audioBase64);
+              clipB64 = clip.audioBase64;
+            }
+          } catch {
+            /* 单句音频失败：文字已展示，继续下一句 */
+          }
+        }
+        // 合成等待期间用户回拖：跳过本次播放，回到循环顶部应用跳转
+        if (guideSeekRef.current != null) continue;
+        if (clipB64) await playClip(clipB64);
+        if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
+        // 播放中被回拖打断：回到循环顶部应用跳转
+        if (guideSeekRef.current != null) continue;
+        i += 1;
       }
       if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
       setDemoIndex(-1);
@@ -825,15 +899,36 @@ export default function Practice() {
       prefetch(0);
       prefetch(1);
       prefetch(2);
-      for (let i = 0; i < lines.length; i++) {
+      // 音频缓存：进度条回拖重播时直接复用，不再重新合成
+      const audioCache = new Map<number, string>();
+      guideSeekRef.current = null;
+      let i = 0;
+      while (i < lines.length) {
         if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
+        if (guideSeekRef.current != null) {
+          i = Math.min(Math.max(0, guideSeekRef.current), lines.length - 1);
+          guideSeekRef.current = null;
+        }
         setBriefIndex(i);
-        const pending = inflight.get(i) ?? synth(lines[i]);
-        inflight.delete(i);
-        prefetch(i + 3);
-        const clip = await pending;
+        let clipB64 = audioCache.get(i);
+        if (!clipB64) {
+          const pending = inflight.get(i) ?? synth(lines[i]);
+          inflight.delete(i);
+          prefetch(i + 3);
+          const clip = await pending;
+          if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
+          if (clip) {
+            audioCache.set(i, clip.audioBase64);
+            clipB64 = clip.audioBase64;
+          }
+        }
+        // 合成等待期间用户回拖：跳过本次播放，回到循环顶部应用跳转
+        if (guideSeekRef.current != null) continue;
+        if (clipB64) await playClip(clipB64);
         if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
-        if (clip) await playClip(clip.audioBase64);
+        // 播放中被回拖打断：回到循环顶部应用跳转
+        if (guideSeekRef.current != null) continue;
+        i += 1;
       }
     } catch {
       /* 讲解稿拉取/播放失败不阻塞后续流程 */
@@ -1434,7 +1529,7 @@ export default function Practice() {
                           <div className="text-[13px] italic text-white/60">🗣 旁白解说中…</div>
                         )}
                         {demoLines.length > 0 && (
-                          <div className="text-[12px] font-medium opacity-60 tabular-nums">{demoIndex + 1} / {demoLines.length}</div>
+                          <GuideProgress index={demoIndex} total={demoLines.length} onSeek={seekGuidance} />
                         )}
                         <button
                           className="btn btn-sm"
@@ -1461,9 +1556,7 @@ export default function Practice() {
                           </div>
                         )}
                         {demoStage === 'briefing' && briefLines.length > 0 && (
-                          <div className="text-[12px] font-medium opacity-60 tabular-nums">
-                            {Math.max(1, briefIndex + 1)} / {briefLines.length}
-                          </div>
+                          <GuideProgress index={briefIndex} total={briefLines.length} onSeek={seekGuidance} />
                         )}
                         <button
                           className="btn btn-sm"
