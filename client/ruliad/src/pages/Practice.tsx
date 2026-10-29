@@ -666,7 +666,6 @@ export default function Practice() {
     const question = questions[q - 1];
     if (!question) return;
     setQualifyQ(q);
-    setQualifyText('');
     setQualifyHint('');
     qualifyRetryRef.current = 0;
     setQualifyStage('asking');
@@ -1383,7 +1382,6 @@ export default function Practice() {
                       <button className="ready-btn" onClick={() => void beginGuide(1)}>▶ 继续（进入示范教学）</button>
                     )}
                     {qualifyHint && <div className="text-[13px] font-semibold text-coral">{qualifyHint}</div>}
-                    {qualifyText && <div className="text-[12.5px] font-medium opacity-60">{qualifyText}</div>}
                     <button
                       className="text-[12.5px] font-medium opacity-60 underline underline-offset-2 hover:opacity-90"
                       onClick={startLive}
@@ -1495,7 +1493,6 @@ export default function Practice() {
                             <div className="text-[13px] font-medium opacity-75">正在识别你的选择…</div>
                           </>
                         )}
-                        {guideText && <div className="text-[12.5px] font-medium opacity-60">{guideText}</div>}
                         {guideHint && <div className="text-[13px] font-semibold text-coral">{guideHint}</div>}
                         <div className="flex gap-3">
                           <button
@@ -1585,12 +1582,34 @@ export default function Practice() {
               <div className="me-tag">{me?.name ?? '我'}（我）</div>
             </div>
 
-            {/* 当前字幕行 */}
-            {(partialText || replyText) && inLive && status !== 'loading' && (
-              <div className="curline">
-                {isRecording && partialText ? `我：${partialText}…` : replyText}
-              </div>
-            )}
+            {/* 当前字幕行（提示屏下方）：对练中显示实时转写/对方回复；新手指引（资格提问/示范选择）显示聆听状态与识别出的回答 */}
+            {(() => {
+              const guideLine =
+                status === 'paused'
+                  ? ''
+                  : phase === 'qualify'
+                    ? qualifyStage === 'recording'
+                      ? '🎙 我：正在聆听，说完自动提交…'
+                      : qualifyStage === 'uploading'
+                        ? '我：正在识别…'
+                        : qualifyText
+                    : phase === 'guide' && demoStage === 'ask'
+                      ? guideRec === 'recording'
+                        ? '🎙 我：正在聆听，说完自动提交…'
+                        : guideRec === 'uploading'
+                          ? '我：正在识别…'
+                          : guideText
+                      : '';
+              const liveLine = inLive && (partialText || replyText)
+                ? isRecording && partialText
+                  ? `我：${partialText}…`
+                  : replyText
+                : '';
+              const line = guideLine || liveLine;
+              // loading（会话恢复/初始化）只压制对练字幕；新手指引阶段 status 恒为 loading，不能拦
+              if (!line || (!guideLine && status === 'loading')) return null;
+              return <div className="curline">{line}</div>;
+            })()}
 
             {/* 对话记录 */}
             {messages.length > 0 && (
