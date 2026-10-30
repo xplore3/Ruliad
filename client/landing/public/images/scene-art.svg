@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 280" fill="none">
+  <!-- 背景 -->
+  <rect width="400" height="280" rx="16" fill="#141B2D"/>
+  
+  <!-- 画架 -->
+  <rect x="60" y="40" width="4" height="180" rx="2" fill="#2E3A56"/>
+  <rect x="60" y="200" width="120" height="4" rx="2" fill="#2E3A56"/>
+  <polygon points="180,40 60,40 120,180" fill="#1A2236" stroke="#2E3A56" stroke-width="2"/>
+  
+  <!-- 画布 -->
+  <rect x="72" y="55" width="92" height="70" rx="3" fill="#F2F4F8"/>
+  
+  <!-- 画作内容 - 抽象艺术 -->
+  <circle cx="105" cy="78" r="10" fill="#E85C62" opacity="0.8"/>
+  <circle cx="130" cy="90" r="8" fill="#34D399" opacity="0.7"/>
+  <path d="M90 100 Q115 85 145 100 Q130 115 110 112 Q95 110 90 100Z" fill="#F07380" opacity="0.6"/>
+  <path d="M100 70 L120 60 L140 75 L125 85" stroke="#E85C62" stroke-width="1.5" fill="none" opacity="0.5"/>
+  
+  <!-- 调色板 -->
+  <ellipse cx="260" cy="160" rx="45" ry="35" fill="#1A2236" stroke="#2E3A56" stroke-width="2"/>
+  <circle cx="245" cy="148" r="6" fill="#E85C62"/>
+  <circle cx="265" cy="142" r="5" fill="#34D399"/>
+  <circle cx="278" cy="152" r="5" fill="#F07380"/>
+  <circle cx="252" cy="170" r="5" fill="#9BA3B5"/>
+  <circle cx="272" cy="168" r="4" fill="#6B7384"/>
+  
+  <!-- 画笔 -->
+  <line x1="220" y1="120" x2="195" y2="90" stroke="#9BA3B5" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="193" cy="87" r="3" fill="#E85C62"/>
+  
+  <!-- 座椅 -->
+  <rect x="220" y="210" width="60" height="8" rx="4" fill="#2E3A56"/>
+  <rect x="230" y="218" width="4" height="30" rx="2" fill="#2E3A56"/>
+  <rect x="270" y="218" width="4" height="30" rx="2" fill="#2E3A56"/>
+  <rect x="222" y="248" width="20" height="4" rx="2" fill="#2E3A56"/>
+  <rect x="262" y="248" width="20" height="4" rx="2" fill="#2E3A56"/>
+  
+  <!-- 装饰圆点 -->
+  <circle cx="320" cy="60" r="3" fill="#34D399" opacity="0.6"/>
+  <circle cx="340" cy="80" r="2" fill="#E85C62" opacity="0.4"/>
+  <circle cx="310" cy="100" r="2.5" fill="#F07380" opacity="0.5"/>
+</svg>

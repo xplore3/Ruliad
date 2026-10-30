@@ -80,7 +80,7 @@ export default function Call() {
   const dismissedQuizIdsRef = useRef<Set<string>>(new Set());
 
   const personaName = persona?.name ?? '对方';
-  const personaAvatar = persona?.avatar ?? '/avatars/man-3.jpg';
+  const personaAvatar = persona?.avatar ?? '/avatars/man-3.png';
   const personaRole = persona?.occupation ?? scenarioName ?? '';
 
   const toast = (msg: string) => {
@@ -402,7 +402,7 @@ export default function Call() {
             <div className="call-card live">
               <div className="st">
                 <span className="dotg" />
-                Grasp 练习通话 · 已接通 {formatTime(elapsed)}
+                Graspit 练习通话 · 已接通 {formatTime(elapsed)}
                 {remainingSeconds != null && ` · 剩余 ${formatTime(Math.max(0, remainingSeconds))}`}
               </div>
               <div className="ringbox">

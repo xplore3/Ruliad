@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 @theme {
-  /* ===== Grasp AI 陪练 · 浅色珊瑚红主题（Prototype v3 规范） ===== */
+  /* ===== Graspit AI 陪练 · 浅色珊瑚红主题（Prototype v3 规范） ===== */
   /* 主色：珊瑚红 */
   --color-coral: #FF6B5B;
   --color-coral-dark: #E85A4A;
@@ -316,16 +316,7 @@ input[type=range] { width: 100%; accent-color: #FF6B5B; }
 .think5 i:nth-child(5) { animation-delay: .6s; }
 @keyframes think5 { 0%, 100% { opacity: .2; transform: scale(1); } 50% { opacity: 1; transform: scale(1.25); } }
 
-/* ===== 手机顶部标题栏 ===== */
-.mtopbar { display: none; position: sticky; top: 0; z-index: 50; height: 52px;
-  background: rgba(255,255,255,.92); backdrop-filter: blur(10px);
-  border-bottom: 1px solid #EBEBEF; align-items: center; justify-content: center;
-  font-weight: 700; font-size: 16px; }
-.mtopbar .back { position: absolute; left: 8px; font-size: 20px; padding: 6px 10px; color: #1F2329; }
-.mtopbar .right { position: absolute; right: 12px; font-size: 13px; color: #FF6B5B; font-weight: 600; }
-@media (max-width: 768px) {
-  .mtopbar { display: flex; }
-}
+/* ===== 手机顶部标题栏（已废弃：底部 Tab 出现时顶部不再需要） ===== */
 
 /* ===== 头像渐变色（原型 .av1–.av6） ===== */
 .av1 { background: linear-gradient(135deg, #FF9A8B, #FF6B5B); }

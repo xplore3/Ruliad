@@ -66,14 +66,6 @@ export default function Layout() {
       {/* PC Top Navigation - matches prototype .topnav */}
       {!isFullscreen && <TopBar streak={streak} />}
 
-      {/* Mobile Top Bar - matches prototype .mtopbar */}
-      {!isFullscreen && (
-        <div className="mtopbar">
-          {getPageTitle(location.pathname)}
-          {streak != null && streak > 0 && <span className="right">连续 {streak} 天</span>}
-        </div>
-      )}
-
       {/* Main content - matches prototype .wrap */}
       <main className="wrap" style={{ paddingTop: isFullscreen ? 0 : undefined }}>
         <Outlet />
@@ -108,7 +100,7 @@ function TopBar({ streak }: { streak: number | null }) {
         {/* Logo */}
         <NavLink to="/home" className="logo">
           <span className="dot" />
-          Grasp
+          Graspit
         </NavLink>
 
         {/* Menu */}
@@ -139,20 +131,6 @@ function TopBar({ streak }: { streak: number | null }) {
       </div>
     </nav>
   );
-}
-
-// ===== Helpers =====
-function getPageTitle(pathname: string): string {
-  if (pathname.startsWith('/home')) return 'Grasp';
-  if (pathname.startsWith('/build')) return '构建';
-  if (pathname.startsWith('/library')) return '资源库';
-  if (pathname.startsWith('/dashboard')) return '能力看板';
-  if (pathname.startsWith('/profile')) return '我的';
-  if (pathname.startsWith('/practice')) return '练习中';
-  if (pathname.startsWith('/call')) return '语音通话';
-  if (pathname.startsWith('/review')) return '练习报告';
-  if (pathname.startsWith('/settings')) return '设置';
-  return 'Grasp';
 }
 
 // ===== Tab Icons (inline SVG, switches to coral on active) =====

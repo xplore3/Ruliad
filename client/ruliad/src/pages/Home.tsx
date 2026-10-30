@@ -5,13 +5,51 @@ import type { MySessionRecord } from '../api';
 import type { ExamWindow, Scenario } from '../types';
 import { CATEGORY_RULES, categoryOf, matchCategory } from '../lib/categories';
 
+/* ── SVG 商务图标组件 ── */
+function IconGroundPush({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path d="M12 2C8.13 2 5 5.13 5 9c0 2.5 1.5 5 3 7l4 5 4-5c1.5-2 3-4.5 3-7 0-3.87-3.13-7-7-7z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="12" cy="9" r="2.5" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M3 21l3-3M18 21l-3-3M3 15h3M18 15h3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconPhone({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 16.92z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M9 5.5c.5-2 2.5-3.5 5-3.5M9 9c.5-2 2.5-3 5-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" opacity=".5" />
+    </svg>
+  );
+}
+
+function IconConsult({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M9 10h.01M15 10h.01M9.5 14a3.5 3.5 0 005 0" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconDeal({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75M19 8l2 2 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 /** 实战训练模块卡片配置（后续增删卡片改这里即可） */
 /* 辅助色统一：图标背景用 slate-100 slate-500 色系，保持商务克制感 */
 const TRAINING_MODULES = [
   {
     key: 'ground-push',
     label: '地推引流课',
-    icon: '👋',
+    icon: IconGroundPush,
     color: '#64748B',
     image: '/field-promotion.png',
     desc: '陌生拜访与破冰开场，练在街头商场快速建立对话',
@@ -21,7 +59,7 @@ const TRAINING_MODULES = [
   {
     key: 'phone',
     label: '电话销售',
-    icon: '📞',
+    icon: IconPhone,
     color: '#64748B',
     image: '/telephone-sale.png',
     desc: '外呼开场与异议应对，练在 30 秒内抓住客户注意力',
@@ -31,7 +69,7 @@ const TRAINING_MODULES = [
   {
     key: 'inquiry',
     label: '咨询接待',
-    icon: '💬',
+    icon: IconConsult,
     color: '#64748B',
     image: '/client-reception.png',
     desc: '承接主动咨询与询价比价，练需求挖掘与专业解答',
@@ -41,7 +79,7 @@ const TRAINING_MODULES = [
   {
     key: 'deal',
     label: '现场成交',
-    icon: '🤝',
+    icon: IconDeal,
     color: '#64748B',
     image: '/negotiation.png',
     desc: '价格谈判与签约推进，练临门一脚的成交能力',
@@ -50,7 +88,8 @@ const TRAINING_MODULES = [
   },
 ] as const;
 
-type TrainingModule = (typeof TRAINING_MODULES)[number];
+type IconComponent = ({ className }: { className?: string }) => React.JSX.Element;
+type TrainingModule = (typeof TRAINING_MODULES)[number] & { icon: IconComponent };
 
 const CATEGORIES = [
   { label: '全部', value: '', color: '' },
@@ -231,7 +270,7 @@ export default function Home() {
                 >
                   <div className="train-left">
                     <div className="train-icon">
-                      {mod.icon}
+                      {mod.icon && <mod.icon className="h-6 w-6" />}
                     </div>
                     <h3>{mod.label}</h3>
                     <p className="desc">{available ? mod.desc : '该类别暂无可用场景'}</p>

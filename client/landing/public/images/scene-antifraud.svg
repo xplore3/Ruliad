@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 280" fill="none">
+  <!-- 背景 -->
+  <rect width="400" height="280" rx="16" fill="#141B2D"/>
+  
+  <!-- 盾牌主图 -->
+  <path d="M200 45 L265 75 L265 150 Q265 190 200 225 Q135 190 135 150 L135 75 Z" fill="#1A2236" stroke="#E85C62" stroke-width="3"/>
+  <path d="M200 60 L252 85 L252 148 Q252 180 200 210 Q148 180 148 148 L148 85 Z" fill="#141B2D" stroke="#2E3A56" stroke-width="1.5"/>
+  
+  <!-- 盾牌中心图标 -->
+  <circle cx="200" cy="125" r="22" fill="#0F1420" stroke="#E85C62" stroke-width="2"/>
+  <path d="M192 125 L198 131 L210 117" stroke="#34D399" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- 警示三角 -->
+  <path d="M70 80 L95 80 L95 115 L70 115 Z" fill="#1A2236" stroke="#E85C62" stroke-width="1.5"/>
+  <text x="82" y="107" text-anchor="middle" fill="#E85C62" font-size="22" font-weight="bold" font-family="sans-serif">!</text>
+  
+  <!-- 警示三角2 -->
+  <path d="M305 80 L330 80 L330 115 L305 115 Z" fill="#1A2236" stroke="#E85C62" stroke-width="1.5"/>
+  <text x="317" y="107" text-anchor="middle" fill="#E85C62" font-size="22" font-weight="bold" font-family="sans-serif">!</text>
+  
+  <!-- 底部文字条 -->
+  <rect x="120" y="240" width="160" height="22" rx="11" fill="#E85C62"/>
+  <text x="200" y="255" text-anchor="middle" fill="#0B0F1A" font-size="11" font-weight="bold" font-family="sans-serif">反诈宣传 · AI模拟训练</text>
+  
+  <!-- 连接线 -->
+  <line x1="95" y1="97" x2="135" y2="105" stroke="#2E3A56" stroke-width="1.5" stroke-dasharray="3 3"/>
+  <line x1="305" y1="97" x2="265" y2="105" stroke="#2E3A56" stroke-width="1.5" stroke-dasharray="3 3"/>
+  
+  <!-- 装饰圆点 -->
+  <circle cx="60" cy="170" r="4" fill="#34D399" opacity="0.6"/>
+  <circle cx="340" cy="170" r="4" fill="#E85C62" opacity="0.6"/>
+  <circle cx="75" cy="200" r="3" fill="#9BA3B5" opacity="0.4"/>
+  <circle cx="325" cy="200" r="3" fill="#34D399" opacity="0.5"/>
+  
+  <!-- 通话气泡 -->
+  <rect x="40" y="145" width="55" height="30" rx="8" fill="#1A2236" stroke="#2E3A56" stroke-width="1"/>
+  <text x="67" y="164" text-anchor="middle" fill="#9BA3B5" font-size="7" font-family="sans-serif">可疑来电</text>
+  
+  <rect x="305" y="145" width="55" height="30" rx="8" fill="#1A2236" stroke="#2E3A56" stroke-width="1"/>
+  <text x="332" y="164" text-anchor="middle" fill="#9BA3B5" font-size="7" font-family="sans-serif">诈骗话术</text>
+</svg>

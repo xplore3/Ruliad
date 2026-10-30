@@ -39,7 +39,7 @@ const NAV_ITEMS: NavItem[] = [
     children: [
       { label: '企业', href: '#sol-enterprise' },
       { label: '线下门店', href: '#sol-store' },
-      { label: '事业单位', href: '#sol-gov' },
+      { label: '机构单位', href: '#sol-gov' },
     ],
   },
   {
@@ -179,7 +179,7 @@ const SOLUTIONS = [
   },
   {
     id: 'sol-gov',
-    tag: '事业单位',
+    tag: '机构单位',
     title: '合规可控的政务与党建实训',
     points: ['窗口沟通陪练', '党建流程推演', '私有化部署'],
     cta: '了解政务方案 →',
@@ -190,49 +190,29 @@ const SOLUTIONS = [
 ];
 
 /* ──────────────────────────────────────────────
- * 第七屏：信任与合规
+ * 第七屏：落地场景与案例
  * ────────────────────────────────────────────── */
-const TRUST_ITEMS = [
+const SCENES = [
   {
-    title: '私有化部署',
-    desc: '数据不出域，全量日志可审计',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" className="h-7 w-7">
-        <rect x="5" y="11" width="14" height="10" rx="2" stroke="currentColor" strokeWidth="1.8" />
-        <path d="M8 11V7a4 4 0 0 1 8 0v4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      </svg>
-    ),
+    title: '艺术培训机构',
+    desc: '学员模拟面对家长咨询、课程试听谈判、续费沟通等场景，AI扮演不同性格的家长角色，训练顾问的表达说服力和异议处理能力。',
+    highlights: ['课程咨询模拟', '续费谈判训练', '家长异议应对'],
+    image: '/weiqi.png',
+    color: C.accent,
   },
   {
-    title: '信创适配',
-    desc: '支持国产AI处理器推理部署',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" className="h-7 w-7">
-        <path d="M12 2l9 5v10l-9 5-9-5V7l9-5z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-        <path d="M12 22V12M3 7l9 5 9-5" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-      </svg>
-    ),
+    title: '健身和体能训练机构',
+    desc: '销售人员面对潜在会员进行课程推荐、价格谈判和体验课转化，AI模拟不同健身需求的客户，提升私教顾问的成单能力。',
+    highlights: ['会员需求挖掘', '价格谈判模拟', '体验课转化'],
+    image: '/sports.png',
+    color: C.mint,
   },
   {
-    title: '内容校准',
-    desc: '政务场景经专家审核后进入训练',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" className="h-7 w-7">
-        <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8" />
-      </svg>
-    ),
-  },
-  {
-    title: '合规框架',
-    desc: '遵循《人工智能拟人化互动服务管理暂行办法》',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" className="h-7 w-7">
-        <path d="M14 3v4a1 1 0 0 0 1 1h4" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-        <path d="M5 21h14a2 2 0 0 0 2-2V8l-5-5H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-        <path d="M9 13h6M9 17h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      </svg>
-    ),
+    title: '反诈宣传',
+    desc: '警务人员与社区工作者在模拟对话中识别诈骗话术套路，AI扮演各类诈骗分子，训练工作人员的快速识别、劝阻和沟通能力。',
+    highlights: ['诈骗话术识别', '劝阻沟通训练', '应急反应模拟'],
+    image: '/anti-fraud.png',
+    color: C.textMain,
   },
 ];
 
@@ -480,8 +460,8 @@ export default function App() {
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           {/* Logo */}
           <a href="#hero" className="flex items-center gap-2.5">
-            <img src="/logo.png" alt="Grasp" className="h-9 w-9 rounded-xl" />
-            <span className="text-lg font-bold tracking-tight" style={{ color: C.textMain }}>Grasp</span>
+            <img src="/logo.png" alt="Graspit" className="h-9 w-9 rounded-xl" />
+            <span className="text-lg font-bold tracking-tight" style={{ color: C.accent }}>Graspit</span>
           </a>
 
           {/* 桌面端导航 */}
@@ -517,7 +497,7 @@ export default function App() {
             <a
               href="#cta"
               className="rounded-full px-5 py-2 text-sm font-bold transition"
-              style={{ backgroundColor: C.accent, color: C.ink950 }}
+              style={{ backgroundColor: C.accent, color: C.textMain }}
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = C.accentLight)}
               onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = C.accent)}
             >
@@ -593,7 +573,7 @@ export default function App() {
                 target="_blank"
                 rel="noopener noreferrer"
                 className="group inline-flex items-center gap-2 rounded-full px-7 py-3.5 text-base font-bold shadow-lg transition hover:scale-105"
-                style={{ backgroundColor: C.accent, color: C.ink950, boxShadow: '0 10px 30px rgba(232,92,98,0.2)' }}
+                style={{ backgroundColor: C.accent, color: C.textMain, boxShadow: '0 10px 30px rgba(232,92,98,0.2)' }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.backgroundColor = C.accentLight;
                   e.currentTarget.style.boxShadow = '0 10px 40px rgba(232,92,98,0.3)';
@@ -990,33 +970,56 @@ export default function App() {
         </div>
       </section>
 
-      {/* ════════ 第七屏：信任与合规 ════════ */}
-      <section className="relative overflow-hidden px-6 py-24">
+      {/* ════════ 第七屏：落地场景与案例 ════════ */}
+      <section id="scenes" className="relative overflow-hidden px-6 py-24">
         <img
           src="/images/trust-bg.svg"
           alt=""
           className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-60"
         />
-        <div className="relative mx-auto max-w-5xl">
+        <div className="relative mx-auto max-w-6xl">
           <div className="text-center">
-            <h2 className="text-3xl font-bold md:text-4xl">产品化与定制化结合</h2>
+            <h2 className="text-3xl font-bold md:text-4xl">落地场景与案例</h2>
+            <p className="mt-3" style={{ color: C.textSub }}>
+              无论是在门店、机构还是公共服务场景，AI陪练都能快速适配真实业务对话
+            </p>
           </div>
 
-          <div className="mt-14 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            {TRUST_ITEMS.map((item) => (
+          <div className="mt-14 grid gap-6 md:grid-cols-3">
+            {SCENES.map((scene) => (
               <div
-                key={item.title}
-                className="rounded-2xl border border-white/8 p-6 text-center"
+                key={scene.title}
+                className="group overflow-hidden rounded-2xl border border-white/8 transition hover:-translate-y-1"
                 style={{ backgroundColor: C.ink850 }}
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = `${scene.color}40`; }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; }}
               >
-                <div
-                  className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl"
-                  style={{ backgroundColor: `${C.mint}15`, color: C.mint }}
-                >
-                  {item.icon}
+                <div className="relative h-44 overflow-hidden">
+                  <img
+                    src={scene.image}
+                    alt={scene.title}
+                    className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+                  />
+                  <div
+                    className="absolute inset-0"
+                    style={{ background: 'linear-gradient(to bottom, rgba(20,27,45,0) 40%, #141B2D 100%)' }}
+                  />
                 </div>
-                <h3 className="mt-4 text-base font-bold" style={{ color: C.textMain }}>{item.title}</h3>
-                <p className="mt-2 text-xs leading-relaxed" style={{ color: C.textSub }}>{item.desc}</p>
+                <div className="p-6">
+                  <h3 className="text-lg font-bold" style={{ color: scene.color }}>{scene.title}</h3>
+                  <p className="mt-2 text-sm leading-relaxed" style={{ color: C.textSub }}>{scene.desc}</p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {scene.highlights.map((h) => (
+                      <span
+                        key={h}
+                        className="rounded-full px-2.5 py-1 text-xs"
+                        style={{ backgroundColor: `${scene.color}15`, color: scene.color }}
+                      >
+                        {h}
+                      </span>
+                    ))}
+                  </div>
+                </div>
               </div>
             ))}
           </div>
@@ -1038,7 +1041,7 @@ export default function App() {
             <a
               href="mailto:support@grasp.chat?subject=预约产品演示"
               className="group inline-flex items-center gap-2 rounded-full px-8 py-4 text-base font-bold shadow-lg transition hover:scale-105"
-              style={{ backgroundColor: C.accent, color: C.ink950, boxShadow: '0 10px 30px rgba(232,92,98,0.2)' }}
+              style={{ backgroundColor: C.accent, color: C.textMain, boxShadow: '0 10px 30px rgba(232,92,98,0.2)' }}
               onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = C.accentLight; }}
               onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = C.accent; }}
             >
@@ -1065,8 +1068,8 @@ export default function App() {
             {/* 公司信息 */}
             <div className="md:col-span-2">
               <div className="flex items-center gap-2.5">
-                <img src="/logo.png" alt="Grasp" className="h-8 w-8 rounded-lg" />
-                <span className="font-bold" style={{ color: C.textMain }}>Grasp</span>
+                <img src="/logo.png" alt="Graspit" className="h-8 w-8 rounded-lg" />
+                <span className="font-bold" style={{ color: C.accent }}>Graspit</span>
               </div>
               <p className="mt-4 max-w-xs text-sm leading-relaxed" style={{ color: C.textSub }}>
                 训练AI无法替代的人。 <br />以认知工程为方法，以主体性计算为内核。
@@ -1112,7 +1115,7 @@ export default function App() {
           </div>
 
           <div className="mt-10 flex flex-col items-center justify-between gap-4 border-t border-white/5 pt-6 text-xs md:flex-row" style={{ color: C.textDim }}>
-            <span>©2026 Grasp · AI驱动的能力训练平台</span>
+            <span>©2026 Graspit · AI驱动的能力训练平台</span>
             <div className="flex gap-4">
               <a href="https://train.grasp.chat/privacy" target="_blank" rel="noopener noreferrer" className="transition hover:text-white">隐私政策</a>
               <a href="https://train.grasp.chat/agreement" target="_blank" rel="noopener noreferrer" className="transition hover:text-white">服务条款</a>
