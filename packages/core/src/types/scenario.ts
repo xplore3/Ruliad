@@ -1,5 +1,7 @@
 /** 场景 / 技能点 / 学习路径 */
 
+import type { ScoreCategory } from './scoring.js';
+
 export interface SkillPoint {
   id: string;
   tenantId: string;
@@ -83,6 +85,8 @@ export interface Scenario {
   source?: string;
   /** 场景类型（缺省视为 practical，兼容存量数据） */
   sceneType?: SceneType;
+  /** 评分分类：决定评分时选用评分标准库中的哪一类标准；缺省兼容存量数据（不按分类过滤） */
+  category?: ScoreCategory;
   /** 剧本（实用场景） */
   script?: ScenarioScript;
   /** 参与者设定 */

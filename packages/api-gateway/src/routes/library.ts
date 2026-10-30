@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
+import { SCORE_CATEGORIES } from '@grasp-mvp/core';
 import type {
   BriefingStandard,
   ChatMessage,
   DemoFaq,
   DemoRole,
   DemoScript,
+  DrillScript,
   GoldenCase,
   RealismStandard,
   ScenarioGuidance,
@@ -56,6 +58,9 @@ function validateScoreItemBody(body: Partial<ScoreItemDef>): string | null {
   }
   if (body.layer !== undefined && !SCORE_LAYERS.has(body.layer)) {
     return "layer 仅支持 'company' | 'team' | 'personal'";
+  }
+  if (body.category !== undefined && !SCORE_CATEGORIES.includes(body.category)) {
+    return `category 仅支持 ${SCORE_CATEGORIES.map((c) => `'${c}'`).join(' | ')}`;
   }
   return null;
 }
@@ -221,10 +226,67 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     return { ok: true };
   });
 
-  /** 评分标准库 —— 第5步「评分」逐项评分依据 */
-  app.get<{ Querystring: { skillPointId?: string } }>('/library/score-items', async (request) => ({
-    items: await store.listScoreItemDefs(request.tenantId, request.query.skillPointId),
+  /** 演练剧本库 —— 模拟演练的剧情参照（整篇文本），演练开始交给 LLM 理解，决定谁先开口、如何回应、何时结束 */
+  app.get<{ Querystring: { category?: string } }>('/library/drill-scripts', async (request) => ({
+    items: await store.listDrillScripts(request.tenantId, request.query.category?.trim() || undefined),
   }));
+
+  app.post<{ Body: Partial<DrillScript> }>('/library/drill-scripts', async (request, reply) => {
+    const body = request.body ?? {};
+    if (!body.name?.trim()) return reply.code(400).send({ error: 'name 必填' });
+    if (!body.content?.trim()) return reply.code(400).send({ error: 'content 必填' });
+    if (!body.category || !SCORE_CATEGORIES.includes(body.category)) {
+      return reply.code(400).send({ error: `category 仅支持 ${SCORE_CATEGORIES.map((c) => `'${c}'`).join(' | ')}` });
+    }
+    const script: DrillScript = {
+      id: body.id ?? randomUUID(),
+      tenantId: request.tenantId,
+      category: body.category,
+      name: body.name.trim(),
+      content: body.content,
+    };
+    await store.saveDrillScript(script);
+    return reply.code(201).send(script);
+  });
+
+  app.put<{ Params: { id: string }; Body: Partial<DrillScript> }>(
+    '/library/drill-scripts/:id',
+    async (request, reply) => {
+      const existing = await store.getDrillScript(request.params.id);
+      if (!existing || existing.tenantId !== request.tenantId) {
+        return reply.code(404).send({ error: '演练剧本不存在' });
+      }
+      const body = request.body ?? {};
+      const merged: DrillScript = {
+        ...existing,
+        name: body.name?.trim() ?? existing.name,
+        category: body.category ?? existing.category,
+        content: body.content ?? existing.content,
+      };
+      if (!merged.name || !merged.content.trim()) return reply.code(400).send({ error: 'name / content 必填' });
+      if (!SCORE_CATEGORIES.includes(merged.category)) {
+        return reply.code(400).send({ error: `category 仅支持 ${SCORE_CATEGORIES.map((c) => `'${c}'`).join(' | ')}` });
+      }
+      await store.saveDrillScript(merged);
+      return merged;
+    }
+  );
+
+  app.delete<{ Params: { id: string } }>('/library/drill-scripts/:id', async (request, reply) => {
+    const existing = await store.getDrillScript(request.params.id);
+    if (!existing || existing.tenantId !== request.tenantId) {
+      return reply.code(404).send({ error: '演练剧本不存在' });
+    }
+    await store.deleteDrillScript(request.params.id);
+    return { ok: true };
+  });
+
+  /** 评分标准库 —— 第5步「评分」逐项评分依据；按评分分类（地推/电销/咨询接待/现场成交）分库维护 */
+  app.get<{ Querystring: { skillPointId?: string; category?: string } }>('/library/score-items', async (request) => {
+    const items = await store.listScoreItemDefs(request.tenantId, request.query.skillPointId);
+    const category = request.query.category?.trim();
+    return { items: category ? items.filter((d) => d.category === category) : items };
+  });
 
   app.post<{ Body: Partial<ScoreItemDef> }>('/library/score-items', async (request, reply) => {
     const body = request.body ?? {};
@@ -244,6 +306,7 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
       levels: body.levels!,
       layer: body.layer ?? 'company',
       isObservation: body.isObservation ?? false,
+      category: body.category,
     };
     await store.upsertScoreItemDef(def);
     return reply.code(201).send(def);
@@ -266,6 +329,7 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
         levels: (body.levels as ScoreLevel[] | undefined) ?? existing.levels,
         layer: body.layer ?? existing.layer,
         isObservation: body.isObservation ?? existing.isObservation,
+        category: body.category ?? existing.category,
       };
       const error = validateScoreItemBody(merged);
       if (error) return reply.code(400).send({ error });
@@ -473,6 +537,7 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
           '把文本提炼为评分标准定义（行为锚定），rows 每项字段：',
           '- name: 评分标准名称',
           '- skillPointName: 所属技能点名称',
+          '- category: 评分分类，"地推" | "电销" | "咨询接待" | "现场成交"（文本未明确时省略）',
           '- behaviorAnchor: 行为锚定描述',
           '- judgePrompt: 判定 prompt 模板',
           '- weight: 权重数字',

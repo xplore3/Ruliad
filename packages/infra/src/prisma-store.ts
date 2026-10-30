@@ -7,6 +7,7 @@ import type {
   CertRecord,
   DemoFaq,
   DemoScript,
+  DrillScript,
   DataConsent,
   DomainEvent,
   Element,
@@ -135,6 +136,7 @@ export class PrismaStore implements Store {
   private scoreItemDefs;
   private demoFaqs;
   private demoScripts;
+  private drillScripts;
   private scenarioGuidances;
   private briefingStandards;
   private realismStandards;
@@ -168,6 +170,7 @@ private domainEvents;
     this.scoreItemDefs = docTable<ScoreItemDef>(this.prisma.scoreItemDef, ['id', 'tenantId', 'skillPointId', 'name', 'layer']);
     this.demoFaqs = docTable<DemoFaq>(this.prisma.demoFaq, ['id', 'tenantId', 'category']);
     this.demoScripts = docTable<DemoScript>(this.prisma.demoScript, ['id', 'tenantId', 'name', 'category']);
+    this.drillScripts = docTable<DrillScript>(this.prisma.drillScript, ['id', 'tenantId', 'name', 'category']);
     this.scenarioGuidances = docTable<ScenarioGuidance>(this.prisma.scenarioGuidance, ['id', 'tenantId', 'scenarioId', 'name']);
     this.briefingStandards = docTable<BriefingStandard>(this.prisma.briefingStandard, ['id', 'tenantId', 'name', 'category']);
     this.realismStandards = docTable<RealismStandard>(this.prisma.realismStandard, ['id', 'tenantId', 'name', 'category']);
@@ -366,6 +369,20 @@ this.domainEvents = docTable<DomainEvent>(this.prisma.domainEvent, ['id', 'type'
   }
   deleteDemoScript(id: string) {
     return this.demoScripts.delete(id);
+  }
+
+  // ---- 演练剧本库 ----
+  getDrillScript(id: string) {
+    return this.drillScripts.get(id);
+  }
+  listDrillScripts(tenantId: string, category?: string) {
+    return this.drillScripts.list({ tenantId, ...(category ? { category } : {}) });
+  }
+  saveDrillScript(s: DrillScript) {
+    return this.drillScripts.upsertById(s);
+  }
+  deleteDrillScript(id: string) {
+    return this.drillScripts.delete(id);
   }
 
   // ---- 新手指引流程配置 ----

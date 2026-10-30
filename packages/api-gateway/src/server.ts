@@ -12,6 +12,7 @@ import { mkEvent } from './events.js';
 import type { RouteContext } from './ctx.js';
 import { requireRoles, tokenFailReason, verifyToken } from './auth.js';
 import { seedHistory, shouldSeedDemoHistory } from './seed-history.js';
+import { ensureDrillScriptSeeds } from './seed-drill-scripts.js';
 import { authRoutes } from './routes/auth.js';
 import { usersRoutes } from './routes/users.js';
 import { tasksRoutes } from './routes/tasks.js';
@@ -96,6 +97,35 @@ async function main() {
       }
       app.log.info(`增量同步：补充 ${missingPersonas.length} 个陪练员（共 ${existingPersonas.length + missingPersonas.length} 个）`);
     }
+    // 评分标准库：仅在库为空时灌入种子；之后用户在库中的增删改归用户所有，启动同步不恢复、不覆盖
+    const existingScoreItems = await store.listScoreItemDefs(DEFAULT_TENANT);
+    if (existingScoreItems.length === 0) {
+      for (const d of fullSeed.scoreItemDefs) await store.upsertScoreItemDef(d);
+      app.log.info(`种子评分标准已灌入（${fullSeed.scoreItemDefs.length} 条）`);
+    }
+    // 已有种子标准缺 category 时回填分类（不覆盖已设置的分类）
+    const seedItemById = new Map(fullSeed.scoreItemDefs.map((d) => [d.id, d]));
+    for (const e of existingScoreItems) {
+      const seedItem = seedItemById.get(e.id);
+      if (seedItem?.category && !e.category) {
+        await store.upsertScoreItemDef({ ...e, category: seedItem.category });
+      }
+    }
+    // 增量同步：回填场景评分分类（仅当场景尚未设置 category，不覆盖用户修改）
+    const existingScenarios = await store.listScenarios(DEFAULT_TENANT);
+    const seedCategoryById = new Map(fullSeed.scenarios.map((s) => [s.id, s.category]));
+    for (const s of existingScenarios) {
+      const category = seedCategoryById.get(s.id);
+      if (category && !s.category) {
+        await store.saveScenario({ ...s, category });
+        app.log.info(`增量同步：场景「${s.name}」回填评分分类 ${category}`);
+      }
+    }
+  }
+  // 演练剧本库：仅在库为空时灌入四类模板（之后用户的增删改归用户所有；新旧库都执行）
+  const drillSeeded = await ensureDrillScriptSeeds(store, DEFAULT_TENANT);
+  if (drillSeeded > 0) {
+    app.log.info(`演练剧本库：灌入 ${drillSeeded} 条分类模板`);
   }
   // 演示考核历史：无任何认证记录时灌入（看板开箱有数据；确定性合成，不依赖 LLM）。
   // 仅 SEED_DEMO_HISTORY=1 或非 production 且未显式设为 0 时执行（生产默认不灌合成数据）

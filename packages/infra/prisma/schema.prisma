@@ -154,6 +154,18 @@ model DemoScript {
   @@index([tenantId])
 }
 
+/// 演练剧本库：模拟演练的剧情参照（整篇文本），按演练分类（地推/电销/咨询接待/现场成交）；
+/// 演练开始时交给 LLM 理解，决定谁先开口、客户如何回应、何时自然结束
+model DrillScript {
+  id       String @id @default(uuid())
+  tenantId String
+  category String @default("")
+  name     String
+  data     String
+
+  @@index([tenantId, category])
+}
+
 // ---------------- 新手指引流程配置 ----------------
 
 /// 新手指引流程配置：五步流程（资格提问→示范→讲解→演练→评分）的场景级配置
