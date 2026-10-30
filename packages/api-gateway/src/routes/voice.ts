@@ -30,7 +30,7 @@ function pcmRMS(buf: Buffer): number {
 
 /** VAD 配置 */
 const VAD_THRESHOLD = 0.015; // 静音能量阈值（RMS）
-const VAD_SILENCE_MS = 1200; // 静音持续时间触发断句
+const VAD_SILENCE_MS = 2500; // 静音持续时间触发断句
 const VAD_CHUNK_MS = 100; // 每 100ms 检测一次
 
 /** 回复按句号/问号/感叹号等切句（保留标点），供逐句 TTS 边合成边播 */

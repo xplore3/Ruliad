@@ -63,10 +63,12 @@ const GROUND_PUSH_KEYWORDS = ['地推', '破冰', '陌生', '展会', '商场', 
 const QUALIFY_QUESTIONS = ['你做过地推吗？', '你做过教育行业的地推吗？'];
 /** 示范播完后教练的询问 */
 const GUIDE_CHOICE_QUESTION = '想再听一个版本的示范，还是开始模拟练习？';
-/** 新手指引自动聆听 VAD 参数（参考服务端 voice.ts 的 RMS + 静音判停思路） */
+/** 自动聆听 VAD 参数（参考服务端 voice.ts 的 RMS + 静音判停思路）：新手指引与 live 阶段共用 */
 const VAD_RMS_THRESHOLD = 0.02;
-const VAD_SILENCE_MS = 1300;
+const VAD_SILENCE_MS = 2500;
 const VAD_MAX_RECORD_MS = 15000;
+/** live 阶段说话后的最长录音兜底：持续输出未停顿也强制收尾（秒级停顿判停之外的保险） */
+const LIVE_MAX_RECORD_MS = 60000;
 /** 自动聆听识别失败的重试上限，超过后给出文字提示 */
 const GUIDANCE_MAX_RETRY = 2;
 
@@ -193,6 +195,15 @@ export default function Practice() {
   const guidanceCancelRef = useRef<(() => void) | null>(null);
   /** 自动聆听最大时长兜底定时器 */
   const vadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** isRecording 镜像（录音器 onLevel 回调中读取，避免闭包过期） */
+  const isRecordingRef = useRef(false);
+  /** live 阶段 VAD：本轮是否已检测到说话 / 最近一次有声时刻 */
+  const liveSpokeRef = useRef(false);
+  const liveLastVoiceAtRef = useRef(0);
+  /** live 阶段最长录音兜底定时器（首次检测到说话时启动） */
+  const liveVadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** finishRecording 最新引用（onLevel 回调经此调用，避免闭包过期） */
+  const finishRecordingRef = useRef<(() => void) | null>(null);
   /** 资格提问 / 示范选择的识别失败重试计数 */
   const qualifyRetryRef = useRef(0);
   const guideRetryRef = useRef(0);
@@ -358,6 +369,21 @@ export default function Practice() {
         levelAtRef.current = now;
         setMicLevel(Math.min(1, rms * 3));
       }
+      // live 阶段自动断句：检测到说话后连续静音 VAD_SILENCE_MS，自动关麦提交本轮；一直不说话则持续等
+      if (!isRecordingRef.current) return;
+      if (rms > VAD_RMS_THRESHOLD) {
+        if (!liveSpokeRef.current) {
+          liveSpokeRef.current = true;
+          // 最长录音兜底：开口后始终不停顿也强制收尾
+          if (liveVadTimerRef.current) clearTimeout(liveVadTimerRef.current);
+          liveVadTimerRef.current = setTimeout(() => finishRecordingRef.current?.(), LIVE_MAX_RECORD_MS);
+        }
+        liveLastVoiceAtRef.current = now;
+        return;
+      }
+      if (liveSpokeRef.current && now - liveLastVoiceAtRef.current >= VAD_SILENCE_MS) {
+        finishRecordingRef.current?.();
+      }
     };
     recorderRef.current = recorder;
 
@@ -401,6 +427,13 @@ export default function Practice() {
       }
       guidanceRecRef.current?.stop();
       guidanceRecRef.current = null;
+      if (liveVadTimerRef.current) {
+        clearTimeout(liveVadTimerRef.current);
+        liveVadTimerRef.current = null;
+      }
+      isRecordingRef.current = false;
+      liveSpokeRef.current = false;
+      liveLastVoiceAtRef.current = 0;
       if (guideSrcRef.current) {
         try { guideSrcRef.current.stop(); } catch { /* 已停止 */ }
         guideSrcRef.current = null;
@@ -656,7 +689,7 @@ export default function Practice() {
   };
 
   /**
-   * 自动聆听：RMS 音量检测说话开始，连续静音约 1.3s 判停，最大 15s 兜底。
+   * 自动聆听：RMS 音量检测说话开始，连续静音约 2.5s 判停，最大 15s 兜底。
    * resolve：micError=true 表示麦克风不可用（micErrorMsg 为具体原因）；audio=null 表示被外部中断（阶段切换/进 live）。
    */
   const autoListen = () =>
@@ -1107,6 +1140,31 @@ export default function Practice() {
     }
   };
 
+  /**
+   * 结束本轮录音：关麦、发 finish、进思考态。手动点麦克风与 VAD 自动断句共用；
+   * 暂停/结束练习等丢弃本轮的路径不走这里（直接停录音，不发 finish）。
+   */
+  const finishRecording = () => {
+    const socket = socketRef.current;
+    const recorder = recorderRef.current;
+    if (!isRecordingRef.current || !socket || !recorder) return;
+    isRecordingRef.current = false;
+    liveSpokeRef.current = false;
+    liveLastVoiceAtRef.current = 0;
+    if (liveVadTimerRef.current) {
+      clearTimeout(liveVadTimerRef.current);
+      liveVadTimerRef.current = null;
+    }
+    recorder.stop();
+    socket.send({ type: 'finish' });
+    setIsRecording(false);
+    setMicLevel(0);
+    setStatusBoth(timeUpRef.current ? 'time_up' : 'thinking');
+  };
+  useEffect(() => {
+    finishRecordingRef.current = finishRecording;
+  });
+
   // ===== 开始录音（点击麦克风或轮到你时自动触发） =====
   const startRecording = async () => {
     const socket = socketRef.current;
@@ -1129,6 +1187,10 @@ export default function Practice() {
       return;
     }
     socket.send({ type: 'start' });
+    // 新一轮录音：重置 VAD 状态，判停逻辑随 onLevel 回调生效
+    liveSpokeRef.current = false;
+    liveLastVoiceAtRef.current = 0;
+    isRecordingRef.current = true;
     setIsRecording(true);
     setStatusBoth('user_turn');
   };
@@ -1151,11 +1213,7 @@ export default function Practice() {
     if (!socket || !recorder) return;
 
     if (isRecording) {
-      recorder.stop();
-      socket.send({ type: 'finish' });
-      setIsRecording(false);
-      setMicLevel(0);
-      setStatusBoth('thinking');
+      finishRecording();
       return;
     }
 
@@ -1201,6 +1259,13 @@ export default function Practice() {
       const prevStatus = statusRef.current;
       // 冻结本地一切收发：录音停止、ASR/TTS 轮次取消、播放器暂停、指引阶段媒体中断
       if (isRecording) {
+        isRecordingRef.current = false;
+        liveSpokeRef.current = false;
+        liveLastVoiceAtRef.current = 0;
+        if (liveVadTimerRef.current) {
+          clearTimeout(liveVadTimerRef.current);
+          liveVadTimerRef.current = null;
+        }
         recorderRef.current?.stop();
         setIsRecording(false);
         setMicLevel(0);
@@ -1255,6 +1320,13 @@ export default function Practice() {
     if (!sessionId || statusRef.current === 'evaluating') return;
     if (!confirm('确定结束本场练习并生成评分吗？')) return;
     if (isRecording) {
+      isRecordingRef.current = false;
+      liveSpokeRef.current = false;
+      liveLastVoiceAtRef.current = 0;
+      if (liveVadTimerRef.current) {
+        clearTimeout(liveVadTimerRef.current);
+        liveVadTimerRef.current = null;
+      }
       recorderRef.current?.stop();
       setIsRecording(false);
     }
@@ -1631,6 +1703,9 @@ export default function Practice() {
                 {inLive && status === 'thinking' && (
                   <div className="flex flex-col items-center gap-4">
                     <div className="think5"><i /><i /><i /><i /><i /></div>
+                    <div className="text-[13.5px] font-medium opacity-85">
+                      {isVoice ? '已结束聆听，正在识别与思考回复…' : '对方正在思考回复…'}
+                    </div>
                   </div>
                 )}
                 {inLive && status === 'speaking' && (
@@ -1663,7 +1738,7 @@ export default function Practice() {
                     )}
                     <div className="text-[13px] font-medium opacity-75">
                       {isRecording
-                        ? '说完后点一次麦克风结束本轮'
+                        ? '说完停顿几秒会自动提交，也可以点麦克风立即结束'
                         : isVoice
                           ? wsReady
                             ? autoMic ? '即将自动开麦，也可以点击麦克风' : '点击麦克风开始说话'
