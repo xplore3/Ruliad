@@ -1838,7 +1838,7 @@ function ScoreItemTab({ skillPoints, setNotice, onChanged }: {
     validate: (d) => {
       if (!d.name?.trim()) return '名称必填';
       if (!d.skillPointId) return '请选择技能点';
-      if (!d.levels?.length) return '至少一个档位';
+      if (d.scoringMode !== 'score' && !d.levels?.length) return '至少一个档位';
       return null;
     },
     create: (d) => createScoreItem(d),
@@ -2000,7 +2000,7 @@ function ScoreItemTab({ skillPoints, setNotice, onChanged }: {
                     <td style={{ minWidth: 200 }}><CellTextarea value={row.data.judgePrompt} onChange={(v) => updateRow(row.key, { judgePrompt: v })} /></td>
                     <td>
                       <button className="btn btn-ghost btn-sm" onClick={() => setExpanded(expanded === row.key ? null : row.key)}>
-                        {expanded === row.key ? '收起' : `档位(${row.data.levels.length})`}
+                        {expanded === row.key ? '收起' : row.data.scoringMode === 'score' ? '直接打分' : `档位(${row.data.levels.length})`}
                       </button>
                     </td>
                     <td style={{ whiteSpace: 'nowrap' }}>
@@ -2068,16 +2068,24 @@ function ScoreItemTab({ skillPoints, setNotice, onChanged }: {
               记录但不计分（冲突裁决用）
             </label>
           </Field>
+          <Field label="打分模式">
+            <select className="input" value={detailRow.data.scoringMode ?? 'levels'} onChange={(e) => updateRow(detailRow.key, { scoringMode: e.target.value as ScoreItemDef['scoringMode'] })}>
+              <option value="levels">按档位判定</option>
+              <option value="score">直接打分（0-100，维度与分值写在行为锚定里）</option>
+            </select>
+          </Field>
           <Field label="行为锚定描述" wide>
             <MTextarea rows={3} value={detailRow.data.behaviorAnchor} onChange={(v) => updateRow(detailRow.key, { behaviorAnchor: v })} />
           </Field>
           <Field label="判定 Prompt 模板" wide>
             <MTextarea rows={4} value={detailRow.data.judgePrompt} onChange={(v) => updateRow(detailRow.key, { judgePrompt: v })} />
           </Field>
-          <div className="lib-fieldset">
-            <h4>档位（levels）</h4>
-            <LevelsEditor levels={detailRow.data.levels} onChange={(levels) => updateRow(detailRow.key, { levels })} />
-          </div>
+          {detailRow.data.scoringMode !== 'score' && (
+            <div className="lib-fieldset">
+              <h4>档位（levels）</h4>
+              <LevelsEditor levels={detailRow.data.levels} onChange={(levels) => updateRow(detailRow.key, { levels })} />
+            </div>
+          )}
         </DetailModal>
       )}
     </div>

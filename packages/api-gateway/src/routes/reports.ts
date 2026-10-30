@@ -12,7 +12,7 @@ export async function reportsRoutes(app: FastifyInstance, ctx: RouteContext): Pr
       return reply.code(404).send({ error: '会话不存在' });
     }
 
-    // 会话被放弃（对话太少或时间太短）—— 不生成报告
+    // 会话被放弃（对话不足 2 轮）—— 不生成报告
     if (session.status === 'abandoned') {
       request.log.info(
         { sessionId: session.id, status: session.status, ms: Date.now() - startedAt },

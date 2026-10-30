@@ -51,6 +51,7 @@ function buildSummaryPrompt(scenario: Scenario, input: SummaryInput): string {
     itemLines || '（无评分标准）',
     input.fillerTotal > 0 ? `口头禅共出现 ${input.fillerTotal} 次。` : '',
     '要求：教练口吻，先总体评价，再指出一个最值得保持的亮点和一个最需要改进的点，最后给一条可执行的练习建议；150 字以内。',
+    '只允许围绕上面列出的评分标准进行点评，禁止引入评分标准之外的评判维度（哪怕它们是销售技巧常识）；没有列出的方面一律不提。',
     '请只输出 JSON：{"summary":"总结文案"}',
   ]
     .filter(Boolean)

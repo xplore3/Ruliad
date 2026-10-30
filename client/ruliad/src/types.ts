@@ -233,6 +233,8 @@ export interface ScoreItemDef {
   layer: 'company' | 'team' | 'personal';
   isObservation: boolean;
   category?: ScoreCategory;
+  /** 打分模式：levels=按档位判定（默认）；score=直接打分 0-100（维度与分值写在行为锚定里） */
+  scoringMode?: 'levels' | 'score';
 }
 
 export interface GoldenCase {

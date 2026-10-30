@@ -10,6 +10,8 @@ import type {
 
 interface JudgeParsed {
   levelKey: string;
+  /** 直接打分模式的分数（0-100）；档位模式不用 */
+  score?: number;
   quote: string;
   quoteTurnSeq: number;
   rationale: string;
@@ -57,11 +59,13 @@ function buildJudgePrompt(
     `评分标准：${def.name}`,
     `行为锚定：${def.behaviorAnchor}`,
     ...scenarioLines,
-    `可选档位（JSON）：${JSON.stringify(def.levels)}`,
+    ...(def.scoringMode === 'score' ? [] : [`可选档位（JSON）：${JSON.stringify(def.levels)}`]),
     ...(stats ? buildStatsLines(stats) : []),
     '对话记录：',
     transcriptLines,
-    '请只输出 JSON：{"levelKey":"档位key","quote":"引用原文","quoteTurnSeq":数字,"rationale":"判定理由","betterScript":"更优话术示范"}',
+    def.scoringMode === 'score'
+      ? '请只输出 JSON：{"score":0到100的整数总分,"dimensions":"各维度得分明细（如 激情40/60 语速15/20 音量12/20）","quote":"引用原文","quoteTurnSeq":数字,"rationale":"判定理由","betterScript":"更优话术示范"}'
+      : '请只输出 JSON：{"levelKey":"档位key","quote":"引用原文","quoteTurnSeq":数字,"rationale":"判定理由","betterScript":"更优话术示范"}',
     'betterScript 要求：针对该评分标准的扣分点，给一句学员当时可以直接说的中文话术示范，不超过 60 字；若判定为最高档（无扣分）则给空字符串。',
     ...(scoringFocus?.length
       ? [`本次演练重点评分维度：${scoringFocus.join('、')}。打分时对这些维度从严、并明确指出该维度表现。`]
@@ -69,8 +73,33 @@ function buildJudgePrompt(
   ].join('\n');
 }
 
-/** 解析 judge 输出；失败或 levelKey 非法时回退中间档 */
+/** 解析 judge 输出；失败或 levelKey 非法时回退中间档；直接打分模式解析 0-100 分数，失败回退 50 分 */
 function parseJudgeOutput(content: string, def: ScoreItemDef): JudgeParsed {
+  if (def.scoringMode === 'score') {
+    try {
+      const parsed = JSON.parse(content) as {
+        score?: unknown;
+        dimensions?: unknown;
+        quote?: unknown;
+        quoteTurnSeq?: unknown;
+        rationale?: unknown;
+        betterScript?: unknown;
+      };
+      const score = Math.round(Number(parsed.score));
+      if (!Number.isFinite(score)) throw new Error('非法 score');
+      const dimensions = typeof parsed.dimensions === 'string' && parsed.dimensions.trim() ? `（${parsed.dimensions.trim()}）` : '';
+      return {
+        levelKey: 'score',
+        score: Math.max(0, Math.min(100, score)),
+        quote: String(parsed.quote ?? ''),
+        quoteTurnSeq: Number(parsed.quoteTurnSeq ?? 0),
+        rationale: `${String(parsed.rationale ?? '')}${dimensions}`,
+        betterScript: String(parsed.betterScript ?? ''),
+      };
+    } catch {
+      return { levelKey: 'score', score: 50, quote: '', quoteTurnSeq: 0, rationale: 'judge 输出解析失败，回退中间分 50', betterScript: '' };
+    }
+  }
   try {
     const parsed = JSON.parse(content) as Partial<JudgeParsed>;
     const level = def.levels.find((l) => l.key === parsed.levelKey);
@@ -85,7 +114,7 @@ function parseJudgeOutput(content: string, def: ScoreItemDef): JudgeParsed {
       betterScript: String(parsed.betterScript ?? ''),
     };
   } catch {
-    const mid = def.levels[Math.floor(def.levels.length / 2)];
+    const mid = def.levels[Math.floor(def.levels.length / 2)] ?? { key: 'unknown', label: '未知', score: 0 };
     return {
       levelKey: mid.key,
       quote: '',
@@ -121,6 +150,32 @@ export async function judgeItem(
   const prompt = buildJudgePrompt(def, session, scenario, scoringFocus, stats);
   const primary = await runJudge(gateway.forTask('judge'), prompt, def);
   const secondary = await runJudge(gateway.forTask('judge_secondary'), prompt, def);
+
+  // 直接打分模式：双 judge 分差 ≤10 视为一致（取均值），否则取主 judge 并标记"参考"
+  if (def.scoringMode === 'score') {
+    const p = primary.score ?? 0;
+    const s = secondary.score ?? 0;
+    const agree = Math.abs(p - s) <= 10;
+    return {
+      itemId: def.id,
+      itemName: def.name,
+      skillPointId: def.skillPointId,
+      levelKey: 'score',
+      levelLabel: '得分',
+      score: agree ? Math.round((p + s) / 2) : p,
+      quote: primary.quote,
+      quoteTurnSeq: primary.quoteTurnSeq,
+      rationale: agree
+        ? primary.rationale
+        : `${primary.rationale}（双 judge 不一致：次 judge 判 ${s} 分，取主 judge 结果）`,
+      betterScript: primary.betterScript || undefined,
+      confidence: agree ? 0.95 : 0.5,
+      judgeAgree: agree,
+      isReference: !agree,
+      isObservation: def.isObservation,
+      layer: def.layer,
+    };
+  }
 
   const agree = primary.levelKey === secondary.levelKey;
   const chosen = primary;

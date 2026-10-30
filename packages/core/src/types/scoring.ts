@@ -33,6 +33,11 @@ export interface ScoreItemDef {
   isObservation: boolean;
   /** 所属评分分类（地推/电销/咨询接待/现场成交）；缺省兼容存量数据，按全部场景可用处理 */
   category?: ScoreCategory;
+  /**
+   * 打分模式：levels=按档位判定（默认）；score=直接打分（0-100，评分标准在行为锚定中自定维度与分值，
+   * 如"总分100=激情60+语速20+音量20"），judge 按锚定直接给出总分
+   */
+  scoringMode?: 'levels' | 'score';
 }
 
 /** 单个评分标准判定结果 */
