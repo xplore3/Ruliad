@@ -6,17 +6,15 @@ import { scoreSession } from '@grasp-mvp/scoring-engine';
 import type { RouteContext } from '../ctx.js';
 import { mkEvent } from '../events.js';
 import { effectiveCountdownSeconds, loadRuntime, remainingSeconds, runTurn } from '../services/turn.js';
-import { decideOpening } from '../services/drill.js';
+import { decideOpening, resolveDrillScript, rollCustomerArchetype } from '../services/drill.js';
 import { personaVoice } from './voice.js';
 import { readFramesAsDataUrls } from '../services/video-store.js';
 
 const MAX_HINTS = 3;
 const REVIEW_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 
-/** 最小学员发言轮次：少于此值不生成报告 */
-const MIN_TRAINEE_TURNS = 2;
-/** 最短对练时长（秒）：短于此值不生成报告 */
-const MIN_DURATION_SECONDS = 30;
+/** 生成报告所需的最少对话句数：学员一句 + 客户一句为一轮，完成 2 轮（4 句对话，不含教练提示）前不生成报告 */
+const MIN_DIALOGUE_TURNS = 4;
 
 /**
  * 结束会话并评分：end 端点与监考自动交卷共用。
@@ -24,7 +22,7 @@ const MIN_DURATION_SECONDS = 30;
  * 评分异常时会话回滚为 active，允许调用方重试。
  * 评分、bestScore、reviewDueAt、UserSkillState、cert 签发、事件行为与原 end 端点完全一致。
  *
- * 当学员发言轮次过少或对练时长过短时，跳过评分报告，会话标记为 abandoned。
+ * 完成 2 轮对话（4 句，学员+客户，不含教练提示）前，跳过评分报告，会话标记为 abandoned。
  */
 async function finalizeSession(session: Session, ctx: RouteContext, log?: FastifyBaseLogger) {
   const { store, gateway } = ctx;
@@ -55,17 +53,17 @@ async function finalizeSession(session: Session, ctx: RouteContext, log?: Fastif
 
   const endedAt = new Date().toISOString();
 
-  // 检查是否有足够的对话内容生成报告
-  const traineeTurns = session.transcript.filter((t) => t.speaker === 'trainee').length;
-  const durationSec =
-    (new Date(endedAt).getTime() - new Date(session.liveStartedAt ?? session.startedAt).getTime()) / 1000;
+  // 检查是否有足够的对话内容生成报告：学员+客户合计对话句数（不含教练提示）
+  const dialogueTurns = session.transcript.filter(
+    (t) => t.speaker === 'trainee' || t.speaker === 'persona'
+  ).length;
 
-  if (traineeTurns < MIN_TRAINEE_TURNS || durationSec < MIN_DURATION_SECONDS) {
+  if (dialogueTurns < MIN_DIALOGUE_TURNS) {
     log?.info(
-      { sessionId: session.id, traineeTurns, durationSec: Math.round(durationSec), minTurns: MIN_TRAINEE_TURNS, minDurationSec: MIN_DURATION_SECONDS },
-      '结束会话：内容不足，标记 abandoned（不生成报告）'
+      { sessionId: session.id, dialogueTurns, minDialogueTurns: MIN_DIALOGUE_TURNS },
+      '结束会话：对话未满 2 轮，标记 abandoned（不生成报告）'
     );
-    // 对话太少或时间太短，跳过报告生成，标记为 abandoned
+    // 对话不足 2 轮（4 句），跳过报告生成，标记为 abandoned
     await store.updateSession(session.id, { status: 'abandoned', endedAt });
     void store.appendEvent(
       mkEvent(EventTypes.SESSION_COMPLETED, {
@@ -77,12 +75,11 @@ async function finalizeSession(session: Session, ctx: RouteContext, log?: Fastif
           mode: session.mode,
           skipped: true,
           reason: 'insufficient_content',
-          traineeTurns,
-          durationSec: Math.round(durationSec),
+          dialogueTurns,
         },
       })
     );
-    return { sessionId: session.id, skippedReport: true, traineeTurns, durationSec: Math.round(durationSec) };
+    return { sessionId: session.id, skippedReport: true, dialogueTurns };
   }
 
   const completed: Session = { ...session, status: 'completed', endedAt };
@@ -270,7 +267,11 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
         }
       }
 
-      const runtime = await loadRuntime(ctx, scenario);
+      // 本场客户类型：剧本声明了概率化原则（如"10次应该有5次客户表现出不感兴趣"）时，系统随机确定并整场固定
+      const drillScriptForRoll = await resolveDrillScript(store, scenario).catch(() => undefined);
+      const customerArchetype = drillScriptForRoll ? rollCustomerArchetype(drillScriptForRoll.content) : undefined;
+
+      const runtime = await loadRuntime(ctx, scenario, undefined, customerArchetype);
       if (!runtime) return reply.code(500).send({ error: '场景对应的 persona 配置缺失' });
       const { personaConfig, bundle, drillScript } = runtime;
 
@@ -318,6 +319,7 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
         prevSessionId: prevCompleted?.id,
         examWindowId: mode === 'exam' ? examWindowId : undefined,
         coachIntensity,
+        customerArchetype,
         startedAt: now,
       };
       await store.createSession(session);

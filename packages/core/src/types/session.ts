@@ -61,6 +61,12 @@ export interface Session {
   qualifyResult?: { answers: string[]; experienced: boolean };
   /** 演练难度等级（对应新手指引流程配置 difficultyLevels.level；缺省用指引配置 defaultDifficulty） */
   difficulty?: number;
+  /**
+   * 本场客户类型（建会话时系统随机确定，整场不变）：uninterested=不感兴趣客户 / interested=潜在意向客户。
+   * 仅当演练剧本声明了概率化客户类型（如"10次应该有5次客户表现出不感兴趣"）时抽取；
+   * LLM 无法执行概率原则，由代码随机后写死进 prompt。
+   */
+  customerArchetype?: 'uninterested' | 'interested';
   startedAt: string;
   endedAt?: string;
 }

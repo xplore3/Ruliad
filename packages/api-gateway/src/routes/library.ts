@@ -50,10 +50,15 @@ function validateDemoScriptBody(body: Partial<DemoScript>): string | null {
 function validateScoreItemBody(body: Partial<ScoreItemDef>): string | null {
   if (!body.skillPointId?.trim()) return 'skillPointId 必填';
   if (!body.name?.trim()) return 'name 必填';
-  if (!Array.isArray(body.levels) || body.levels.length === 0) return 'levels 至少一档';
-  for (const lv of body.levels) {
-    if (!lv?.key?.trim() || !lv?.label?.trim() || typeof lv?.score !== 'number') {
-      return '每档的 key / label / score 必填';
+  if (body.scoringMode !== undefined && body.scoringMode !== 'levels' && body.scoringMode !== 'score') {
+    return "scoringMode 仅支持 'levels' | 'score'";
+  }
+  if (body.scoringMode !== 'score') {
+    if (!Array.isArray(body.levels) || body.levels.length === 0) return 'levels 至少一档';
+    for (const lv of body.levels) {
+      if (!lv?.key?.trim() || !lv?.label?.trim() || typeof lv?.score !== 'number') {
+        return '每档的 key / label / score 必填';
+      }
     }
   }
   if (body.layer !== undefined && !SCORE_LAYERS.has(body.layer)) {
@@ -303,10 +308,11 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
       behaviorAnchor: body.behaviorAnchor ?? '',
       judgePrompt: body.judgePrompt ?? '',
       weight: body.weight ?? 1,
-      levels: body.levels!,
+      levels: body.levels ?? [],
       layer: body.layer ?? 'company',
       isObservation: body.isObservation ?? false,
       category: body.category,
+      scoringMode: body.scoringMode,
     };
     await store.upsertScoreItemDef(def);
     return reply.code(201).send(def);
@@ -330,6 +336,7 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
         layer: body.layer ?? existing.layer,
         isObservation: body.isObservation ?? existing.isObservation,
         category: body.category ?? existing.category,
+        scoringMode: body.scoringMode ?? existing.scoringMode,
       };
       const error = validateScoreItemBody(merged);
       if (error) return reply.code(400).send({ error });

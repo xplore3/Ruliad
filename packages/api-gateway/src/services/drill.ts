@@ -34,6 +34,31 @@ export function drillScriptPrompt(script: DrillScript): string {
   ].join('\n');
 }
 
+/**
+ * 概率化客户类型原则识别：剧本中声明了类似"10次应该有5次客户表现出不感兴趣"的概率原则时，
+ * LLM 无法执行概率，由代码在开场时按 50/50 随机确定本场客户类型并写死进 prompt。
+ * 未声明返回 undefined（不干预）。
+ */
+export function rollCustomerArchetype(content: string): 'uninterested' | 'interested' | undefined {
+  if (!/10次应该有5次|一半.*不感兴趣|5次.*不感兴趣/.test(content)) return undefined;
+  return Math.random() < 0.5 ? 'uninterested' : 'interested';
+}
+
+/** 本场客户类型注入 prompt 的硬约束段落（系统随机确定，整场不变） */
+export function archetypePrompt(archetype: 'uninterested' | 'interested'): string {
+  return archetype === 'uninterested'
+    ? [
+        '【本场客户类型（系统随机确定，必须严格遵守，优先级高于其他行为要求）】不感兴趣的客户。',
+        '按剧本中该类客户的行为要求执行：不表现出兴趣，主要用身体语言拒绝（不停下脚步/没有放慢脚步/摇手），',
+        '或简短表明（如"我们不学""我们赶时间"），不展开提问；这种类型的演练很快就会结束。',
+      ].join('\n')
+    : [
+        '【本场客户类型（系统随机确定，必须严格遵守，优先级高于其他行为要求）】潜在意向客户。',
+        '按剧本中该类客户的行为要求执行：用肢体语言表达兴趣（放慢脚步/停下脚步/转头问孩子），',
+        '被动配合销售的引导推进流程，不主动连续提问。',
+      ].join('\n');
+}
+
 export interface OpeningDecision {
   /** 谁先开口：trainee=学员（销售一方）；persona=客户（AI 一方） */
   firstSpeaker: 'trainee' | 'persona';

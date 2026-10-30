@@ -50,7 +50,10 @@ export async function scoreSession(
   gateway: LLMGateway,
   options: ScoreOptions = {}
 ): Promise<ScoreReport> {
-  const { violations, stats } = runRuleChecks(session, scenario.coverageTopics ?? []);
+  const { violations: ruleViolations, stats } = runRuleChecks(session, scenario.coverageTopics ?? []);
+  // 分类场景（评分库驱动）：评什么完全由分类库决定，规则层只产出统计指标（供 judge 判定语声语调类标准），
+  // 不产出库外违规项（话题覆盖/口头禅/红线）；无分类的存量场景保持完整规则层
+  const violations = scenario.category ? [] : ruleViolations;
 
   const relevantDefs = scenario.category
     ? defs.filter((d) => !d.category || d.category === scenario.category)

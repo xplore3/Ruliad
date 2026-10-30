@@ -2,7 +2,7 @@ import { EventTypes, type QuizQuestion, type QuizQuestionPublic, type Scenario, 
 import { bandFor, checkConsistency, compilePersona, EmotionTracker, PersonaActor } from '@grasp-mvp/role-engine';
 import type { RouteContext } from '../ctx.js';
 import { mkEvent } from '../events.js';
-import { drillScriptPrompt, resolveDrillScript } from './drill.js';
+import { drillScriptPrompt, archetypePrompt, resolveDrillScript } from './drill.js';
 
 /** 一致性校验重试仍失败时的兜底角色化文案 */
 const CONSISTENCY_FALLBACK = '这个我不太清楚，你接着说。';
@@ -43,8 +43,13 @@ export async function effectiveCountdownSeconds(
   return countdownSecondsOf(scenario, guidance);
 }
 
-/** 加载 persona 运行时（编译后的 bundle + 原始配置 + 演练剧本），配置缺失返回 undefined */
-export async function loadRuntime(ctx: RouteContext, scenario: Scenario, difficulty?: number) {
+/** 加载 persona 运行时（编译后的 bundle + 原始配置 + 演练剧本 + 本场客户类型），配置缺失返回 undefined */
+export async function loadRuntime(
+  ctx: RouteContext,
+  scenario: Scenario,
+  difficulty?: number,
+  archetype?: 'uninterested' | 'interested'
+) {
   const personaConfig = await ctx.store.getPersonaConfig(scenario.personaConfigId);
   if (!personaConfig) return undefined;
   const elements = await ctx.store.listElements({});
@@ -90,6 +95,10 @@ export async function loadRuntime(ctx: RouteContext, scenario: Scenario, difficu
   const drillScript = await resolveDrillScript(ctx.store, scenario).catch(() => undefined);
   if (drillScript) {
     bundle.systemPrompt = `${bundle.systemPrompt}\n\n${drillScriptPrompt(drillScript)}`;
+  }
+  // 注入本场客户类型（开场时系统随机确定并存在会话上，整场不变）：概率化原则由代码落地，不交给 LLM
+  if (archetype) {
+    bundle.systemPrompt = `${bundle.systemPrompt}\n\n${archetypePrompt(archetype)}`;
   }
   return { personaConfig, bundle, productKB, drillScript };
 }
@@ -194,7 +203,7 @@ export async function runTurn(
 
   // 结束时机由 AI 判断（replyWithSignal 的 shouldClose），不再由倒计时/maxTurns 强制收口；
   // 仅保留学员轮数极端上限 MAX_LIVE_TURNS 兜底，防止对话无限进行
-  const runtime = await loadRuntime(ctx, scenario, session.difficulty);
+  const runtime = await loadRuntime(ctx, scenario, session.difficulty, session.customerArchetype);
   if (!runtime) {
     console.error('[runTurn] persona 运行时加载失败, scenarioId=', scenario.id, 'personaConfigId=', scenario.personaConfigId);
     return null;
