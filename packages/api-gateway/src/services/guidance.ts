@@ -3,6 +3,7 @@ import type {
   DemoLine,
   DemoScriptTemplate,
   LLMGateway,
+  Scenario,
   ScenarioGuidance,
 } from '@grasp-mvp/core';
 import type { Store } from '@grasp-mvp/infra';
@@ -12,12 +13,31 @@ import { DEMO_FAQ_ITEMS } from '../demo-faq.data.js';
  * 新手指引流程：资格判断 + 示范剧本演绎 + 讲解口播稿组装。
  * 资源库化以后，示范剧本存示范剧本库（DemoScript），由 ScenarioGuidance.demoScriptId 引用。
  * 示范执行方式：先把模板确定性渲染成参照稿（变量 + FAQ 池抽取），再交给大模型理解演绎成自然对话；
+ * 讲解口播稿同理：要点与讲解标准先渲染成参照稿，再由大模型理解改写成自然口播，不照念资源库原文。
  * LLM 失败/输出不合法时回退参照稿，保证 mock/弱网环境可跑通。
  * 场景无指引配置或剧本引用失效时不提供兜底示范剧本，由路由声明无示范（hasDemo=false），前端跳过示范步骤。
  */
 
-/** 资格提问兜底（场景无引导资源时的默认两问） */
-export const QUALIFY_QUESTIONS = ['你做过地推吗？', '你做过教培行业的地推吗？'] as const;
+/** 资格提问兜底（仅地推类实战演练场景无引导资源时的默认两问，其他场景不适用） */
+export const QUALIFY_QUESTIONS = ['你做过地推吗？', '你做过教育行业的地推吗？'] as const;
+
+/** 地推类场景关键词（与前端 Practice.tsx 的判定规则一致）；仅在无指引配置时作回退判定 */
+const GROUND_PUSH_KEYWORDS = ['地推', '破冰', '陌生', '展会', '商场', '摊位', '驻足'];
+
+/**
+ * 资格提问解析：优先指引配置的 qualifyQuestions；
+ * 无配置且命中地推关键词时回退默认两问；其余场景无资格提问（返回空数组，跳过资格提问环节）。
+ */
+export function resolveQualifyQuestions(
+  guidance: ScenarioGuidance | undefined,
+  scenario: Scenario | undefined
+): string[] {
+  if (guidance?.qualifyQuestions?.length) return guidance.qualifyQuestions;
+  if (scenario && GROUND_PUSH_KEYWORDS.some((k) => `${scenario.name} ${(scenario.coverageTopics ?? []).join(' ')}`.includes(k))) {
+    return [...QUALIFY_QUESTIONS];
+  }
+  return [];
+}
 
 export type { DemoLine } from '@grasp-mvp/core';
 
@@ -279,10 +299,10 @@ export async function getGuidance(store: Store, scenarioId: string): Promise<Sce
 const CN_NUMERALS = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
 
 /**
- * 组装教练口播稿（第3步）：讲解要点 + 引用的讲解标准库条目，按"第一/第二…"编号。
- * 返回纯文本数组，每项一段口播。
+ * 渲染讲解参照稿：讲解要点 + 引用的讲解标准库条目，按"第一/第二…"编号。
+ * 作为 LLM 改写的输入与失败兜底，不直接对学员口播。
  */
-export function composeBriefing(guidance: ScenarioGuidance, standards: BriefingStandard[]): string[] {
+function renderBriefingReference(guidance: ScenarioGuidance, standards: BriefingStandard[]): string[] {
   const referenced = guidance.briefingStandardIds
     .map((id) => standards.find((s) => s.id === id))
     .filter((s): s is BriefingStandard => !!s);
@@ -300,4 +320,52 @@ export function composeBriefing(guidance: ScenarioGuidance, standards: BriefingS
   });
   if (hasDemo) lines.push('想再听一次示范对白，还是直接开始模拟练习？');
   return lines;
+}
+
+/**
+ * 组装教练口播稿（第3步）：资源库内容不照念，先把要点与讲解标准渲染成参照稿，
+ * 再交给大模型理解后重新组织成教练对学员说话的自然口播（意思保留、措辞口语化）。
+ * LLM 失败/输出不合法时回退参照稿，保证 mock/弱网环境可跑通。
+ * 返回纯文本数组，每项一段口播。
+ */
+export async function composeBriefing(
+  gateway: LLMGateway,
+  guidance: ScenarioGuidance,
+  standards: BriefingStandard[]
+): Promise<string[]> {
+  const reference = renderBriefingReference(guidance, standards);
+  if (reference.length === 0) return [];
+  try {
+    const result = await gateway.forTask('actor').chat(
+      [
+        {
+          role: 'user',
+          content: [
+            '你是销售培训教练。下面是一份讲解要点参照稿（要点来自培训资源库的标准与方法论条目）。',
+            '请理解每个要点的意思，用你作为教练对学员当面讲解的自然口语重新组织成口播稿。',
+            '要求：',
+            '1. 保留全部要点的意思与先后顺序，不遗漏、不新增要点',
+            '2. 不要照念资源库原文（如"XX标准：……"这种条目式读法），把标准的要求自然融入讲解，像教练在亲口带教',
+            '3. 每段口播讲一个要点，段数与参照稿接近；首段开场与末段收尾的意思保持不变',
+            '4. 每段控制在 80 字以内，口语化、可直接语音播报',
+            '只输出 JSON：{"lines":["第一段口播","第二段口播",...]}',
+            '不要输出任何其他内容。',
+            '',
+            '【讲解要点参照稿】',
+            ...reference,
+          ].join('\n'),
+        },
+      ],
+      { jsonMode: true, temperature: 0.7 }
+    );
+    const parsed = JSON.parse(extractJson(result.content)) as { lines?: unknown };
+    const lines = (Array.isArray(parsed.lines) ? parsed.lines : [])
+      .filter((l): l is string => typeof l === 'string' && l.trim().length > 0)
+      .map((l) => l.trim());
+    // 改写结果条数过少视为失败（要点被截断），回退参照稿
+    if (lines.length >= Math.max(2, Math.floor(reference.length / 2))) return lines;
+  } catch {
+    /* 落入兜底 */
+  }
+  return reference;
 }

@@ -30,7 +30,7 @@ function pcmRMS(buf: Buffer): number {
 
 /** VAD 配置 */
 const VAD_THRESHOLD = 0.015; // 静音能量阈值（RMS）
-const VAD_SILENCE_MS = 1200; // 静音持续时间触发断句
+const VAD_SILENCE_MS = 2500; // 静音持续时间触发断句
 const VAD_CHUNK_MS = 100; // 每 100ms 检测一次
 
 /** 回复按句号/问号/感叹号等切句（保留标点），供逐句 TTS 边合成边播 */
@@ -156,7 +156,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
   type VoiceRole = 'persona' | 'coach' | 'sales' | 'narrator' | 'child';
   // 指引模式各角色的固定音色（与 persona 常用默认 longxiaochun_v2 区分开）；
   // mock speech 忽略音色参数，aliyun 未知音色会报错——这里选的都是官方音色。
-  // sales 用 CosyVoice v3 音色 longanhuan（欢脱元气女，v3 模型表现力更强；provider 会按音色自动切到 cosyvoice-v3-flash）
+  // sales 用 CosyVoice v3 音色 longanhuan（欢脱元气女，v3 模型表现力更强；provider 按音色代际自动路由到 v3 系模型）
   const ROLE_VOICES: Record<Exclude<VoiceRole, 'persona'>, string> = {
     coach: 'longshu_v2',
     sales: 'longanhuan',

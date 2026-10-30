@@ -424,6 +424,7 @@ function LevelsEditor({ levels, onChange }: { levels: ScoreLevel[]; onChange: (l
     onChange(levels.map((lv, i) => (i === idx ? { ...lv, ...patch } : lv)));
   return (
     <div>
+      <div className="lib-table-wrap">
       <table className="lib-table">
         <thead><tr><th>key</th><th>档位名</th><th>分数</th><th>描述</th><th></th></tr></thead>
         <tbody>
@@ -438,6 +439,7 @@ function LevelsEditor({ levels, onChange }: { levels: ScoreLevel[]; onChange: (l
           ))}
         </tbody>
       </table>
+      </div>
       <button
         className="btn btn-ghost btn-sm"
         style={{ marginTop: 8 }}
@@ -457,6 +459,7 @@ function TranscriptEditor({ transcript, onChange }: {
     onChange(transcript.map((t, i) => (i === idx ? { ...t, ...patch } : t)));
   return (
     <div>
+      <div className="lib-table-wrap">
       <table className="lib-table">
         <thead><tr><th>#</th><th>角色</th><th>内容</th><th></th></tr></thead>
         <tbody>
@@ -482,6 +485,7 @@ function TranscriptEditor({ transcript, onChange }: {
           ))}
         </tbody>
       </table>
+      </div> 
       <button
         className="btn btn-ghost btn-sm"
         style={{ marginTop: 8 }}
@@ -502,6 +506,7 @@ function ExpectedEditor({ expected, onChange, scoreItems }: {
     onChange(expected.map((e, i) => (i === idx ? { ...e, ...patch } : e)));
   return (
     <div>
+      <div className="lib-table-wrap">
       <table className="lib-table">
         <thead><tr><th>评分标准</th><th>期望档位 key</th><th></th></tr></thead>
         <tbody>
@@ -520,6 +525,7 @@ function ExpectedEditor({ expected, onChange, scoreItems }: {
           ))}
         </tbody>
       </table>
+      </div> 
       <button
         className="btn btn-ghost btn-sm"
         style={{ marginTop: 8 }}
@@ -1535,6 +1541,7 @@ function DemoLinesEditor({ lines, onChange }: { lines: GuidanceDemoLine[]; onCha
     onChange(lines.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
   return (
     <div>
+      <div className="lib-table-wrap">
       <table className="lib-table">
         <thead><tr><th>#</th><th>角色</th><th>台词</th><th>唤醒度</th><th>激情</th><th></th></tr></thead>
         <tbody>
@@ -1554,6 +1561,7 @@ function DemoLinesEditor({ lines, onChange }: { lines: GuidanceDemoLine[]; onCha
           ))}
         </tbody>
       </table>
+      </div> 
       <button
         className="btn btn-ghost btn-sm"
         style={{ marginTop: 8 }}
@@ -2314,6 +2322,7 @@ function DifficultyLevelsEditor({ levels, onChange }: { levels: DifficultyLevel[
     onChange(levels.map((lv, i) => (i === idx ? { ...lv, ...patch } : lv)));
   return (
     <div>
+      <div className="lib-table-wrap">
       <table className="lib-table">
         <thead><tr><th>等级(1-5)</th><th>档位名</th><th>难度说明</th><th>AI 客户行为要求</th><th></th></tr></thead>
         <tbody>
@@ -2328,6 +2337,7 @@ function DifficultyLevelsEditor({ levels, onChange }: { levels: DifficultyLevel[
           ))}
         </tbody>
       </table>
+      </div> 
       <button
         className="btn btn-ghost btn-sm"
         style={{ marginTop: 8 }}
