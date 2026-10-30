@@ -2,9 +2,9 @@ import DocLayout, { DocSection } from '../components/DocLayout';
 
 export default function Agreement() {
   return (
-    <DocLayout title="Grasp 用户协议" updatedAt="2025-01-01">
+    <DocLayout title="Graspit 用户协议" updatedAt="2025-01-01">
       <DocSection title="一、协议的确认与接受">
-        <p>1.1 本协议由您（以下简称"用户"）与 Grasp 产品运营方（以下简称"我们"）共同缔结。您在注册、登录或使用 Grasp 销售 AI 陪练服务（以下简称"本服务"）前，应当认真阅读并充分理解本协议全部内容。</p>
+        <p>1.1 本协议由您（以下简称"用户"）与 Graspit 产品运营方（以下简称"我们"）共同缔结。您在注册、登录或使用 Graspit 销售 AI 陪练服务（以下简称"本服务"）前，应当认真阅读并充分理解本协议全部内容。</p>
         <p>1.2 您勾选"我已阅读并同意《用户协议》"或实际使用本服务，即视为您已充分理解并同意接受本协议的全部条款。</p>
         <p>1.3 如您不同意本协议的任何内容，请立即停止注册或使用本服务。</p>
       </DocSection>

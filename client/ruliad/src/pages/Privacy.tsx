@@ -2,7 +2,7 @@ import DocLayout, { DocSection } from '../components/DocLayout';
 
 export default function Privacy() {
   return (
-    <DocLayout title="Grasp 隐私政策" updatedAt="2025-01-01">
+    <DocLayout title="Graspit 隐私政策" updatedAt="2025-01-01">
       <DocSection title="一、我们收集的信息">
         <p>1.1 账号信息：您注册/登录时提供的手机号或用户名、姓名等基本信息。</p>
         <p>1.2 练习数据：您在使用对练功能过程中产生的语音录音、语音识别文本、对话记录、答题记录及评分结果。</p>

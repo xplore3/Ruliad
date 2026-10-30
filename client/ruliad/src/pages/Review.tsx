@@ -193,8 +193,8 @@ export default function Review() {
   /** 分享报告：优先系统分享（navigator.share），不支持则复制摘要+链接到剪贴板 */
   const handleShare = async () => {
     const url = window.location.href;
-    const title = 'Grasp 练习报告';
-    const text = `我在 Grasp 完成了「${scenario?.name ?? '销售练习'}」，本次得分 ${score} 分${report.passed ? '，已通过' : '，未通过'}（及格线 ${scenario?.passScore ?? '-'} 分）。`;
+    const title = 'Graspit 练习报告';
+    const text = `我在 Graspit 完成了「${scenario?.name ?? '销售练习'}」，本次得分 ${score} 分${report.passed ? '，已通过' : '，未通过'}（及格线 ${scenario?.passScore ?? '-'} 分）。`;
     if (navigator.share) {
       try {
         await navigator.share({ title, text, url });

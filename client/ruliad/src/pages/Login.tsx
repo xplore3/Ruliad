@@ -115,7 +115,7 @@ export default function Login() {
     <main className="auth">
       {/* 登录 / 注册卡片 */}
       <section className="card auth-card">
-        <div className="auth-logo"><span className="dot" />Grasp</div>
+        <div className="auth-logo"><span className="dot" />Graspit</div>
         <div className="auth-hero">
           <h1>像实战一样练销售</h1>
           <p>AI 扮演客户，随时陪你过招</p>

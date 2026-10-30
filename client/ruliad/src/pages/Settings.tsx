@@ -402,10 +402,10 @@ export default function Settings() {
               onClick={() => navigate('/home')}
             >
               <span className="dot" />
-              Grasp
+              Graspit
             </a>
             <p className="small muted" style={{ marginTop: 6 }}>
-              Grasp v0.3.0（设计演示版）
+              Graspit v0.1.0
               <br />
               像实战一样练销售
             </p>

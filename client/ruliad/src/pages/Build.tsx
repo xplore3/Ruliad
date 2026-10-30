@@ -68,8 +68,8 @@ const DIMENSIONS = [
 
 const DIFF_LABELS: Record<number, string> = { 1: '初级', 2: '进阶', 3: '挑战' };
 const AVATARS = [
-  '/avatars/man-1.jpg', '/avatars/man-2.jpg', '/avatars/man-3.jpg', '/avatars/man-4.jpg',
-  '/avatars/woman-1.jpg', '/avatars/woman-2.jpg', '/avatars/woman-3.jpg', '/avatars/woman-4.jpg',
+'/avatars/man-1.png', '/avatars/man-2.png', '/avatars/man-3.png', '/avatars/man-4.png',
+'/avatars/women-1.png', '/avatars/women-2.png', '/avatars/women-3.png', '/avatars/women-4.png',
 ];
 
 const DEFAULT_WEIGHTS: Record<string, number> = Object.fromEntries(
