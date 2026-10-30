@@ -3,6 +3,7 @@ import type { ASRStream, TTSOptions } from '@grasp-mvp/speech-gateway';
 import type { RouteContext } from '../ctx.js';
 import { tokenFailReason, verifyToken } from '../auth.js';
 import { runTurn } from '../services/turn.js';
+import { analyzePcm16, wavToPcm } from '../services/voice-features.js';
 
 /** WebSocket 关闭码说明（仅日志用，与客户端保持同步） */
 function describeCloseCode(code: number): string {
@@ -125,9 +126,13 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
     const userText = (await speech.asr.transcribe(audio, format)).trim();
     if (!userText) return reply.code(422).send({ error: '未识别到有效语音' });
 
+    // 声学特征提取：响度/起伏/音调变化/说话时长，随学员轮入库供评分量化判定（失败不影响回合）
+    const pcm = wavToPcm(audio);
+    const voiceFeatures = pcm ? analyzePcm16(pcm) ?? undefined : undefined;
+
     const scenario = await store.getScenario(session.scenarioId);
     if (!scenario) return reply.code(500).send({ error: '场景缺失' });
-    const result = await runTurn(ctx, session, scenario, userText);
+    const result = await runTurn(ctx, session, scenario, userText, voiceFeatures);
     if (!result) return reply.code(500).send({ error: '场景对应的 persona 配置缺失' });
 
     const ttsProfile = await personaVoice(store, scenario.id, scenario.personaConfigId, request.log);
@@ -229,6 +234,8 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
       let ttsPlaying = false;
       /** 本轮已累积的识别文本（paraformer 句末会多次回调 onFinal，文本为累计全量） */
       let latestText = '';
+      /** 本轮上行音频块（PCM16），回合落库前做声学特征提取 */
+      let audioChunks: Buffer[] = [];
       /** 客户端已点「结束本轮」：等 ASR 收尾后统一落回合，说话中不做自动断句 */
       let clientFinish = false;
       let finishing = false;
@@ -245,6 +252,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
         processing = false;
         ttsPlaying = false;
         latestText = '';
+        audioChunks = [];
         clientFinish = false;
         finishing = false;
         if (asrStream) {
@@ -276,7 +284,11 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
           if (!scenario) return fail('场景缺失');
 
           console.log(`[VoiceCall][trace] calling runTurn: sessionId=${sessionId} userText="${userText.slice(0, 40)}"`);
-          const result = await runTurn(ctx, session, scenario, userText);
+          // 声学特征提取（本轮上行 PCM）：失败不影响回合
+          const voiceFeatures = audioChunks.length > 0
+            ? analyzePcm16(Buffer.concat(audioChunks)) ?? undefined
+            : undefined;
+          const result = await runTurn(ctx, session, scenario, userText, voiceFeatures);
           console.log(`[VoiceCall][trace] runTurn returned: ${result ? `ok reply="${result.personaTurn.text.slice(0, 40)}..."` : 'NULL'}`);
           if (!result) return fail('场景对应的 persona 配置缺失');
           if (myRound !== round) {
@@ -375,6 +387,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
           // 注意：processing 为 true 时说明 runTurn 进行中，不应被新音频打断，忽略之
           if (!speaking && !processing) startASR();
           asrStream?.write(data);
+          audioChunks.push(data);
           return;
         }
         let msg: { type?: string };
@@ -464,6 +477,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
 
       // VAD 状态
       let vadBuffer: Buffer[] = []; // 累积音频块
+      let roundAudio: Buffer[] = []; // 本轮全部上行音频（供回合落库前声学特征提取）
       let vadSilenceStart = 0; // 静音开始时间戳（0 = 未在静音）
       let vadHasSpeech = false; // 本轮检测到过语音
 
@@ -490,6 +504,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
         ttsAborted = true;
         stopASR();
         vadBuffer = [];
+        roundAudio = [];
         vadSilenceStart = 0;
         vadHasSpeech = false;
         return active;
@@ -747,7 +762,11 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
           if (!scenario) return fail('场景缺失');
 
           console.log(`[VoiceCall][trace] calling runTurn: sessionId=${sessionId} userText="${userText.slice(0, 40)}"`);
-          const result = await runTurn(ctx, session, scenario, userText);
+          // 声学特征提取（本轮上行 PCM）：失败不影响回合
+          const voiceFeatures = roundAudio.length > 0
+            ? analyzePcm16(Buffer.concat(roundAudio)) ?? undefined
+            : undefined;
+          const result = await runTurn(ctx, session, scenario, userText, voiceFeatures);
           console.log(`[VoiceCall][trace] runTurn returned: ${result ? `ok reply="${result.personaTurn.text.slice(0, 40)}..."` : 'NULL'}`);
           if (!result) return fail('场景对应的 persona 配置缺失');
           if (myRound !== round) {
@@ -886,8 +905,9 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
 
           if (listening && asrStream) {
             asrStream.write(data);
-            // 同时累积到 VAD buffer
+            // 同时累积到 VAD buffer 与本轮特征提取 buffer
             vadBuffer.push(data);
+            roundAudio.push(data);
           }
           return;
         }

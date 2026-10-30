@@ -15,6 +15,33 @@ export interface ScoreLevel {
   description: string;
 }
 
+/** 定量计分区间：metric 值命中 [min, max) 时得 score 分（0-100），bands 按声明顺序首个命中生效 */
+export interface QuantMetricBand {
+  min?: number;
+  max?: number;
+  score: number;
+}
+
+/** 定量计分 metric：语音声学量化数据之一 */
+export interface QuantMetricRule {
+  metric: 'pitchVarSemitones' | 'loudnessRangeDb' | 'speechRateCpm' | 'avgLoudnessDbfs';
+  bands: QuantMetricBand[];
+}
+
+/**
+ * 确定性定量计分规则：配置后该标准跳过 LLM 打分，由代码按语音量化数据查表计分
+ * （块得分 = 各 metric 区间得分的均值 / 100 × maxScore，缺数据的 metric 按 50 分计），
+ * LLM 只负责根据已定分数写评语与话术建议，无法再自由改分。
+ */
+export interface QuantitativeRule {
+  blocks: Array<{
+    /** 计分块名（如 激情度/语速/音调/音量） */
+    label: string;
+    maxScore: number;
+    metrics: QuantMetricRule[];
+  }>;
+}
+
 /** 评分标准定义（行为锚定） */
 export interface ScoreItemDef {
   id: string;
@@ -38,6 +65,8 @@ export interface ScoreItemDef {
    * 如"总分100=激情60+语速20+音量20"），judge 按锚定直接给出总分
    */
   scoringMode?: 'levels' | 'score';
+  /** 确定性定量计分规则（仅 score 模式）：配置后跳过 LLM 打分，按语音量化数据查表计分 */
+  quantitativeRule?: QuantitativeRule;
 }
 
 /** 单个评分标准判定结果 */
@@ -120,6 +149,19 @@ export interface ScoreReport {
     avgSpeechRate: number;
     /** 明显停顿次数（学员应答前静默 > 3s） */
     pauseCount: number;
+    /** 学员语音声学特征聚合（来自各语音轮的录音分析；纯文字对练时缺省） */
+    voice?: {
+      /** 有声学特征的语音轮数 */
+      turns: number;
+      /** 平均响度 dBFS（按说话时长加权的各轮均值） */
+      avgLoudnessDbfs: number;
+      /** 响度动态范围 dB（各轮 P90-P10 的加权均值） */
+      loudnessRangeDb: number;
+      /** 音调变化幅度（F0 半音标准差，加权均值；全部轮不可测时为 null） */
+      pitchVarSemitones: number | null;
+      /** 真实语速（字/分钟，学员语音轮总字数 / 实际说话总时长） */
+      speechRateCpm: number;
+    };
   };
   /** 教练总结（LLM 生成，失败时回退模板文案） */
   summary?: string;

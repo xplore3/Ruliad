@@ -85,18 +85,8 @@ async function main() {
     await store.seed(buildSeedData());
     app.log.info('种子数据已灌入（tenant-demo）');
   } else {
-    // 增量同步：已有数据时检查 persona 数量，不足则补充新增的陪练员
-    const existingPersonas = await store.listPersonaConfigs(DEFAULT_TENANT);
+    // 陪练员库由用户全权管理：启动不再自动回补被删除的种子陪练员（演练行为以场景设定与演练剧本为准）
     const fullSeed = buildSeedData();
-    const missingPersonas = fullSeed.personaConfigs.filter(
-      (p) => !existingPersonas.some((e) => e.id === p.id)
-    );
-    if (missingPersonas.length > 0) {
-      for (const p of missingPersonas) {
-        await store.savePersonaConfig(p);
-      }
-      app.log.info(`增量同步：补充 ${missingPersonas.length} 个陪练员（共 ${existingPersonas.length + missingPersonas.length} 个）`);
-    }
     // 评分标准库：仅在库为空时灌入种子；之后用户在库中的增删改归用户所有，启动同步不恢复、不覆盖
     const existingScoreItems = await store.listScoreItemDefs(DEFAULT_TENANT);
     if (existingScoreItems.length === 0) {

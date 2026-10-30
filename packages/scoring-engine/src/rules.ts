@@ -133,6 +133,32 @@ export function runRuleChecks(
     }
   }
 
+  // ---- 语音声学特征聚合：各学员语音轮的录音分析，按实际说话时长加权 ----
+  const voiceTurns = traineeTurns.filter((t) => t.voiceFeatures);
+  let voice: ScoreReport['ruleStats']['voice'];
+  if (voiceTurns.length > 0) {
+    const totalVoicedMs = voiceTurns.reduce((sum, t) => sum + (t.voiceFeatures?.voicedMs ?? 0), 0);
+    if (totalVoicedMs > 0) {
+      const wavg = (pick: (f: NonNullable<(typeof voiceTurns)[number]['voiceFeatures']>) => number) =>
+        voiceTurns.reduce((sum, t) => sum + pick(t.voiceFeatures!) * t.voiceFeatures!.voicedMs, 0) / totalVoicedMs;
+      const pitchTurns = voiceTurns.filter((t) => t.voiceFeatures?.pitchVarSemitones != null);
+      const pitchMs = pitchTurns.reduce((sum, t) => sum + t.voiceFeatures!.voicedMs, 0);
+      const voiceChars = voiceTurns.reduce((sum, t) => sum + t.text.length, 0);
+      voice = {
+        turns: voiceTurns.length,
+        avgLoudnessDbfs: Math.round(wavg((f) => f.avgLoudnessDbfs) * 10) / 10,
+        loudnessRangeDb: Math.round(wavg((f) => f.loudnessRangeDb) * 10) / 10,
+        pitchVarSemitones:
+          pitchMs > 0
+            ? Math.round(
+                (pitchTurns.reduce((sum, t) => sum + t.voiceFeatures!.pitchVarSemitones! * t.voiceFeatures!.voicedMs, 0) / pitchMs) * 100
+              ) / 100
+            : null,
+        speechRateCpm: Math.round(voiceChars / (totalVoicedMs / 60000)),
+      };
+    }
+  }
+
   return {
     violations,
     stats: {
@@ -143,6 +169,7 @@ export function runRuleChecks(
       talkRatio,
       avgSpeechRate,
       pauseCount,
+      ...(voice ? { voice } : {}),
     },
   };
 }

@@ -16,6 +16,18 @@ export interface EmotionSnapshot {
   triggeredBy?: string[];
 }
 
+/** 学员单轮语音的声学特征（服务端对录音 PCM 的确定性分析，供语声语调类评分标准量化判定） */
+export interface VoiceFeatures {
+  /** 平均响度 dBFS（说话段 RMS 均值） */
+  avgLoudnessDbfs: number;
+  /** 响度动态范围 dB（说话段 P90 与 P10 之差，反映强弱起伏） */
+  loudnessRangeDb: number;
+  /** 音调变化幅度（F0 半音标准差；音频过短或无法测音调时为 null） */
+  pitchVarSemitones: number | null;
+  /** 实际说话时长 ms（剔除静音段），真实语速 = 字数 / voicedMs */
+  voicedMs: number;
+}
+
 export interface TranscriptTurn {
   seq: number;
   speaker: Speaker;
@@ -26,6 +38,8 @@ export interface TranscriptTurn {
   emotion?: EmotionSnapshot;
   /** 该轮是否使用了提示（coach 轮） */
   isHint?: boolean;
+  /** 学员语音轮的声学特征（文字轮/未开启语音分析时无此字段） */
+  voiceFeatures?: VoiceFeatures;
 }
 
 export interface Session {

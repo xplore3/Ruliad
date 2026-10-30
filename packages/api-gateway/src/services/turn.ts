@@ -1,4 +1,4 @@
-import { EventTypes, type QuizQuestion, type QuizQuestionPublic, type Scenario, type ScenarioGuidance, type Session, type TranscriptTurn } from '@grasp-mvp/core';
+import { EventTypes, type PersonaConfig, type QuizQuestion, type QuizQuestionPublic, type Scenario, type ScenarioGuidance, type Session, type TranscriptTurn, type VoiceFeatures } from '@grasp-mvp/core';
 import { bandFor, checkConsistency, compilePersona, EmotionTracker, PersonaActor } from '@grasp-mvp/role-engine';
 import type { RouteContext } from '../ctx.js';
 import { mkEvent } from '../events.js';
@@ -43,15 +43,31 @@ export async function effectiveCountdownSeconds(
   return countdownSecondsOf(scenario, guidance);
 }
 
-/** 加载 persona 运行时（编译后的 bundle + 原始配置 + 演练剧本 + 本场客户类型），配置缺失返回 undefined */
+/** 中性兜底陪练员：陪练员库为空或场景未绑定时使用——演练行为完全由场景设定与演练剧本驱动，不携带任何角色库设定 */
+function fallbackPersona(scenario: Scenario): PersonaConfig {
+  return {
+    id: 'persona-neutral-fallback',
+    tenantId: scenario.tenantId,
+    version: 1,
+    name: '客户',
+    background: '本场演练的客户，行为完全由场景设定与演练剧本决定。',
+    elementIds: [],
+    behaviorBands: [
+      { minArousal: 0, maxArousal: 1, key: 'neutral', instruction: '按演练剧本与对话情境自然反应' },
+    ],
+    knowledgeBoundary: { mustNotKnow: [], loadedKnowledge: [] },
+  };
+}
+
+/** 加载 persona 运行时（编译后的 bundle + 原始配置 + 演练剧本 + 本场客户类型）；陪练员缺失时用中性兜底角色，保证演练只受场景与剧本影响 */
 export async function loadRuntime(
   ctx: RouteContext,
   scenario: Scenario,
   difficulty?: number,
   archetype?: 'uninterested' | 'interested'
 ) {
-  const personaConfig = await ctx.store.getPersonaConfig(scenario.personaConfigId);
-  if (!personaConfig) return undefined;
+  const personaConfig =
+    (await ctx.store.getPersonaConfig(scenario.personaConfigId)) ?? fallbackPersona(scenario);
   const elements = await ctx.store.listElements({});
 
   // 加载产品知识库：场景级 productKBId 优先于陪练员级 productKBId
@@ -177,7 +193,8 @@ export async function runTurn(
   ctx: RouteContext,
   session: Session,
   scenario: Scenario,
-  text: string
+  text: string,
+  voiceFeatures?: VoiceFeatures
 ): Promise<TurnResult | null> {
   const { store, gateway } = ctx;
   const isSystemGreeting = text === SYSTEM_GREETING_TOKEN;
@@ -195,6 +212,7 @@ export async function runTurn(
     speaker: 'trainee',
     text: displayText,
     at: now,
+    ...(voiceFeatures && !isSystemGreeting ? { voiceFeatures } : {}),
   };
   const guidance = await store.getScenarioGuidance(scenario.id).catch(() => undefined);
   const totalSeconds = countdownSecondsOf(scenario, guidance);

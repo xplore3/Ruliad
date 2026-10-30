@@ -42,6 +42,64 @@ function gatewayWith(output: string): LLMGateway {
   return { forTask: () => new MockLLMProvider(handler) };
 }
 
+describe('judgeItem 定量计分（quantitativeRule）', () => {
+  const quantDef: ScoreItemDef = {
+    ...def,
+    id: 'item-quant',
+    name: '语速调',
+    scoringMode: 'score',
+    quantitativeRule: {
+      blocks: [
+        {
+          label: '激情度',
+          maxScore: 40,
+          metrics: [
+            { metric: 'pitchVarSemitones', bands: [{ min: 3, score: 100 }, { min: 1, max: 3, score: 40 }, { max: 1, score: 10 }] },
+            { metric: 'loudnessRangeDb', bands: [{ min: 7, score: 100 }, { max: 7, score: 20 }] },
+          ],
+        },
+        {
+          label: '语速',
+          maxScore: 20,
+          metrics: [
+            { metric: 'speechRateCpm', bands: [{ min: 240, max: 300, score: 100 }, { min: 320, score: 15 }, { score: 50 }] },
+          ],
+        },
+      ],
+    },
+  };
+  const voiceStats = {
+    interruptions: 0,
+    fillerCounts: {},
+    coverageHits: [],
+    coverageMisses: [],
+    talkRatio: 0.5,
+    avgSpeechRate: 200,
+    pauseCount: 0,
+    voice: { turns: 2, avgLoudnessDbfs: -24, loudnessRangeDb: 8, pitchVarSemitones: 3.4, speechRateCpm: 270 },
+  };
+
+  it('分数由查表确定，LLM 输出无法改分', async () => {
+    // LLM 试图给 999 分，结果仍应按表计算：激情度 (100+100)/2→40，语速 270→100→20，总分 60
+    const gateway = gatewayWith(JSON.stringify({ rationale: '表现有激情', betterScript: '', score: 999 }));
+    const result = await judgeItem(quantDef, session, gateway, undefined, undefined, voiceStats);
+    expect(result.score).toBe(60);
+    expect(result.rationale).toContain('表现有激情');
+    expect(result.rationale).toContain('激情度40/40');
+  });
+
+  it('缺声学数据时按中间分计并注明', async () => {
+    const gateway = gatewayWith('不是 JSON'); // LLM 也失败 → 回退计表明细
+    const result = await judgeItem(quantDef, session, gateway, undefined, undefined, {
+      ...voiceStats,
+      voice: undefined,
+    });
+    // 全部 metric 无数据：每块 50% → 40×0.5 + 20×0.5 = 30
+    expect(result.score).toBe(30);
+    expect(result.rationale).toContain('无数据');
+  });
+});
+
 describe('judgeItem betterScript', () => {
   it('judge 输出含 betterScript 时透传到结果', async () => {
     const gateway = gatewayWith(

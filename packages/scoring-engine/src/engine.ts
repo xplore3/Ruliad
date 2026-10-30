@@ -153,6 +153,7 @@ export async function scoreSession(
     passed,
     fatalViolation,
     items,
+    defs: relevantDefs,
     fillerTotal,
   });
 
