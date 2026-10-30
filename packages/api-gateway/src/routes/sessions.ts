@@ -6,6 +6,7 @@ import { scoreSession } from '@grasp-mvp/scoring-engine';
 import type { RouteContext } from '../ctx.js';
 import { mkEvent } from '../events.js';
 import { effectiveCountdownSeconds, loadRuntime, remainingSeconds, runTurn } from '../services/turn.js';
+import { decideOpening } from '../services/drill.js';
 import { personaVoice } from './voice.js';
 import { readFramesAsDataUrls } from '../services/video-store.js';
 
@@ -271,24 +272,37 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
 
       const runtime = await loadRuntime(ctx, scenario);
       if (!runtime) return reply.code(500).send({ error: '场景对应的 persona 配置缺失' });
-      const { personaConfig, bundle } = runtime;
+      const { personaConfig, bundle, drillScript } = runtime;
 
-      const actor = new PersonaActor(gateway.forTask('actor'));
+      // 演练开场：有剧本按剧本确定性判定谁先开口，判定不了由 LLM 按剧本/场景设定决定；学员先开口则不留客户开场白
+      const decision = await decideOpening(gateway, bundle, !!drillScript, drillScript?.content);
+      const openingText =
+        decision.firstSpeaker === 'persona'
+          ? decision.openingLine ??
+            (await new PersonaActor(gateway.forTask('actor')).reply(
+              bundle,
+              bandFor(bundle.dynamics.baseArousal, bundle.behaviorBands),
+              [],
+              coachIntensity
+            ))
+          : undefined;
       const initialBand = bandFor(bundle.dynamics.baseArousal, bundle.behaviorBands);
-      const openingText = await actor.reply(bundle, initialBand, [], coachIntensity);
 
       const prevCompleted = (await store.listSessions({ userId: request.userId, scenarioId }))
         .filter((s) => s.status === 'completed')
         .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
 
       const now = new Date().toISOString();
-      const openingTurn: TranscriptTurn = {
-        seq: 1,
-        speaker: 'persona',
-        text: openingText,
-        at: now,
-        emotion: { arousal: bundle.dynamics.baseArousal, bandKey: initialBand.key },
-      };
+      // 客户先开口：开场白作第 1 轮；学员先开口：transcript 为空，等待学员发起
+      const openingTurn: TranscriptTurn | undefined = openingText
+        ? {
+            seq: 1,
+            speaker: 'persona',
+            text: openingText,
+            at: now,
+            emotion: { arousal: bundle.dynamics.baseArousal, bandKey: initialBand.key },
+          }
+        : undefined;
       const session: Session = {
         id: randomUUID(),
         tenantId: request.tenantId,
@@ -296,10 +310,10 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
         scenarioId,
         mode,
         status: 'active',
-        transcript: [openingTurn],
-        emotionTrace: [
-          { seq: 1, arousal: bundle.dynamics.baseArousal, bandKey: initialBand.key, at: now },
-        ],
+        transcript: openingTurn ? [openingTurn] : [],
+        emotionTrace: openingTurn
+          ? [{ seq: 1, arousal: bundle.dynamics.baseArousal, bandKey: initialBand.key, at: now }]
+          : [],
         hintsUsed: 0,
         prevSessionId: prevCompleted?.id,
         examWindowId: mode === 'exam' ? examWindowId : undefined,

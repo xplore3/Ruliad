@@ -1,7 +1,31 @@
+import type { ScoreCategory, ScoreItemDef } from '@grasp-mvp/core';
 import type { SeedData } from './store.js';
 import { hashPassword } from './password.js';
 
 const TENANT = 'tenant-demo';
+
+/** 其余三类相对底版（咨询接待）的评分标准 id 前缀 */
+const SCORE_CATEGORY_PREFIX: [ScoreCategory, string][] = [
+  ['地推', 'dt'],
+  ['电销', 'dx'],
+  ['现场成交', 'xc'],
+];
+
+/**
+ * 评分标准四分类：底版 7 条归「咨询接待」，地推/电销/现场成交各复制一套（id 加前缀），
+ * 内容初始一致，四类在评分标准库中独立增删维护。
+ */
+function withScoreItemCategories(base: ScoreItemDef[]): ScoreItemDef[] {
+  const marked = base.map((item) => ({ ...item, category: '咨询接待' as const }));
+  const copies = SCORE_CATEGORY_PREFIX.flatMap(([category, prefix]) =>
+    marked.map((item) => ({
+      ...item,
+      id: item.id.replace(/^item-/, `item-${prefix}-`),
+      category,
+    }))
+  );
+  return [...marked, ...copies];
+}
 
 /** 华东一区考核名单 23 人（5 名主管团队成员 + 18 名新人班学员） */
 export const Q3_ROSTER_USER_IDS = [
@@ -522,6 +546,7 @@ export function buildSeedData(): SeedData {
       {
         id: 'scenario-first-visit',
         tenantId: TENANT,
+        category: '咨询接待',
         name: '首访破冰·焦虑家长',
         personaConfigId: 'persona-chen',
         skillPointIds: ['sp-icebreak', 'sp-need'],
@@ -563,6 +588,7 @@ export function buildSeedData(): SeedData {
       {
         id: 'scenario-price-objection',
         tenantId: TENANT,
+        category: '现场成交',
         name: '价格异议·比价家长',
         personaConfigId: 'persona-liu',
         skillPointIds: ['sp-value', 'sp-objection'],
@@ -604,6 +630,7 @@ export function buildSeedData(): SeedData {
       {
         id: 'scenario-push-forward',
         tenantId: TENANT,
+        category: '现场成交',
         name: '「再考虑一下」推进',
         personaConfigId: 'persona-zhao',
         skillPointIds: ['sp-closing', 'sp-objection'],
@@ -645,6 +672,7 @@ export function buildSeedData(): SeedData {
       {
         id: 'scenario-compliance',
         tenantId: TENANT,
+        category: '咨询接待',
         name: '合规效果承诺表达',
         personaConfigId: 'persona-chen',
         skillPointIds: ['sp-compliance'],
@@ -687,6 +715,7 @@ export function buildSeedData(): SeedData {
       {
         id: 'scenario-drill-ground-push',
         tenantId: TENANT,
+        category: '地推',
         name: '实战·地推陌生破冰',
         personaConfigId: 'persona-zhao',
         skillPointIds: ['sp-icebreak'],
@@ -702,6 +731,7 @@ export function buildSeedData(): SeedData {
       {
         id: 'scenario-drill-phone-sales',
         tenantId: TENANT,
+        category: '电销',
         name: '实战·电话外呼开场',
         personaConfigId: 'persona-liu',
         skillPointIds: ['sp-icebreak', 'sp-need'],
@@ -717,6 +747,7 @@ export function buildSeedData(): SeedData {
       {
         id: 'scenario-drill-inquiry',
         tenantId: TENANT,
+        category: '咨询接待',
         name: '实战·客户来电咨询',
         personaConfigId: 'persona-chen',
         skillPointIds: ['sp-need', 'sp-value'],
@@ -732,6 +763,7 @@ export function buildSeedData(): SeedData {
       {
         id: 'scenario-drill-negotiation',
         tenantId: TENANT,
+        category: '现场成交',
         name: '实战·成交价格谈判',
         personaConfigId: 'persona-liu',
         skillPointIds: ['sp-closing', 'sp-objection'],
@@ -759,7 +791,7 @@ export function buildSeedData(): SeedData {
         assignedTeamIds: ['team-hd1-new'],
       },
     ],
-    scoreItemDefs: [
+    scoreItemDefs: withScoreItemCategories([
       {
         id: 'item-icebreak-1',
         tenantId: TENANT,
@@ -879,7 +911,7 @@ export function buildSeedData(): SeedData {
         layer: 'company',
         isObservation: false,
       },
-    ],
+    ]),
     goldenCases: [
       {
         id: 'golden-case-1',

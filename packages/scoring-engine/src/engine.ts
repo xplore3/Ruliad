@@ -39,7 +39,8 @@ export interface ScoreLogger {
 
 /**
  * 评分主流程：规则层 + 双 judge 评分标准 + 汇总报告。
- * 只评 defs 中属于 scenario.skillPointIds 的项；观察项进 items 但不计分。
+ * 评分标准选取：场景有 category 时评该分类库里的全部标准（未分类标准视为通用，一并纳入）；
+ * 场景无 category 的存量数据回退为只评 scenario.skillPointIds 覆盖的项。观察项进 items 但不计分。
  * options.videoFrames 存在时附带视频表现评审（videoReview，独立维度不计总分）。
  */
 export async function scoreSession(
@@ -51,7 +52,9 @@ export async function scoreSession(
 ): Promise<ScoreReport> {
   const { violations, stats } = runRuleChecks(session, scenario.coverageTopics ?? []);
 
-  const relevantDefs = defs.filter((d) => scenario.skillPointIds.includes(d.skillPointId));
+  const relevantDefs = scenario.category
+    ? defs.filter((d) => !d.category || d.category === scenario.category)
+    : defs.filter((d) => scenario.skillPointIds.includes(d.skillPointId));
 
   const startedAt = Date.now();
   const log = options.log;
@@ -68,7 +71,7 @@ export async function scoreSession(
   const items: ScoreItemResult[] = [];
   for (const [i, def] of relevantDefs.entries()) {
     const itemStart = Date.now();
-    const item = await judgeItem(def, session, gateway, scenario, options.scoringFocus);
+    const item = await judgeItem(def, session, gateway, scenario, options.scoringFocus, stats);
     log?.info(
       {
         sessionId: session.id,

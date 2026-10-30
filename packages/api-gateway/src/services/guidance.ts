@@ -64,6 +64,8 @@ function fallbackExperienced(answer: string): boolean {
 /**
  * 判断学员是否有相关经验（问题数量按新手指引流程配置，不写死）。
  * 全部问题都答"做过"才返回 true；任一题"没做过"或缺答 → false。
+ * 语音识别对错字/噪声敏感：LLM 判"没做过"但回答中含明确肯定表述（"做过/干过/有经验"且无否定词）时，
+ * 以关键词判定为准——避免有经验学员被误判送进示范模式。
  */
 export async function judgeExperience(
   gateway: LLMGateway,
@@ -78,7 +80,9 @@ export async function judgeExperience(
           role: 'user',
           content: [
             '你是销售培训的新手资格审核员。下面是学员对资格提问的语音回答（经语音识别，可能有错字）。',
-            '请判断每个问题学员是否表达"做过/有相关经验"。回答含糊、答非所问、回避问题都视为没做过。',
+            '请判断每个问题学员是否表达"做过/有相关经验"。',
+            '回答中出现"做过/干过/有经验"等肯定表述（即使带语气词、不够完整）即视为做过；',
+            '只有明确表示没做过、不了解，或答非所问、回避问题，才视为没做过。',
             qaLines,
             `只输出 JSON：{"results": [true 或 false, ...]}（数组按问题顺序，共 ${qa.length} 项）`,
             '不要输出任何其他内容。',
@@ -89,8 +93,10 @@ export async function judgeExperience(
     );
     const parsed = JSON.parse(extractJson(result.content)) as { results?: unknown };
     const results = Array.isArray(parsed.results) ? parsed.results : [];
-    // 逐题解析，缺位/非布尔走关键词兜底
-    return qa.every((x, i) => (typeof results[i] === 'boolean' ? results[i] : fallbackExperienced(x.answer)));
+    // 逐题解析：LLM 结果优先，但关键词识别出明确肯定表述时覆盖 LLM 的保守误判；缺位/非布尔走关键词兜底
+    return qa.every((x, i) =>
+      (typeof results[i] === 'boolean' ? results[i] : false) || fallbackExperienced(x.answer)
+    );
   } catch {
     // LLM 失败/解析失败：逐题关键词兜底，全部判"做过"才算有经验
     return qa.every((x) => fallbackExperienced(x.answer));

@@ -4,6 +4,7 @@ import type {
   Scenario,
   ScoreItemDef,
   ScoreItemResult,
+  ScoreReport,
   Session,
 } from '@grasp-mvp/core';
 
@@ -15,8 +16,30 @@ interface JudgeParsed {
   betterScript: string;
 }
 
-/** 组装 judge prompt：评分标准定义 + 档位 JSON + 场景考核点 + 带 seq 的转写（+ 可选的重点评分维度） */
-function buildJudgePrompt(def: ScoreItemDef, session: Session, scenario?: Scenario, scoringFocus?: string[]): string {
+/** 语音表现统计段落：语速/停顿/口头禅等确定性分析，供语声语调类评分标准判定（LLM 无法从文字转写感知这些维度） */
+function buildStatsLines(stats: ScoreReport['ruleStats']): string[] {
+  const fillers =
+    Object.entries(stats.fillerCounts)
+      .map(([w, n]) => `${w}×${n}`)
+      .join('、') || '无';
+  return [
+    '语音表现统计（来自本场录音的确定性分析，判定语速/语调/流畅度类标准时必须以此为依据，不要仅凭对话文字猜测）：',
+    `- 对话整体节奏：约 ${stats.avgSpeechRate} 字/分钟（含停顿与倾听时间的整体速率；流畅对练通常 150-250，数值越低节奏越拖沓）`,
+    `- 明显停顿（学员应答前静默超过 3 秒）：${stats.pauseCount} 次`,
+    `- 口头禅/填充词：${fillers}`,
+    `- 学员发言占比：${Math.round(stats.talkRatio * 100)}%`,
+    `- 打断客户次数（启发式估算）：${stats.interruptions} 次`,
+  ];
+}
+
+/** 组装 judge prompt：评分标准定义 + 档位 JSON + 场景考核点 + 语音表现统计 + 带 seq 的转写（+ 可选的重点评分维度） */
+function buildJudgePrompt(
+  def: ScoreItemDef,
+  session: Session,
+  scenario?: Scenario,
+  scoringFocus?: string[],
+  stats?: ScoreReport['ruleStats']
+): string {
   const transcriptLines = session.transcript
     .filter((t) => t.speaker !== 'coach')
     .map((t) => `[${t.seq}] ${t.speaker === 'trainee' ? '学员' : '客户'}：${t.text}`)
@@ -35,6 +58,7 @@ function buildJudgePrompt(def: ScoreItemDef, session: Session, scenario?: Scenar
     `行为锚定：${def.behaviorAnchor}`,
     ...scenarioLines,
     `可选档位（JSON）：${JSON.stringify(def.levels)}`,
+    ...(stats ? buildStatsLines(stats) : []),
     '对话记录：',
     transcriptLines,
     '请只输出 JSON：{"levelKey":"档位key","quote":"引用原文","quoteTurnSeq":数字,"rationale":"判定理由","betterScript":"更优话术示范"}',
@@ -91,9 +115,10 @@ export async function judgeItem(
   session: Session,
   gateway: LLMGateway,
   scenario?: Scenario,
-  scoringFocus?: string[]
+  scoringFocus?: string[],
+  stats?: ScoreReport['ruleStats']
 ): Promise<ScoreItemResult> {
-  const prompt = buildJudgePrompt(def, session, scenario, scoringFocus);
+  const prompt = buildJudgePrompt(def, session, scenario, scoringFocus, stats);
   const primary = await runJudge(gateway.forTask('judge'), prompt, def);
   const secondary = await runJudge(gateway.forTask('judge_secondary'), prompt, def);
 

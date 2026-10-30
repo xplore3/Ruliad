@@ -152,6 +152,35 @@ describe('scoreSession', () => {
     expect(report.items.find((i) => i.itemId === 'item-obs')!.isObservation).toBe(true);
   });
 
+  it('场景有 category 时评该分类库全部标准（不受技能点限制）；无 category 时按技能点过滤', async () => {
+    const categorized: ScoreItemDef[] = [
+      { ...defs[0], id: 'item-ground-1', category: '地推' },
+      { ...defs[0], id: 'item-ground-2', skillPointId: 'sp-closing', category: '地推' },
+      { ...defs[0], id: 'item-reception-1', category: '咨询接待' },
+      { ...defs[0], id: 'item-legacy' },
+    ];
+    const withCategory = await scoreSession(
+      session,
+      { ...scenario, category: '地推' },
+      categorized,
+      gateway
+    );
+    // 地推分类全部纳入（item-ground-2 虽属其他技能点也评），未分类视为通用一并纳入；其他分类排除
+    expect(withCategory.items.map((i) => i.itemId).sort()).toEqual([
+      'item-ground-1',
+      'item-ground-2',
+      'item-legacy',
+    ]);
+
+    const withoutCategory = await scoreSession(session, scenario, categorized, gateway);
+    // 无 category：只按技能点过滤（item-ground-2 属 sp-closing，不在场景技能点内）
+    expect(withoutCategory.items.map((i) => i.itemId).sort()).toEqual([
+      'item-ground-1',
+      'item-legacy',
+      'item-reception-1',
+    ]);
+  });
+
   it('skillPointNames 选项把技能点 id 映射为名称', async () => {
     const report = await scoreSession(session, scenario, defs, gateway, {
       skillPointNames: { 'sp-objection': '异议处理' },

@@ -281,7 +281,7 @@ export default function Practice() {
         // 初始开场白（seq:1 的客户第一句话）不进对话记录，从用户的实际对练开始展示
         setMessages((session.transcript ?? []).filter((t) => !(t.seq === 1 && t.speaker === 'persona')));
         setHintsRemaining(Math.max(0, MAX_HINTS - (session.hintsUsed ?? 0)));
-        applyTurnMeta(remainingSeconds, remainingSeconds === 0);
+        applyTurnMeta(remainingSeconds);
         const lastEmotion = session.emotionTrace?.[session.emotionTrace.length - 1];
         if (lastEmotion?.bandKey) setBandKey(lastEmotion.bandKey);
         setLoaded(true);
@@ -289,9 +289,6 @@ export default function Practice() {
         if (session.status !== 'active') {
           setPhaseBoth('live');
           setStatusBoth('ended');
-        } else if (remainingSeconds === 0) {
-          setPhaseBoth('live');
-          setStatusBoth('time_up');
         } else if (session.pausedAt) {
           // 刷新恢复：会话处于暂停中
           setPhaseBoth('live');
@@ -328,17 +325,8 @@ export default function Practice() {
   useEffect(() => {
     if (timerIdle) return;
     const timer = setInterval(() => {
-      setRemaining((prev) => {
-        if (prev <= 1) {
-          if (!timeUpRef.current) {
-            timeUpRef.current = true;
-            setTimeUp(true);
-            setStatusBoth('time_up');
-          }
-          return 0;
-        }
-        return prev - 1;
-      });
+      // 倒计时只作参考显示：到 0 不强制结束（结束时机由 AI 判断，见 timeUp 信号）；对话可继续
+      setRemaining((prev) => (prev <= 1 ? 0 : prev - 1));
     }, 1000);
     return () => clearInterval(timer);
   }, [timerIdle]);
@@ -794,6 +782,14 @@ export default function Practice() {
       if (q < totalQ) {
         await askQualifyQuestion(q + 1);
       } else if (res.experienced) {
+        // 有经验：不看示范，直接进模拟演练（学员扮销售、AI 扮客户）；先口播说明，避免学员误以为进了示范模式
+        try {
+          const clip = await ttsClip(sessionId, '好的，你有相关经验，那我们跳过示范，直接进入模拟演练。', 'coach');
+          await playClip(clip.audioBase64);
+        } catch {
+          /* 提示音频失败不影响进入练习 */
+        }
+        if (phaseRef.current !== 'qualify') return;
         startLive();
       } else {
         await beginGuide(1);
@@ -1485,7 +1481,7 @@ export default function Practice() {
               )}
               {inLive && status === 'user_turn' && !timeUp && (
                 <div className="statusbar statusbar-coral">
-                  <span className="pulse-dot" />🎙 {isRecording ? '正在聆听，再点一次结束本轮' : '轮到你了'}
+                  <span className="pulse-dot" />🎙 {isRecording ? '正在聆听，再点一次结束本轮' : messages.length === 0 ? '轮到你了 · 请你先开口' : '轮到你了'}
                   {isVoice && (
                     <span className="ml-auto shrink-0 text-[12px] font-medium opacity-75">
                       {wsReady ? '语音识别与 AI 已就绪' : '语音通道连接中…'}
@@ -1497,7 +1493,7 @@ export default function Practice() {
                 <div className="statusbar statusbar-gray">⏸ 已暂停，倒计时已冻结 — 点击下方 ▶ 继续</div>
               )}
               {inLive && timeUp && status !== 'evaluating' && status !== 'ended' && (
-                <div className="statusbar statusbar-coral">⏰ 时间到，请点击右侧「结束并评分」查看结果</div>
+                <div className="statusbar statusbar-coral">✅ 本场演练已结束，请点击右侧「结束并评分」查看结果</div>
               )}
               {status === 'ended' && (
                 <div className="statusbar statusbar-gray">本场练习已结束</div>
@@ -1756,7 +1752,7 @@ export default function Practice() {
                 )}
                 {inLive && (status === 'time_up' || status === 'ended' || status === 'failed') && (
                   <div className="text-[14px] font-semibold opacity-90">
-                    {status === 'time_up' ? '⏰ 本场时间已到' : status === 'ended' ? '本场练习已结束' : '会话加载失败'}
+                    {status === 'time_up' ? '✅ 本场演练已结束' : status === 'ended' ? '本场练习已结束' : '会话加载失败'}
                   </div>
                 )}
                 {status === 'evaluating' && (
@@ -1897,7 +1893,7 @@ export default function Practice() {
                       {status === 'paused'
                         ? '点击 ▶ 继续练习'
                         : timeUp
-                          ? '时间已到，请结束练习'
+                          ? '本场演练已结束，请结束练习'
                           : autoMic
                             ? '轮到你时会自动开麦，AI 播报中点击可打断插话'
                             : 'AI 播报中点击麦克风可打断插话'}
@@ -1911,7 +1907,7 @@ export default function Practice() {
                 <div className="textin">
                   <input
                     className="input"
-                    placeholder={status === 'paused' ? '已暂停' : timeUp ? '时间已到，请结束练习' : '输入你的回复…'}
+                    placeholder={status === 'paused' ? '已暂停' : timeUp ? '本场演练已结束，请结束练习' : '输入你的回复…'}
                     value={textInput}
                     onChange={(e) => setTextInput(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleSendText()}

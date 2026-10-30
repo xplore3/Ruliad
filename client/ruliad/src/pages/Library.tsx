@@ -6,12 +6,14 @@ import {
   batchCreateDemoFaqs,
   createDemoFaq,
   createDemoScript,
+  createDrillScript,
   createGoldenCase,
   createScenario,
   createScoreItem,
   deleteBriefingStandard,
   deleteDemoFaq,
   deleteDemoScript,
+  deleteDrillScript,
   deleteGoldenCase,
   deleteRealismStandard,
   deleteScenario,
@@ -25,6 +27,7 @@ import {
   listBriefingStandards,
   listDemoFaqs,
   listDemoScripts,
+  listDrillScripts,
   listGoldenCases,
   listRealismStandards,
   listScenarioGuidances,
@@ -34,6 +37,7 @@ import {
   saveScenarioGuidance,
   updateDemoFaq,
   updateDemoScript,
+  updateDrillScript,
   updateGoldenCase,
   updateScenario,
   updateScoreItem,
@@ -41,6 +45,7 @@ import {
 import type {
   DemoFaq,
   DemoScript,
+  DrillScript,
   GoldenCase,
   PersonaConfig,
   Scenario,
@@ -49,6 +54,7 @@ import type {
   ScoreLevel,
   SkillPoint,
 } from '../types';
+import { SCORE_CATEGORIES } from '../types';
 import type {
   BriefingStandard,
   DifficultyLevel,
@@ -515,7 +521,7 @@ function ExpectedEditor({ expected, onChange, scoreItems }: {
               <td>
                 <select className="lib-cell" value={e.itemId} onChange={(ev) => update(idx, { itemId: ev.target.value })}>
                   <option value="">选择评分标准…</option>
-                  {scoreItems.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  {scoreItems.map((s) => <option key={s.id} value={s.id}>{s.category ? `[${s.category}] ` : ''}{s.name}</option>)}
                   {e.itemId && !scoreItems.some((s) => s.id === e.itemId) && <option value={e.itemId}>{e.itemId}（未匹配）</option>}
                 </select>
               </td>
@@ -578,12 +584,13 @@ function ParticipantsEditor({ participants, onChange }: {
 
 /** ===== 页面 ===== */
 
-type TabKey = 'scenarios' | 'questions' | 'demo-scripts' | 'score-items' | 'golden-cases' | 'analysis-standards' | 'realism-standards' | 'guidance';
+type TabKey = 'scenarios' | 'questions' | 'demo-scripts' | 'drill-scripts' | 'score-items' | 'golden-cases' | 'analysis-standards' | 'realism-standards' | 'guidance';
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'scenarios', label: '对练场景库' },
   { key: 'questions', label: '示范问答库' },
   { key: 'demo-scripts', label: '示范剧本库' },
+  { key: 'drill-scripts', label: '演练剧本库' },
   { key: 'score-items', label: '评分标准库' },
   { key: 'golden-cases', label: '评分回归案例库' },
   { key: 'analysis-standards', label: '讲解标准库' },
@@ -678,6 +685,7 @@ export default function Library() {
       )}
       {tab === 'questions' && <DemoFaqTab skillPoints={skillPoints} setNotice={setNotice} />}
       {tab === 'demo-scripts' && <DemoScriptTab setNotice={setNotice} />}
+      {tab === 'drill-scripts' && <DrillScriptTab setNotice={setNotice} />}
       {tab === 'score-items' && (
         <ScoreItemTab skillPoints={skillPoints} setNotice={setNotice} onChanged={() => listScoreItems().then((r) => setScoreItems(r.items)).catch(() => {})} />
       )}
@@ -1799,7 +1807,7 @@ const DEFAULT_LEVELS: ScoreLevel[] = [
 
 const LAYER_LABELS: Record<ScoreItemDef['layer'], string> = { company: '公司层', team: '团队层', personal: '个人层' };
 
-const SCORE_ITEM_HEADERS = ['名称', '技能点', '层级', '权重', '行为锚定', '判定Prompt'];
+const SCORE_ITEM_HEADERS = ['名称', '分类', '技能点', '层级', '权重', '行为锚定', '判定Prompt'];
 
 type ScoreItemRowData = Omit<ScoreItemDef, 'id' | 'tenantId'> & { id?: string };
 
@@ -1815,6 +1823,7 @@ function ScoreItemTab({ skillPoints, setNotice, onChanged }: {
   const [panel, setPanel] = useState<'extract' | 'paste' | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [detailKey, setDetailKey] = useState<string | null>(null);
+  const [branch, setBranch] = useState<string>('全部');
 
   const reload = () => {
     setLoading(true);
@@ -1877,6 +1886,9 @@ function ScoreItemTab({ skillPoints, setNotice, onChanged }: {
         })).filter((lv) => lv.key && lv.label)
       : [];
     const layer = r.layer === 'team' || r.layer === 'personal' ? r.layer : 'company';
+    const category = SCORE_CATEGORIES.includes(r.category as ScoreItemDef['category'] & string)
+      ? (r.category as ScoreItemDef['category'])
+      : undefined;
     return {
       data: {
         name: String(r.name ?? ''),
@@ -1887,6 +1899,7 @@ function ScoreItemTab({ skillPoints, setNotice, onChanged }: {
         layer,
         isObservation: r.isObservation === true,
         levels: levels.length > 0 ? levels : DEFAULT_LEVELS,
+        category,
       },
       warn: warn.length > 0 ? warn : undefined,
     };
@@ -1895,18 +1908,24 @@ function ScoreItemTab({ skillPoints, setNotice, onChanged }: {
   const mapPasted = (cells: string[][]): { data: ScoreItemRowData; warn?: string[] }[] =>
     cells.map((c) => {
       const warn: string[] = [];
-      const sp = c[1] ? skillPoints.find((s) => s.name === c[1]) : undefined;
-      if (c[1] && !sp) warn.push(`技能点「${c[1]}」未匹配，请手动选择`);
-      const layerText = c[2] ?? '';
+      const categoryText = (c[1] ?? '').trim();
+      const category = SCORE_CATEGORIES.includes(categoryText as ScoreItemDef['category'] & string)
+        ? (categoryText as ScoreItemDef['category'])
+        : undefined;
+      if (categoryText && !category) warn.push(`分类「${categoryText}」未匹配，请手动选择`);
+      const sp = c[2] ? skillPoints.find((s) => s.name === c[2]) : undefined;
+      if (c[2] && !sp) warn.push(`技能点「${c[2]}」未匹配，请手动选择`);
+      const layerText = c[3] ?? '';
       const layer: ScoreItemDef['layer'] = /团队/.test(layerText) ? 'team' : /个人/.test(layerText) ? 'personal' : 'company';
       return {
         data: {
           name: c[0] ?? '',
+          category,
           skillPointId: sp?.id ?? '',
           layer,
-          weight: num(c[3]) ?? 1,
-          behaviorAnchor: c[4] ?? '',
-          judgePrompt: c[5] ?? '',
+          weight: num(c[4]) ?? 1,
+          behaviorAnchor: c[5] ?? '',
+          judgePrompt: c[6] ?? '',
           isObservation: false,
           levels: DEFAULT_LEVELS,
         },
@@ -1916,33 +1935,52 @@ function ScoreItemTab({ skillPoints, setNotice, onChanged }: {
 
   const detailRow = rows.find((r) => r.key === detailKey);
 
+  const visibleRows = rows.filter((r) => {
+    if (branch === '全部') return true;
+    if (branch === '未分类') return !r.data.category;
+    return r.data.category === branch;
+  });
+
   return (
     <div className="card lib-card">
       <Toolbar
         pendingCount={pendingCount}
         saving={saving}
-        onAdd={() => addDrafts([{ data: { name: '', skillPointId: '', behaviorAnchor: '', judgePrompt: '', weight: 1, layer: 'company', isObservation: false, levels: DEFAULT_LEVELS } }])}
+        onAdd={() => addDrafts([{ data: { name: '', skillPointId: '', behaviorAnchor: '', judgePrompt: '', weight: 1, layer: 'company', isObservation: false, levels: DEFAULT_LEVELS, ...(SCORE_CATEGORIES.includes(branch as ScoreItemDef['category'] & string) ? { category: branch as ScoreItemDef['category'] } : {}) } }])}
         onExtract={() => setPanel('extract')}
         onPaste={() => setPanel('paste')}
         onReload={reload}
         onSave={saveAll}
       />
+      <div className="pick" style={{ padding: '0 16px 12px' }}>
+        {['全部', ...SCORE_CATEGORIES, '未分类'].map((c) => (
+          <button key={c} className={`chip${branch === c ? ' on' : ''}`} onClick={() => setBranch(c)}>
+            {c === '全部' || c === '未分类' ? c : `${c}评分`}
+          </button>
+        ))}
+      </div>
       {loading ? (
         <p style={{ padding: 16, color: '#6B7280', fontSize: 13 }}>加载中…</p>
       ) : (
         <div className="lib-table-wrap">
           <table className="lib-table">
             <thead>
-              <tr><th>状态</th><th>名称</th><th>技能点</th><th>层级</th><th>权重</th><th>观察项</th><th>行为锚定</th><th>判定 Prompt</th><th>档位</th><th>操作</th></tr>
+              <tr><th>状态</th><th>名称</th><th>分类</th><th>技能点</th><th>层级</th><th>权重</th><th>观察项</th><th>行为锚定</th><th>判定 Prompt</th><th>档位</th><th>操作</th></tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {visibleRows.map((row) => (
                 <Fragment key={row.key}>
                   <tr className={`lib-row-${row.status}`}>
                     <td><RowStatusChip row={row} />{row.error && <div className="lib-err">{row.error}</div>}
                       {row.warn?.map((w) => <div key={w} className="lib-warn">{w}</div>)}
                     </td>
                     <td><CellInput value={row.data.name} onChange={(v) => updateRow(row.key, { name: v })} /></td>
+                    <td>
+                      <select className="lib-cell" value={row.data.category ?? ''} onChange={(e) => updateRow(row.key, { category: (e.target.value || undefined) as ScoreItemDef['category'] })}>
+                        <option value="">未分类</option>
+                        {SCORE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </td>
                     <td>
                       <select className="lib-cell" value={row.data.skillPointId} onChange={(e) => updateRow(row.key, { skillPointId: e.target.value })}>
                         <option value="">选择技能点…</option>
@@ -1976,7 +2014,7 @@ function ScoreItemTab({ skillPoints, setNotice, onChanged }: {
                   </tr>
                   {expanded === row.key && (
                     <tr className={`lib-row-${row.status}`}>
-                      <td colSpan={10}>
+                      <td colSpan={11}>
                         <div className="lib-sub">
                           <LevelsEditor levels={row.data.levels} onChange={(levels) => updateRow(row.key, { levels })} />
                         </div>
@@ -1993,7 +2031,7 @@ function ScoreItemTab({ skillPoints, setNotice, onChanged }: {
       {panel === 'paste' && (
         <PastePanel
           headers={SCORE_ITEM_HEADERS}
-          example={'名称\t技能点\t层级\t权重\t行为锚定\t判定Prompt\n破冰开场\t破冰\t公司层\t1\t开场30秒内说明来意\t判断学员是否在开场30秒内清晰说明来意'}
+          example={'名称\t分类\t技能点\t层级\t权重\t行为锚定\t判定Prompt\n破冰开场\t地推\t破冰\t公司层\t1\t开场30秒内说明来意\t判断学员是否在开场30秒内清晰说明来意'}
           onClose={() => setPanel(null)}
           onRows={(rs) => addDrafts(mapPasted(rs))}
         />
@@ -2006,6 +2044,12 @@ function ScoreItemTab({ skillPoints, setNotice, onChanged }: {
           onClose={() => setDetailKey(null)}
         >
           <Field label="名称" wide><MInput value={detailRow.data.name} onChange={(v) => updateRow(detailRow.key, { name: v })} /></Field>
+          <Field label="分类">
+            <select className="input" value={detailRow.data.category ?? ''} onChange={(e) => updateRow(detailRow.key, { category: (e.target.value || undefined) as ScoreItemDef['category'] })}>
+              <option value="">未分类</option>
+              {SCORE_CATEGORIES.map((c) => <option key={c} value={c}>{c}评分</option>)}
+            </select>
+          </Field>
           <Field label="所属技能点">
             <select className="input" value={detailRow.data.skillPointId} onChange={(e) => updateRow(detailRow.key, { skillPointId: e.target.value })}>
               <option value="">选择技能点…</option>
@@ -2643,6 +2687,105 @@ function GuidanceTab({ focus, onFocusHandled, onChanged, setNotice }: {
             )}
           </div>
         </DetailModal>
+      )}
+    </div>
+  );
+}
+
+/** ===== Tab：演练剧本库（整篇剧情文本，演练开始交给 LLM 理解，决定谁先开口、如何回应、何时结束） ===== */
+
+type DrillScriptRowData = { id?: string; name: string; category: string; content: string };
+
+function DrillScriptTab({ setNotice }: { setNotice: (s: string | null) => void }) {
+  const { rows, setRows, loadRows, addDrafts, updateRow, toggleDelete } = useRows<DrillScriptRowData>();
+  const [branch, setBranch] = useState<string>('全部');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const reload = () => {
+    setLoading(true);
+    listDrillScripts()
+      .then((r) => loadRows(r.items))
+      .catch((err) => setNotice(apiError(err, '加载演练剧本库失败')))
+      .finally(() => setLoading(false));
+  };
+  useEffect(reload, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handlers: SaveHandlers<DrillScriptRowData> = {
+    validate: (d) => {
+      if (!d.name?.trim()) return '名称必填';
+      if (!SCORE_CATEGORIES.includes(d.category as ScoreItemDef['category'] & string)) return '请选择分类';
+      if (!d.content?.trim()) return '剧本内容必填';
+      return null;
+    },
+    create: (d) => createDrillScript(d as Partial<DrillScript>).then((s) => ({ id: s.id, name: s.name, category: s.category, content: s.content })),
+    update: (id, d) => updateDrillScript(id, d as Partial<DrillScript>).then((s) => ({ id: s.id, name: s.name, category: s.category, content: s.content })),
+    remove: (id) => deleteDrillScript(id),
+  };
+
+  const pendingCount = rows.filter((r) => r.status !== 'clean').length;
+
+  const saveAll = async () => {
+    setSaving(true);
+    const { saved, failed } = await saveRows(rows, handlers, setRows);
+    setSaving(false);
+    setNotice(`保存完成：成功 ${saved} 项${failed ? `，失败 ${failed} 项（见行内提示）` : ''}`);
+    if (saved > 0) reload();
+  };
+
+  const visibleRows = rows.filter((r) => branch === '全部' || r.data.category === branch);
+
+  return (
+    <div className="card lib-card">
+      <Toolbar
+        pendingCount={pendingCount}
+        saving={saving}
+        onAdd={() => addDrafts([{ data: { name: '', category: SCORE_CATEGORIES.includes(branch as ScoreItemDef['category'] & string) ? branch : '地推', content: '' } }])}
+        onReload={reload}
+        onSave={saveAll}
+      />
+      <div className="pick" style={{ padding: '0 16px 12px' }}>
+        {['全部', ...SCORE_CATEGORIES].map((c) => (
+          <button key={c} className={`chip${branch === c ? ' on' : ''}`} onClick={() => setBranch(c)}>{c}</button>
+        ))}
+      </div>
+      <p style={{ padding: '0 16px 12px', margin: 0, fontSize: 12.5, color: '#6B7280' }}>
+        本库剧本在模拟演练开始时整篇交给 AI 阅读理解，由它决定谁先开口、客户如何回应、何时自然结束；可在剧本末尾追加演练原则（如结束条件、客户反应轨迹）。
+      </p>
+      {loading ? (
+        <p style={{ padding: 16, color: '#6B7280', fontSize: 13 }}>加载中…</p>
+      ) : visibleRows.length === 0 ? (
+        <p style={{ padding: 16, color: '#6B7280', fontSize: 13 }}>该分类暂无演练剧本，点击「新增行」创建</p>
+      ) : (
+        <div className="lib-table-wrap">
+          <table className="lib-table">
+            <thead>
+              <tr><th>状态</th><th>分类</th><th>名称</th><th>剧本内容（整篇交给 AI 理解）</th><th>操作</th></tr>
+            </thead>
+            <tbody>
+              {visibleRows.map((row) => (
+                <tr key={row.key} className={`lib-row-${row.status}`}>
+                  <td><RowStatusChip row={row} />{row.error && <div className="lib-err">{row.error}</div>}</td>
+                  <td>
+                    <select className="lib-cell" value={row.data.category} onChange={(e) => updateRow(row.key, { category: e.target.value })}>
+                      {SCORE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                      {row.data.category && !SCORE_CATEGORIES.includes(row.data.category as ScoreItemDef['category'] & string) && (
+                        <option value={row.data.category}>{row.data.category}（自定义）</option>
+                      )}
+                    </select>
+                  </td>
+                  <td style={{ minWidth: 140 }}><CellInput value={row.data.name} onChange={(v) => updateRow(row.key, { name: v })} /></td>
+                  <td style={{ minWidth: 420 }}><CellTextarea rows={14} value={row.data.content} onChange={(v) => updateRow(row.key, { content: v })} /></td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    <button className="btn btn-ghost btn-sm" onClick={() => toggleDelete(row.key)}>
+                      {row.status === 'deleted' ? '恢复' : '删除'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

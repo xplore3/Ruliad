@@ -63,6 +63,8 @@ export interface Scenario {
   productKBId?: string;
   /** 场景类型（缺省视为 practical） */
   sceneType?: SceneType;
+  /** 评分分类：决定评分时选用评分标准库中的哪一类标准 */
+  category?: ScoreCategory;
   /** 剧本（实用场景） */
   script?: ScenarioScript;
   /** 参与者设定 */
@@ -205,6 +207,20 @@ export interface ScoreLevel {
   description: string;
 }
 
+/** 评分业务分类：评分标准库按四类分库维护 */
+export type ScoreCategory = '地推' | '电销' | '咨询接待' | '现场成交';
+
+export const SCORE_CATEGORIES: readonly ScoreCategory[] = ['地推', '电销', '咨询接待', '现场成交'];
+
+/** 演练剧本：整篇剧情文本，演练开始交给 LLM 理解，决定谁先开口、如何回应、何时结束 */
+export interface DrillScript {
+  id: string;
+  tenantId: string;
+  category: ScoreCategory;
+  name: string;
+  content: string;
+}
+
 export interface ScoreItemDef {
   id: string;
   tenantId: string;
@@ -216,6 +232,7 @@ export interface ScoreItemDef {
   levels: ScoreLevel[];
   layer: 'company' | 'team' | 'personal';
   isObservation: boolean;
+  category?: ScoreCategory;
 }
 
 export interface GoldenCase {

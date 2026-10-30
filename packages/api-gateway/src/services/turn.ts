@@ -1,15 +1,17 @@
-import { EventTypes, type DurationParams, type QuizQuestion, type QuizQuestionPublic, type Scenario, type ScenarioGuidance, type Session, type TranscriptTurn } from '@grasp-mvp/core';
+import { EventTypes, type QuizQuestion, type QuizQuestionPublic, type Scenario, type ScenarioGuidance, type Session, type TranscriptTurn } from '@grasp-mvp/core';
 import { bandFor, checkConsistency, compilePersona, EmotionTracker, PersonaActor } from '@grasp-mvp/role-engine';
 import type { RouteContext } from '../ctx.js';
 import { mkEvent } from '../events.js';
+import { drillScriptPrompt, resolveDrillScript } from './drill.js';
 
-const TIME_UP_CLOSING = '时间不早了，今天先聊到这吧，你说的我再想想。';
 /** 一致性校验重试仍失败时的兜底角色化文案 */
 const CONSISTENCY_FALLBACK = '这个我不太清楚，你接着说。';
 /** 重生成时追加的纠正指令 */
 const CONSISTENCY_CORRECTION = '（注意：上一次回复出戏或泄露了不该说的信息，务必保持角色，不要暴露 AI 身份或考核相关信息。）';
 /** 系统级开场白触发词：电话接通后自动播放问候，不存入 transcript */
 const SYSTEM_GREETING_TOKEN = '__SYSTEM_GREETING__';
+/** 学员轮数极端安全上限：防止对话无限进行（正常演练远低于此；结束时机由 AI 判断，不由倒计时决定） */
+const MAX_LIVE_TURNS = 40;
 
 export function remainingSeconds(session: Session, scenario: Scenario, overrideSeconds?: number): number {
   const totalSeconds = overrideSeconds ?? scenario.durationMinutes * 60;
@@ -41,14 +43,7 @@ export async function effectiveCountdownSeconds(
   return countdownSecondsOf(scenario, guidance);
 }
 
-/** 是否走超时收口：学员轮数达 maxTurns 立即收口；时间用尽但轮数未达 minTurns 则继续对练 */
-function shouldCloseLive(remaining: number, traineeTurns: number, duration?: DurationParams): boolean {
-  if (duration?.maxTurns !== undefined && traineeTurns >= duration.maxTurns) return true;
-  if (remaining <= 0 && (duration?.minTurns === undefined || traineeTurns >= duration.minTurns)) return true;
-  return false;
-}
-
-/** 加载 persona 运行时（编译后的 bundle + 原始配置），配置缺失返回 undefined */
+/** 加载 persona 运行时（编译后的 bundle + 原始配置 + 演练剧本），配置缺失返回 undefined */
 export async function loadRuntime(ctx: RouteContext, scenario: Scenario, difficulty?: number) {
   const personaConfig = await ctx.store.getPersonaConfig(scenario.personaConfigId);
   if (!personaConfig) return undefined;
@@ -90,7 +85,13 @@ export async function loadRuntime(ctx: RouteContext, scenario: Scenario, difficu
       bundle.systemPrompt = `${bundle.systemPrompt}\n\n【演练要求】\n${parts.join('\n')}`;
     }
   }
-  return { personaConfig, bundle, productKB };
+
+  // 注入演练剧本（整篇剧情参照）：LLM 依此理解谁先开口、客户如何回应、何时自然结束
+  const drillScript = await resolveDrillScript(ctx.store, scenario).catch(() => undefined);
+  if (drillScript) {
+    bundle.systemPrompt = `${bundle.systemPrompt}\n\n${drillScriptPrompt(drillScript)}`;
+  }
+  return { personaConfig, bundle, productKB, drillScript };
 }
 
 export interface TurnResult {
@@ -99,6 +100,7 @@ personaTurn: TranscriptTurn;
 arousal: number | null;
 bandKey: string | null;
 remainingSeconds: number;
+/** AI 判断本场对练应自然结束（剧情终点/目标达成/客户离开），或达到极端轮数上限；不再由倒计时驱动 */
 timeUp?: boolean;
 /** 本轮触发的待弹出考题（脱敏视图，不含答案） */
 pendingQuizzes?: QuizQuestionPublic[];
@@ -187,34 +189,11 @@ export async function runTurn(
   };
   const guidance = await store.getScenarioGuidance(scenario.id).catch(() => undefined);
   const totalSeconds = countdownSecondsOf(scenario, guidance);
-  const remaining = remainingSeconds(session, scenario, totalSeconds);
   const lastTrace = session.emotionTrace[session.emotionTrace.length - 1];
   const traineeTurnCount = session.transcript.filter((t) => t.speaker === 'trainee').length;
 
-  // 超时或学员轮数达上限：固定收口文案，不再调 LLM（轮数未达 minTurns 时超时也不收口）
-  if (shouldCloseLive(remaining, traineeTurnCount, guidance?.duration)) {
-    const personaTurn: TranscriptTurn = {
-      seq: traineeTurn.seq + 1,
-      speaker: 'persona',
-      text: TIME_UP_CLOSING,
-      at: new Date().toISOString(),
-      emotion: lastTrace
-        ? { arousal: lastTrace.arousal, bandKey: lastTrace.bandKey }
-        : undefined,
-    };
-    await store.updateSession(session.id, {
-      transcript: [...session.transcript, traineeTurn, personaTurn],
-    });
-    return {
-      traineeTurn,
-      personaTurn,
-      arousal: lastTrace?.arousal ?? null,
-      bandKey: lastTrace?.bandKey ?? null,
-      remainingSeconds: 0,
-      timeUp: true,
-    };
-  }
-
+  // 结束时机由 AI 判断（replyWithSignal 的 shouldClose），不再由倒计时/maxTurns 强制收口；
+  // 仅保留学员轮数极端上限 MAX_LIVE_TURNS 兜底，防止对话无限进行
   const runtime = await loadRuntime(ctx, scenario, session.difficulty);
   if (!runtime) {
     console.error('[runTurn] persona 运行时加载失败, scenarioId=', scenario.id, 'personaConfigId=', scenario.personaConfigId);
@@ -233,16 +212,21 @@ export async function runTurn(
 
   const actor = new PersonaActor(gateway.forTask('actor'));
   const transcriptSoFar = [...session.transcript, traineeTurn];
-  let replyText = await actor.reply(bundle, band, transcriptSoFar, session.coachIntensity);
+  // LLM 回复时顺带判断本场是否应自然结束（shouldClose）：剧情终点/目标达成/谈判破裂/客户离开
+  let { text: replyText, shouldClose } = await actor.replyWithSignal(bundle, band, transcriptSoFar, session.coachIntensity);
 
   // 一致性校验：出戏/泄露则带纠正指令重生成一次，仍不通过用兜底文案
   const firstCheck = await checkConsistency(gateway.forTask('judge'), bundle, replyText);
   if (!firstCheck.pass) {
     const retryBand = { ...band, instruction: band.instruction + CONSISTENCY_CORRECTION };
-      replyText = await actor.reply(bundle, retryBand, transcriptSoFar, session.coachIntensity);
-      const secondCheck = await checkConsistency(gateway.forTask('judge'), bundle, replyText);
-    if (!secondCheck.pass) {
+      const retry = await actor.replyWithSignal(bundle, retryBand, transcriptSoFar, session.coachIntensity);
+      const secondCheck = await checkConsistency(gateway.forTask('judge'), bundle, retry.text);
+    if (secondCheck.pass) {
+      replyText = retry.text;
+      shouldClose = retry.shouldClose;
+    } else {
       replyText = CONSISTENCY_FALLBACK;
+      shouldClose = false;
     }
     void store.appendEvent(
       mkEvent(EventTypes.PERSONA_CONSISTENCY_VIOLATION, {
@@ -303,6 +287,8 @@ personaTurn,
 arousal: snapshot.arousal,
 bandKey: snapshot.bandKey,
 remainingSeconds: remainingSeconds(session, scenario, totalSeconds),
+// AI 判断本场应自然结束（剧情终点/目标达成/客户离开），或达到极端轮数上限；倒计时用尽不再强制结束
+timeUp: shouldClose || traineeTurnCount + 1 >= MAX_LIVE_TURNS,
 pendingQuizzes: pendingQuizzes.length > 0 ? pendingQuizzes.map(toPublicQuiz) : undefined,
 };
 }

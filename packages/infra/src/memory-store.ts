@@ -5,6 +5,7 @@ import type {
   CertRecord,
   DemoFaq,
   DemoScript,
+  DrillScript,
   DataConsent,
   DomainEvent,
   Element,
@@ -54,6 +55,7 @@ export class MemoryStore implements Store {
   private scoreItemDefs = new Map<string, ScoreItemDef>();
   private demoFaqs = new Map<string, DemoFaq>();
   private demoScripts = new Map<string, DemoScript>();
+  private drillScripts = new Map<string, DrillScript>();
   private scenarioGuidances = new Map<string, ScenarioGuidance>();
   private briefingStandards = new Map<string, BriefingStandard>();
   private realismStandards = new Map<string, RealismStandard>();
@@ -256,6 +258,22 @@ private events: DomainEvent[] = [];
   }
   async deleteDemoScript(id: string) {
     this.demoScripts.delete(id);
+  }
+
+  // ---- 演练剧本库 ----
+  async getDrillScript(id: string) {
+    return this.drillScripts.get(id);
+  }
+  async listDrillScripts(tenantId: string, category?: string) {
+    return [...this.drillScripts.values()].filter(
+      (s) => s.tenantId === tenantId && (!category || s.category === category)
+    );
+  }
+  async saveDrillScript(s: DrillScript) {
+    this.drillScripts.set(s.id, s);
+  }
+  async deleteDrillScript(id: string) {
+    this.drillScripts.delete(id);
   }
 
   // ---- 新手指引流程配置 ----

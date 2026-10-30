@@ -2,6 +2,11 @@
 
 import type { QuizScore } from './quiz.js';
 
+/** 评分业务分类：评分标准库与场景共用，四类各自维护评分标准 */
+export type ScoreCategory = '地推' | '电销' | '咨询接待' | '现场成交';
+
+export const SCORE_CATEGORIES: readonly ScoreCategory[] = ['地推', '电销', '咨询接待', '现场成交'];
+
 /** 评分标准档位定义 */
 export interface ScoreLevel {
   key: string;
@@ -26,6 +31,8 @@ export interface ScoreItemDef {
   layer: 'company' | 'team' | 'personal';
   /** 观察项：记录但不计分（冲突裁决用） */
   isObservation: boolean;
+  /** 所属评分分类（地推/电销/咨询接待/现场成交）；缺省兼容存量数据，按全部场景可用处理 */
+  category?: ScoreCategory;
 }
 
 /** 单个评分标准判定结果 */

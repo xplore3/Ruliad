@@ -5,6 +5,7 @@ import type {
   CertRecord,
   DemoFaq,
   DemoScript,
+  DrillScript,
   DataConsent,
   DomainEvent,
   Element,
@@ -143,6 +144,12 @@ export interface Store {
   listDemoScripts(tenantId: string, category?: string): Promise<DemoScript[]>;
   saveDemoScript(s: DemoScript): Promise<void>;
   deleteDemoScript(id: string): Promise<void>;
+
+  // ---- 演练剧本库（模拟演练剧情参照，整篇文本，按演练分类） ----
+  getDrillScript(id: string): Promise<DrillScript | undefined>;
+  listDrillScripts(tenantId: string, category?: string): Promise<DrillScript[]>;
+  saveDrillScript(s: DrillScript): Promise<void>;
+  deleteDrillScript(id: string): Promise<void>;
 
   // ---- 新手指引流程配置 ----
   getScenarioGuidance(scenarioId: string): Promise<ScenarioGuidance | undefined>;

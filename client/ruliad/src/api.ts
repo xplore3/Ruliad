@@ -13,6 +13,7 @@ import type {
   ScenarioScript,
   ScenarioParticipant,
   DemoFaq,
+  DrillScript,
   GoldenCase,
   ScoreItemDef,
 } from './types';
@@ -478,6 +479,27 @@ export async function updateScoreItem(id: string, payload: Partial<ScoreItemDef>
 
 export async function deleteScoreItem(id: string) {
   await api.delete(`/library/score-items/${id}`);
+}
+
+// ---- 演练剧本库（模拟演练剧情参照：演练开始交给 LLM 理解，决定谁先开口、如何回应、何时结束） ----
+
+export async function listDrillScripts(category?: string) {
+  const { data } = await api.get('/library/drill-scripts', { params: category ? { category } : {} });
+  return data as { items: DrillScript[] };
+}
+
+export async function createDrillScript(payload: Partial<DrillScript>) {
+  const { data } = await api.post('/library/drill-scripts', payload);
+  return data as DrillScript;
+}
+
+export async function updateDrillScript(id: string, payload: Partial<DrillScript>) {
+  const { data } = await api.put(`/library/drill-scripts/${id}`, payload);
+  return data as DrillScript;
+}
+
+export async function deleteDrillScript(id: string) {
+  await api.delete(`/library/drill-scripts/${id}`);
 }
 
 // ---- 评分回归案例 ----
