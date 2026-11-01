@@ -22,16 +22,18 @@ export interface QuantMetricBand {
   score: number;
 }
 
-/** 定量计分 metric：语音声学量化数据之一 */
+/** 定量计分 metric：语音声学量化数据之一；weight 为块内权重（缺省 1，按权重加权平均） */
 export interface QuantMetricRule {
   metric: 'pitchVarSemitones' | 'loudnessRangeDb' | 'speechRateCpm' | 'avgLoudnessDbfs';
   bands: QuantMetricBand[];
+  /** 块内权重（缺省 1）；区分度弱的指标可降权，如 0.3 */
+  weight?: number;
 }
 
 /**
  * 确定性定量计分规则：配置后该标准跳过 LLM 打分，由代码按语音量化数据查表计分
- * （块得分 = 各 metric 区间得分的均值 / 100 × maxScore，缺数据的 metric 按 50 分计），
- * LLM 只负责根据已定分数写评语与话术建议，无法再自由改分。
+ * （块得分 = 各 metric 区间得分按 weight 加权平均 / 100 × maxScore，weight 缺省 1，
+ * 缺数据的 metric 按 50 分计），LLM 只负责根据已定分数写评语与话术建议，无法再自由改分。
  */
 export interface QuantitativeRule {
   blocks: Array<{

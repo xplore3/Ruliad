@@ -6,7 +6,7 @@ import { scoreSession } from '@grasp-mvp/scoring-engine';
 import type { RouteContext } from '../ctx.js';
 import { mkEvent } from '../events.js';
 import { effectiveCountdownSeconds, loadRuntime, remainingSeconds, runTurn } from '../services/turn.js';
-import { decideOpening, resolveDrillScript, rollCustomerArchetype } from '../services/drill.js';
+import { decideOpening, initialCustomerArchetype, resolveDrillScript } from '../services/drill.js';
 import { personaVoice } from './voice.js';
 import { readFramesAsDataUrls } from '../services/video-store.js';
 
@@ -267,9 +267,10 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
         }
       }
 
-      // 本场客户类型：剧本声明了概率化原则（如"10次应该有5次客户表现出不感兴趣"）时，系统随机确定并整场固定
+      // 本场客户类型：剧本声明了概率化原则（如"10次应该有5次客户表现出不感兴趣"）时采用双场制——
+      // 第一场必定"不感兴趣"（最多 3 轮后旁白切场），第二场必定"潜在意向"，不再随机
       const drillScriptForRoll = await resolveDrillScript(store, scenario).catch(() => undefined);
-      const customerArchetype = drillScriptForRoll ? rollCustomerArchetype(drillScriptForRoll.content) : undefined;
+      const customerArchetype = drillScriptForRoll ? initialCustomerArchetype(drillScriptForRoll.content) : undefined;
 
       const runtime = await loadRuntime(ctx, scenario, undefined, customerArchetype);
       if (!runtime) return reply.code(500).send({ error: '场景对应的 persona 配置缺失' });

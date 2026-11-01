@@ -344,6 +344,7 @@ export interface VoiceServerEvent {
   turn?: {
     traineeTurn: { seq: number; speaker: string; text: string; at: string };
     personaTurn: { seq: number; speaker: string; text: string; at: string };
+    narratorTurn?: { seq: number; speaker: string; text: string; at: string };
     remainingSeconds: number;
     timeUp?: boolean;
     pendingQuizzes?: QuizQuestion[];

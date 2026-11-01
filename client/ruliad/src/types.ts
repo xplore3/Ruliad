@@ -367,6 +367,8 @@ export interface QuizQuestion {
 export interface TurnResult {
   traineeTurn: TranscriptTurn;
   personaTurn: TranscriptTurn;
+  /** 双场制切场旁白（第一小场结束、切换有意向客户时下发；speaker=coach） */
+  narratorTurn?: TranscriptTurn;
   arousal?: number | null;
   bandKey?: string | null;
   remainingSeconds: number;

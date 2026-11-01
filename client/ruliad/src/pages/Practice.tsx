@@ -57,10 +57,6 @@ const MAX_HINTS = 3;
 const AUTO_MIC_KEY = 'grasp-auto-mic';
 const PERSONA_FALLBACK_MS = 10000;
 
-/** 地推引流课分类关键词（与 Home.tsx 及后端 guidance 服务的判定规则一致）；仅在 guidance 拉取失败/为 null 时作回退判定 */
-const GROUND_PUSH_KEYWORDS = ['地推', '破冰', '陌生', '展会', '商场', '摊位', '驻足'];
-/** 资格提问回退题库（guidance 不可用时使用；正常以 guidance.qualifyQuestions 为准） */
-const QUALIFY_QUESTIONS = ['你做过地推吗？', '你做过教育行业的地推吗？'];
 /** 示范播完后教练的询问 */
 const GUIDE_CHOICE_QUESTION = '想再听一个版本的示范，还是开始模拟练习？';
 /** 自动聆听 VAD 参数（参考服务端 voice.ts 的 RMS + 静音判停思路）：新手指引与 live 阶段共用 */
@@ -72,12 +68,9 @@ const LIVE_MAX_RECORD_MS = 60000;
 /** 自动聆听识别失败的重试上限，超过后给出文字提示 */
 const GUIDANCE_MAX_RETRY = 2;
 
-/** 资格问题：优先指引配置；guidance 拉取失败/为 null 且命中地推关键词时回退硬编码题库 */
-function resolveQualifyQuestions(g: ScenarioGuidance | null, s: ScenarioInfo | null): string[] {
+/** 资格问题：仅以指引配置为准；无指引配置时不做资格提问（不再使用硬编码回退题库） */
+function resolveQualifyQuestions(g: ScenarioGuidance | null, _s: ScenarioInfo | null): string[] {
   if (g?.qualifyQuestions?.length) return g.qualifyQuestions;
-  if (s && GROUND_PUSH_KEYWORDS.some((k) => `${s.name} ${(s.coverageTopics ?? []).join(' ')}`.includes(k))) {
-    return QUALIFY_QUESTIONS;
-  }
   return [];
 }
 
@@ -270,7 +263,7 @@ export default function Practice() {
         setPersona(p);
         setScenario(s);
         setSessionMode(session.mode);
-        // 并行拉取场景指引配置；失败/为 null 时回退到本地关键词判定（见 resolveQualifyQuestions）
+        // 并行拉取场景指引配置；失败/为 null 时按无指引处理（不做资格提问，直接开练）
         guidanceReqRef.current = fetchGuidance(session.scenarioId)
           .then((res) => {
             if (cancelled) return;
@@ -1084,9 +1077,11 @@ export default function Practice() {
         if (t) {
           const trainee: TranscriptTurn = { ...t.traineeTurn, speaker: 'trainee' };
           const personaTurn: TranscriptTurn = { ...t.personaTurn, speaker: 'persona' };
+          // 双场制切场旁白（speaker=coach）：追加到对话记录展示
+          const narrator: TranscriptTurn | null = t.narratorTurn ? { ...t.narratorTurn, speaker: 'coach' } : null;
           setMessages((prev) => {
             const seqs = new Set(prev.map((m) => `${m.seq}:${m.speaker}`));
-            const add = [trainee, personaTurn].filter((m) => !seqs.has(`${m.seq}:${m.speaker}`));
+            const add = [trainee, personaTurn, ...(narrator ? [narrator] : [])].filter((m) => !seqs.has(`${m.seq}:${m.speaker}`));
             return [...prev, ...add];
           });
           setReplyText(t.personaTurn.text);
@@ -1117,7 +1112,7 @@ export default function Practice() {
     setStatusBoth('thinking');
     try {
       const res = await sendTurn(sessionId, text);
-      setMessages((prev) => [...prev, res.traineeTurn, res.personaTurn]);
+      setMessages((prev) => [...prev, res.traineeTurn, res.personaTurn, ...(res.narratorTurn ? [res.narratorTurn] : [])]);
       setReplyText(res.personaTurn.text);
       if (res.bandKey) setBandKey(res.bandKey);
       applyTurnMeta(res.remainingSeconds, res.timeUp);

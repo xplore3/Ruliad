@@ -140,15 +140,24 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
       arousal: result.arousal ?? undefined,
       ...ttsProfile,
     });
+    // 双场制切场旁白：用旁白音色合成（失败不阻断回合）
+    let narratorAudioBase64: string | undefined;
+    if (result.narratorTurn) {
+      narratorAudioBase64 = (
+        await speech.tts.synthesize(result.narratorTurn.text, { voice: ROLE_VOICES.narrator }).catch(() => null)
+      )?.audio.toString('base64');
+    }
 
     return {
       userText,
       replyText: result.personaTurn.text,
       audioBase64: tts.audio.toString('base64'),
       audioFormat: tts.format,
+      narratorAudioBase64,
       turn: {
         traineeTurn: result.traineeTurn,
         personaTurn: result.personaTurn,
+        narratorTurn: result.narratorTurn,
         remainingSeconds: result.remainingSeconds,
         timeUp: result.timeUp,
         pendingQuizzes: result.pendingQuizzes,
@@ -322,6 +331,19 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
               );
             }
           }
+          // 双场制切场旁白：接在 persona 回复之后用旁白音色播（失败不阻断回合）
+          if (result.narratorTurn) {
+            try {
+              const narratorTts = await speech.tts.synthesize(result.narratorTurn.text, { voice: ROLE_VOICES.narrator });
+              if (myRound !== round) return;
+              send({ type: 'tts_sentence', seq: sentences.length, audio: narratorTts.audio.toString('base64'), format: narratorTts.format });
+            } catch (ttsErr) {
+              req.log.warn(
+                { sessionId, err: ttsErr instanceof Error ? ttsErr.message : String(ttsErr) },
+                'voice 切场旁白 TTS 合成失败，跳过'
+              );
+            }
+          }
           ttsPlaying = false;
           send({ type: 'tts_end' });
           send({
@@ -329,6 +351,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
             turn: {
               traineeTurn: result.traineeTurn,
               personaTurn: result.personaTurn,
+              narratorTurn: result.narratorTurn,
               remainingSeconds: result.remainingSeconds,
               timeUp: result.timeUp,
               pendingQuizzes: result.pendingQuizzes,
@@ -835,6 +858,20 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
           }
 
           if (myRound !== round) return;
+          // 双场制切场旁白：接在 persona 回复之后用旁白音色播（失败不阻断回合）
+          if (result.narratorTurn) {
+            try {
+              const narratorTts = await speech.tts.synthesize(result.narratorTurn.text, { voice: ROLE_VOICES.narrator });
+              if (myRound !== round) return;
+              send({ type: 'tts_chunk', seq, audio: narratorTts.audio.toString('base64'), format: narratorTts.format, isFinal: true });
+              seq++;
+            } catch (ttsErr) {
+              req.log.warn(
+                { sessionId, err: ttsErr instanceof Error ? ttsErr.message : String(ttsErr) },
+                'voice-call 切场旁白 TTS 合成失败，跳过'
+              );
+            }
+          }
           ttsPlaying = false;
           send({ type: 'tts_end' });
           send({
@@ -842,6 +879,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
             turn: {
               traineeTurn: result.traineeTurn,
               personaTurn: result.personaTurn,
+              narratorTurn: result.narratorTurn,
               remainingSeconds: result.remainingSeconds,
               timeUp: result.timeUp,
               pendingQuizzes: result.pendingQuizzes,

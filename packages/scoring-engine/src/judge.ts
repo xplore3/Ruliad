@@ -42,7 +42,8 @@ function computeQuantScore(
   const blockLines: string[] = [];
   for (const block of rule.blocks) {
     const parts = block.metrics.map((m) => scoreMetric(m, stats?.voice));
-    const avg = parts.reduce((s, p) => s + p.score, 0) / parts.length;
+    const totalWeight = block.metrics.reduce((s, m) => s + (m.weight ?? 1), 0);
+    const avg = parts.reduce((s, p, i) => s + p.score * (block.metrics[i].weight ?? 1), 0) / totalWeight;
     const blockScore = Math.round((avg / 100) * block.maxScore);
     total += blockScore;
     const detail = block.metrics
@@ -66,8 +67,7 @@ async function narrateQuantScore(
   det: { total: number; blockLines: string[] }
 ): Promise<{ rationale: string; betterScript: string }> {
   const transcriptLines = session.transcript
-    .filter((t) => t.speaker !== 'coach')
-    .map((t) => `[${t.seq}] ${t.speaker === 'trainee' ? '学员' : '客户'}：${t.text}`)
+    .map((t) => `[${t.seq}] ${t.speaker === 'trainee' ? '学员' : t.speaker === 'coach' ? '旁白' : '客户'}：${t.text}`)
     .join('\n');
   const prompt = [
     def.judgePrompt,
@@ -140,8 +140,7 @@ function buildJudgePrompt(
   stats?: ScoreReport['ruleStats']
 ): string {
   const transcriptLines = session.transcript
-    .filter((t) => t.speaker !== 'coach')
-    .map((t) => `[${t.seq}] ${t.speaker === 'trainee' ? '学员' : '客户'}：${t.text}`)
+    .map((t) => `[${t.seq}] ${t.speaker === 'trainee' ? '学员' : t.speaker === 'coach' ? '旁白' : '客户'}：${t.text}`)
     .join('\n');
   const scenarioLines: string[] = [];
   if (scenario) {
