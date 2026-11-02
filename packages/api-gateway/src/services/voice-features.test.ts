@@ -24,15 +24,17 @@ describe('analyzePcm16', () => {
     expect(analyzePcm16(synth([[220, 0.2, 200]]))).toBeNull();
   });
 
-  it('恒定 220Hz 正弦：响度接近理论值，音调变化幅度小', () => {
+  it('恒定 220Hz 正弦：归一化到目标电平，音调变化幅度小', () => {
     const f = analyzePcm16(synth([[220, 0.2, 2000]]))!;
     expect(f).not.toBeNull();
-    // RMS = 0.2/√2 ≈ 0.1414 → ≈ -17.0 dBFS
-    expect(f.avgLoudnessDbfs).toBeGreaterThan(-18.5);
-    expect(f.avgLoudnessDbfs).toBeLessThan(-15.5);
-    // 恒定频率 → 音调变化幅度应很小
+    // 电平归一化：语音 p90 统一到 0.05 RMS；恒定正弦 mean=p90 → ≈ -26.0 dBFS
+    expect(f.avgLoudnessDbfs).toBeGreaterThan(-27.5);
+    expect(f.avgLoudnessDbfs).toBeLessThan(-24.5);
+    // 恒定频率 → 音调变化幅度应很小；音高中位数应接近 220Hz
     expect(f.pitchVarSemitones).not.toBeNull();
     expect(f.pitchVarSemitones!).toBeLessThan(1);
+    expect(f.medianF0Hz).toBeGreaterThan(200);
+    expect(f.medianF0Hz).toBeLessThan(240);
     // 恒定振幅 → 动态范围小
     expect(f.loudnessRangeDb).toBeLessThan(3);
     expect(f.voicedMs).toBeGreaterThanOrEqual(1900);
@@ -66,6 +68,20 @@ describe('analyzePcm16', () => {
     expect(f.pitchVarSemitones).not.toBeNull();
     expect(f.pitchVarSemitones!).toBeGreaterThan(3);
     expect(f.pitchVarSemitones!).toBeLessThan(9);
+  });
+
+  it('电平归一化：同一段话大声/小声（差 20dB）测得的音调与动态范围基本一致', () => {
+    // 模拟同一表现、不同麦克风增益：0.15~0.22 vs 0.015~0.022（约 -33dBFS，低增益麦克风实景）
+    const shape: Array<[number, number, number]> = [
+      [150, 1, 400], [300, 1.3, 400], [0, 0, 150], [180, 1, 400], [350, 1.4, 400], [0, 0, 150], [200, 1, 500],
+    ];
+    const loud = analyzePcm16(synth(shape.map(([f, a, ms]) => [f, a * 0.15, ms])))!;
+    const quiet = analyzePcm16(synth(shape.map(([f, a, ms]) => [f, a * 0.015, ms])))!;
+    // 轻声版被归一化抬回目标电平附近：平均响度差距从 20dB 收敛到 3dB 以内
+    expect(Math.abs(quiet.avgLoudnessDbfs - loud.avgLoudnessDbfs)).toBeLessThan(3);
+    // 相对量（音调变化/响度起伏）在两种增益下基本一致
+    expect(Math.abs(quiet.pitchVarSemitones! - loud.pitchVarSemitones!)).toBeLessThan(0.5);
+    expect(Math.abs(quiet.loudnessRangeDb - loud.loudnessRangeDb)).toBeLessThan(1.5);
   });
 });
 

@@ -4,6 +4,7 @@ import type { RouteContext } from '../ctx.js';
 import { tokenFailReason, verifyToken } from '../auth.js';
 import { runTurn } from '../services/turn.js';
 import { analyzePcm16, wavToPcm } from '../services/voice-features.js';
+import { saveTurnRecording } from '../services/recording.js';
 
 /** WebSocket 关闭码说明（仅日志用，与客户端保持同步） */
 function describeCloseCode(code: number): string {
@@ -30,9 +31,30 @@ function pcmRMS(buf: Buffer): number {
 }
 
 /** VAD 配置 */
-const VAD_THRESHOLD = 0.015; // 静音能量阈值（RMS）
-const VAD_SILENCE_MS = 2500; // 静音持续时间触发断句
+const VAD_SILENCE_MS = 1500; // 静音持续时间触发断句（2.5s 等待感明显；自适应阈值保证准确性后放宽到 1.5s）
 const VAD_CHUNK_MS = 100; // 每 100ms 检测一次
+
+/** VAD 自适应阈值范围与噪声倍率：AGC 关闭后不同麦克风的原始电平差异大，
+ * 固定阈值会把轻声说话误判为静音（话说到一半被切断）。按近期静音块估计噪声底并随之浮动。 */
+const VAD_MIN_THRESHOLD = 0.005;
+const VAD_MAX_THRESHOLD = 0.02;
+const VAD_NOISE_MULTIPLIER = 2.5;
+
+function createAdaptiveVad() {
+  let noiseFloor = 0.006;
+  return {
+    /** 当前语音判定阈值（噪声底 ×2.5，钳制在 0.005~0.02） */
+    threshold(): number {
+      return Math.min(VAD_MAX_THRESHOLD, Math.max(VAD_MIN_THRESHOLD, noiseFloor * VAD_NOISE_MULTIPLIER));
+    },
+    /** 输入一个音频块 RMS，返回是否语音；非语音块缓慢更新噪声底 */
+    isSpeech(rms: number): boolean {
+      if (rms > this.threshold()) return true;
+      noiseFloor = Math.max(0.002, noiseFloor * 0.95 + rms * 0.05);
+      return false;
+    },
+  };
+}
 
 /** 回复按句号/问号/感叹号等切句（保留标点），供逐句 TTS 边合成边播 */
 function splitSentences(text: string): string[] {
@@ -128,18 +150,28 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
 
     // 声学特征提取：响度/起伏/音调变化/说话时长，随学员轮入库供评分量化判定（失败不影响回合）
     const pcm = wavToPcm(audio);
+    if (pcm) saveTurnRecording(session.id, pcm);
     const voiceFeatures = pcm ? analyzePcm16(pcm) ?? undefined : undefined;
 
     const scenario = await store.getScenario(session.scenarioId);
     if (!scenario) return reply.code(500).send({ error: '场景缺失' });
-    const result = await runTurn(ctx, session, scenario, userText, voiceFeatures);
+    // 整段 TTS 预合成与 runTurn 内的语义一致性审查并行（warmup 只服务家长主应答轮）
+    const warmupProfile = await personaVoice(store, scenario.id, scenario.personaConfigId, request.log);
+    const result = await runTurn(ctx, session, scenario, userText, voiceFeatures, (text) =>
+      speech.tts.synthesize(text, warmupProfile).catch(() => null)
+    );
     if (!result) return reply.code(500).send({ error: '场景对应的 persona 配置缺失' });
 
-    const ttsProfile = await personaVoice(store, scenario.id, scenario.personaConfigId, request.log);
-    const tts = await speech.tts.synthesize(result.personaTurn.text, {
-      arousal: result.arousal ?? undefined,
-      ...ttsProfile,
-    });
+    const isChildReply = !result.personaTurn && !!result.childTurn;
+    const mainReplyText = (result.personaTurn ?? result.childTurn)?.text ?? '';
+    const tts = result.warmupAudio
+      ? { audio: result.warmupAudio, format: result.warmupFormat ?? 'wav' }
+      : await speech.tts.synthesize(mainReplyText, {
+          arousal: isChildReply ? undefined : result.arousal ?? undefined,
+          voice: isChildReply ? ROLE_VOICES.child : warmupProfile.voice,
+          excitement: warmupProfile.excitement,
+          rate: warmupProfile.rate,
+        });
     // 双场制切场旁白：用旁白音色合成（失败不阻断回合）
     let narratorAudioBase64: string | undefined;
     if (result.narratorTurn) {
@@ -147,17 +179,26 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
         await speech.tts.synthesize(result.narratorTurn.text, { voice: ROLE_VOICES.narrator }).catch(() => null)
       )?.audio.toString('base64');
     }
+    // 孩子作答：用儿童音色合成（失败不阻断回合；孩子主应答轮已由主链路合成，跳过）
+    let childAudioBase64: string | undefined;
+    if (result.childTurn && !isChildReply) {
+      childAudioBase64 = (
+        await speech.tts.synthesize(result.childTurn.text, { voice: ROLE_VOICES.child }).catch(() => null)
+      )?.audio.toString('base64');
+    }
 
     return {
       userText,
-      replyText: result.personaTurn.text,
+      replyText: mainReplyText,
       audioBase64: tts.audio.toString('base64'),
       audioFormat: tts.format,
       narratorAudioBase64,
+      childAudioBase64,
       turn: {
         traineeTurn: result.traineeTurn,
         personaTurn: result.personaTurn,
         narratorTurn: result.narratorTurn,
+              childTurn: result.childTurn,
         remainingSeconds: result.remainingSeconds,
         timeUp: result.timeUp,
         pendingQuizzes: result.pendingQuizzes,
@@ -293,12 +334,17 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
           if (!scenario) return fail('场景缺失');
 
           console.log(`[VoiceCall][trace] calling runTurn: sessionId=${sessionId} userText="${userText.slice(0, 40)}"`);
-          // 声学特征提取（本轮上行 PCM）：失败不影响回合
-          const voiceFeatures = audioChunks.length > 0
-            ? analyzePcm16(Buffer.concat(audioChunks)) ?? undefined
-            : undefined;
-          const result = await runTurn(ctx, session, scenario, userText, voiceFeatures);
-          console.log(`[VoiceCall][trace] runTurn returned: ${result ? `ok reply="${result.personaTurn.text.slice(0, 40)}..."` : 'NULL'}`);
+          // 声学特征提取（本轮上行 PCM）：失败不影响回合；原始录音留存供离线核查
+          const uplink = audioChunks.length > 0 ? Buffer.concat(audioChunks) : undefined;
+          if (uplink) saveTurnRecording(sessionId, uplink);
+          const voiceFeatures = uplink ? analyzePcm16(uplink) ?? undefined : undefined;
+          // 首句 TTS 预合成与 runTurn 内的语义一致性审查并行（warmup 只服务家长主应答轮）
+          const warmupProfile = await personaVoice(store, scenario.id, scenario.personaConfigId, req.log);
+          const result = await runTurn(ctx, session, scenario, userText, voiceFeatures, (text) => {
+            const first = splitSentences(text)[0];
+            return first ? speech.tts.synthesize(first, warmupProfile) : Promise.resolve(null);
+          });
+          console.log(`[VoiceCall][trace] runTurn returned: ${result ? `ok reply="${(result.personaTurn ?? result.childTurn)?.text.slice(0, 40)}..."` : 'NULL'}`);
           if (!result) return fail('场景对应的 persona 配置缺失');
           if (myRound !== round) {
             console.log('[VoiceCall][trace] runTurn done but round changed, aborting');
@@ -306,19 +352,27 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
           }
           processing = false;
 
-          const replyText = result.personaTurn.text;
+          const isChildReply = !result.personaTurn && !!result.childTurn;
+          const replyText = (result.personaTurn ?? result.childTurn)?.text ?? '';
           console.log(`[VoiceCall][trace] sending reply_text: "${replyText.slice(0, 60)}" (${replyText.length} chars)`);
           send({ type: 'reply_text', text: replyText });
 
           // 逐句合成逐句发：客户端收到即可开始播放，实现边合成边播
           ttsPlaying = true;
-          const ttsProfile = await personaVoice(store, scenario.id, scenario.personaConfigId, req.log);
+          const ttsProfile = isChildReply
+            ? { voice: ROLE_VOICES.child }
+            : await personaVoice(store, scenario.id, scenario.personaConfigId, req.log);
           const sentences = splitSentences(replyText);
           for (let seq = 0; seq < sentences.length; seq++) {
             if (myRound !== round) return; // 被打断
             try {
+              // 首句命中预合成（与语义审查并行完成的）直接用，无需再等 TTS
+              if (seq === 0 && result.warmupAudio) {
+                send({ type: 'tts_sentence', seq, audio: result.warmupAudio.toString('base64'), format: result.warmupFormat });
+                continue;
+              }
               const tts = await speech.tts.synthesize(sentences[seq], {
-                arousal: result.arousal ?? undefined,
+                arousal: isChildReply ? undefined : result.arousal ?? undefined,
                 ...ttsProfile,
               });
               if (myRound !== round) return;
@@ -331,12 +385,26 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
               );
             }
           }
+          // 孩子作答：家长提问后、接在家长台词之后用儿童音色播（孩子主应答轮已由上面主链路播放，跳过）
+          let extraSeq = sentences.length;
+          if (result.childTurn && !isChildReply) {
+            try {
+              const childTts = await speech.tts.synthesize(result.childTurn.text, { voice: ROLE_VOICES.child });
+              if (myRound !== round) return;
+              send({ type: 'tts_sentence', seq: extraSeq++, audio: childTts.audio.toString('base64'), format: childTts.format });
+            } catch (ttsErr) {
+              req.log.warn(
+                { sessionId, err: ttsErr instanceof Error ? ttsErr.message : String(ttsErr) },
+                'voice 孩子作答 TTS 合成失败，跳过'
+              );
+            }
+          }
           // 双场制切场旁白：接在 persona 回复之后用旁白音色播（失败不阻断回合）
           if (result.narratorTurn) {
             try {
               const narratorTts = await speech.tts.synthesize(result.narratorTurn.text, { voice: ROLE_VOICES.narrator });
               if (myRound !== round) return;
-              send({ type: 'tts_sentence', seq: sentences.length, audio: narratorTts.audio.toString('base64'), format: narratorTts.format });
+              send({ type: 'tts_sentence', seq: extraSeq++, audio: narratorTts.audio.toString('base64'), format: narratorTts.format });
             } catch (ttsErr) {
               req.log.warn(
                 { sessionId, err: ttsErr instanceof Error ? ttsErr.message : String(ttsErr) },
@@ -352,6 +420,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
               traineeTurn: result.traineeTurn,
               personaTurn: result.personaTurn,
               narratorTurn: result.narratorTurn,
+              childTurn: result.childTurn,
               remainingSeconds: result.remainingSeconds,
               timeUp: result.timeUp,
               pendingQuizzes: result.pendingQuizzes,
@@ -499,6 +568,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
       let audioMsgCount = 0; // 收到音频块总数（诊断用）
 
       // VAD 状态
+      const vad = createAdaptiveVad(); // 本连接级自适应 VAD（噪声底随环境浮动）
       let vadBuffer: Buffer[] = []; // 累积音频块
       let roundAudio: Buffer[] = []; // 本轮全部上行音频（供回合落库前声学特征提取）
       let vadSilenceStart = 0; // 静音开始时间戳（0 = 未在静音）
@@ -570,7 +640,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
           if (!result || myRound !== round) return;
           processing = false;
 
-          const replyText = result.personaTurn.text;
+          const replyText = result.personaTurn?.text ?? '';
           console.log(`[VoiceCall][greeting] replyText="${replyText.slice(0, 60)}" length=${replyText.length}`);
           send({ type: 'reply_text', text: replyText });
 
@@ -725,7 +795,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
         vadBuffer = [];
 
         const rms = pcmRMS(buf);
-        if (rms > VAD_THRESHOLD) {
+        if (vad.isSpeech(rms)) {
           // 检测到语音
           vadHasSpeech = true;
           vadSilenceStart = 0;
@@ -789,8 +859,13 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
           const voiceFeatures = roundAudio.length > 0
             ? analyzePcm16(Buffer.concat(roundAudio)) ?? undefined
             : undefined;
-          const result = await runTurn(ctx, session, scenario, userText, voiceFeatures);
-          console.log(`[VoiceCall][trace] runTurn returned: ${result ? `ok reply="${result.personaTurn.text.slice(0, 40)}..."` : 'NULL'}`);
+          // 首句 TTS 预合成与 runTurn 内的语义一致性审查并行（warmup 只服务家长主应答轮）
+          const warmupProfile = await personaVoice(store, scenario.id, scenario.personaConfigId, req.log);
+          const result = await runTurn(ctx, session, scenario, userText, voiceFeatures, (text) => {
+            const first = splitSentences(text)[0];
+            return first ? speech.tts.synthesize(first, warmupProfile) : Promise.resolve(null);
+          });
+          console.log(`[VoiceCall][trace] runTurn returned: ${result ? `ok reply="${(result.personaTurn ?? result.childTurn)?.text.slice(0, 40)}..."` : 'NULL'}`);
           if (!result) return fail('场景对应的 persona 配置缺失');
           if (myRound !== round) {
             console.log('[VoiceCall][trace] runTurn done but round changed, aborting');
@@ -798,23 +873,31 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
           }
           processing = false;
 
-          const replyText = result.personaTurn.text;
+          const isChildReply = !result.personaTurn && !!result.childTurn;
+          const replyText = (result.personaTurn ?? result.childTurn)?.text ?? '';
           console.log(`[VoiceCall][trace] sending reply_text: "${replyText.slice(0, 60)}" (${replyText.length} chars)`);
           send({ type: 'reply_text', text: replyText });
 
           // 流式 TTS：逐句合成，使用 synthesizeStream 分块发送
           ttsPlaying = true;
           ttsAborted = false;
-          const ttsProfile = await personaVoice(store, scenario.id, scenario.personaConfigId, req.log);
+          const ttsProfile = isChildReply
+            ? { voice: ROLE_VOICES.child }
+            : await personaVoice(store, scenario.id, scenario.personaConfigId, req.log);
           const sentences = splitSentences(replyText);
           let seq = 0;
 
-          for (const sentence of sentences) {
+          // 首句命中预合成（与语义审查并行完成的）直接发送，该句无需再流式合成
+          if (result.warmupAudio && sentences.length > 0) {
+            send({ type: 'tts_chunk', seq, audio: result.warmupAudio.toString('base64'), format: result.warmupFormat, isFinal: true });
+            seq++;
+          }
+          for (const sentence of sentences.slice(result.warmupAudio ? 1 : 0)) {
             if (myRound !== round || ttsAborted || closed) return;
             // 使用流式 TTS：音频分块即到即发
             try {
               for await (const chunk of speech.tts.synthesizeStream(sentence, {
-                arousal: result.arousal ?? undefined,
+                arousal: isChildReply ? undefined : result.arousal ?? undefined,
                 ...ttsProfile,
               })) {
                 if (myRound !== round || ttsAborted || closed) return;
@@ -834,7 +917,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
               if (myRound !== round || ttsAborted || closed) return;
               try {
                 const tts = await speech.tts.synthesize(sentence, {
-                  arousal: result.arousal ?? undefined,
+                  arousal: isChildReply ? undefined : result.arousal ?? undefined,
                   ...ttsProfile,
                 });
                 if (myRound !== round || ttsAborted || closed) return;
@@ -858,6 +941,20 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
           }
 
           if (myRound !== round) return;
+          // 孩子作答：家长提问后、接在家长台词之后用儿童音色播（孩子主应答轮已由上面主链路播放，跳过）
+          if (result.childTurn && !isChildReply) {
+            try {
+              const childTts = await speech.tts.synthesize(result.childTurn.text, { voice: ROLE_VOICES.child });
+              if (myRound !== round) return;
+              send({ type: 'tts_chunk', seq, audio: childTts.audio.toString('base64'), format: childTts.format, isFinal: true });
+              seq++;
+            } catch (ttsErr) {
+              req.log.warn(
+                { sessionId, err: ttsErr instanceof Error ? ttsErr.message : String(ttsErr) },
+                'voice-call 孩子作答 TTS 合成失败，跳过'
+              );
+            }
+          }
           // 双场制切场旁白：接在 persona 回复之后用旁白音色播（失败不阻断回合）
           if (result.narratorTurn) {
             try {
@@ -880,6 +977,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
               traineeTurn: result.traineeTurn,
               personaTurn: result.personaTurn,
               narratorTurn: result.narratorTurn,
+              childTurn: result.childTurn,
               remainingSeconds: result.remainingSeconds,
               timeUp: result.timeUp,
               pendingQuizzes: result.pendingQuizzes,
@@ -925,10 +1023,10 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
           }
           // 二进制音频块：PCM16 LE 16kHz mono
           // TTS 播放中：检测到明显语音能量才视为用户插话打断；低能量噪声/回声直接忽略，
-          // 否则持续推流的首块音频（甚至扬声器回声）会立刻掐断 TTS
+          // 否则持续推流的首块音频（甚至扬声器回声）会立刻掐断 TTS；阈值随噪声底自适应
           if (ttsPlaying) {
             const rms = pcmRMS(data);
-            if (rms > VAD_THRESHOLD * 2) {
+            if (rms > vad.threshold() * 2) {
               cancelAll();
               send({ type: 'tts_cancelled' });
               // 打断的这块音频含有效语音，继续走下面的 ASR 流程

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
-import { EventTypes, type CertRecord, type QuizResult, type Session, type TranscriptTurn } from '@grasp-mvp/core';
+import { EventTypes, type CertRecord, type QuizResult, type Session, type TranscriptTurn, type VoiceBaseline } from '@grasp-mvp/core';
 import { bandFor, PersonaActor } from '@grasp-mvp/role-engine';
 import { scoreSession } from '@grasp-mvp/scoring-engine';
 import type { RouteContext } from '../ctx.js';
@@ -103,7 +103,10 @@ async function finalizeSession(session: Session, ctx: RouteContext, log?: Fastif
     );
 
     const scoringStart = Date.now();
-    report = await scoreSession(completed, scenario, defs, gateway, { videoFrames, log, skillPointNames, scoringFocus: guidance?.scoringFocus });
+    // 学员个人语音基线（preferences.voiceBaseline）：用于激情"音高/响度抬升"量化评分
+    const trainee = await store.getUser(session.userId);
+    const voiceBaseline = trainee?.preferences?.voiceBaseline as VoiceBaseline | undefined;
+    report = await scoreSession(completed, scenario, defs, gateway, { videoFrames, log, skillPointNames, scoringFocus: guidance?.scoringFocus, voiceBaseline });
     log?.info(
       { sessionId: session.id, reportId: report.id, totalScore: report.totalScore, passed: report.passed, ms: Date.now() - scoringStart },
       '结束会话：评分完成'
@@ -445,7 +448,7 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
 
     const scenario = await store.getScenario(session.scenarioId);
     const transcriptText = session.transcript
-      .map((t) => `[${t.seq}] ${t.speaker === 'trainee' ? '学员' : t.speaker === 'persona' ? '客户' : '教练'}：${t.text}`)
+      .map((t) => `[${t.seq}] ${t.speaker === 'trainee' ? '学员' : t.speaker === 'persona' ? '客户' : t.speaker === 'child' ? '孩子' : '教练'}：${t.text}`)
       .join('\n');
 
     const scenarioLines: string[] = [];

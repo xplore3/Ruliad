@@ -7,7 +7,7 @@ export type SessionMode = 'practice' | 'exam';
 
 export type SessionStatus = 'active' | 'completed' | 'abandoned';
 
-export type Speaker = 'trainee' | 'persona' | 'coach';
+export type Speaker = 'trainee' | 'persona' | 'coach' | 'child';
 
 export interface EmotionSnapshot {
   arousal: number;
@@ -16,14 +16,17 @@ export interface EmotionSnapshot {
   triggeredBy?: string[];
 }
 
-/** 学员单轮语音的声学特征（服务端对录音 PCM 的确定性分析，供语声语调类评分标准量化判定） */
+/** 学员单轮语音的声学特征（服务端对录音 PCM 的确定性分析，供语声语调类评分标准量化判定。
+ *  分析前已做电平归一化，特征与麦克风增益/距离无关；avgLoudnessDbfs 为归一化后的值，仅作诊断参考，不作评分依据） */
 export interface VoiceFeatures {
-  /** 平均响度 dBFS（说话段 RMS 均值） */
+  /** 平均响度 dBFS（归一化后说话段 RMS 均值；设备相关量，勿用于评分） */
   avgLoudnessDbfs: number;
   /** 响度动态范围 dB（说话段 P90 与 P10 之差，反映强弱起伏） */
   loudnessRangeDb: number;
   /** 音调变化幅度（F0 半音标准差；音频过短或无法测音调时为 null） */
   pitchVarSemitones: number | null;
+  /** 音高中位数 Hz（有效音调帧 F0 的中位数，对八度跳变噪声稳健；激情"音高抬升"型表现的核心指标） */
+  medianF0Hz?: number | null;
   /** 实际说话时长 ms（剔除静音段），真实语速 = 字数 / voicedMs */
   voicedMs: number;
 }
@@ -38,6 +41,8 @@ export interface TranscriptTurn {
   emotion?: EmotionSnapshot;
   /** 该轮是否使用了提示（coach 轮） */
   isHint?: boolean;
+  /** 本轮学员发言是对孩子说的（孩子模式路由判定）：该轮语音不计入音高/响度/语速等语音声学考核 */
+  addressedToChild?: boolean;
   /** 学员语音轮的声学特征（文字轮/未开启语音分析时无此字段） */
   voiceFeatures?: VoiceFeatures;
 }
@@ -81,6 +86,8 @@ export interface Session {
    * LLM 无法执行概率原则，由代码随机后写死进 prompt。
    */
   customerArchetype?: 'uninterested' | 'interested';
+  /** 孩子对话模式：客户转头问孩子后激活；激活期间学员发言经路由器判定对话对象，对孩子说的由孩子角色应答 */
+  childMode?: boolean;
   startedAt: string;
   endedAt?: string;
 }

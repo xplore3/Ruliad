@@ -21,7 +21,7 @@ import {
   type DemoLine,
 } from '../api';
 import type { ScenarioGuidance } from '../lib/guidance';
-import { PcmRecorder, TtsPlayer, VoiceSocket, type VoiceServerEvent } from '../voice';
+import { AdaptiveVad, PcmRecorder, TtsPlayer, VoiceSocket, type VoiceServerEvent } from '../voice';
 import QuizModal from '../components/QuizModal';
 import type { QuizQuestion, TranscriptTurn } from '../types';
 
@@ -59,12 +59,10 @@ const PERSONA_FALLBACK_MS = 10000;
 
 /** 示范播完后教练的询问 */
 const GUIDE_CHOICE_QUESTION = '想再听一个版本的示范，还是开始模拟练习？';
-/** 自动聆听 VAD 参数（参考服务端 voice.ts 的 RMS + 静音判停思路）：新手指引与 live 阶段共用 */
-const VAD_RMS_THRESHOLD = 0.02;
-const VAD_SILENCE_MS = 2500;
-const VAD_MAX_RECORD_MS = 15000;
-/** live 阶段说话后的最长录音兜底：持续输出未停顿也强制收尾（秒级停顿判停之外的保险） */
-const LIVE_MAX_RECORD_MS = 60000;
+/** 自动聆听 VAD 参数（参考服务端 voice.ts 的 RMS + 静音判停思路）：新手指引与 live 阶段共用；
+ * 语音判定用 AdaptiveVad 自适应噪声底，不再使用固定 RMS 阈值 */
+const VAD_SILENCE_MS = 1500;
+const VAD_MAX_RECORD_MS = 60000;
 /** 自动聆听识别失败的重试上限，超过后给出文字提示 */
 const GUIDANCE_MAX_RETRY = 2;
 
@@ -163,6 +161,8 @@ export default function Practice() {
   const statusRef = useRef<PracticeStatus>('loading');
   const phaseRef = useRef<Phase>('boot');
   const timeUpRef = useRef(false);
+  /** 倒计时真正开始过（出现过 >0）才允许到 0 自动结束，避免开场数据未加载时误判 */
+  const countdownLiveRef = useRef(false);
   const socketRef = useRef<VoiceSocket | null>(null);
   const recorderRef = useRef<PcmRecorder | null>(null);
   const playerRef = useRef<TtsPlayer | null>(null);
@@ -190,11 +190,10 @@ export default function Practice() {
   const vadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** isRecording 镜像（录音器 onLevel 回调中读取，避免闭包过期） */
   const isRecordingRef = useRef(false);
-  /** live 阶段 VAD：本轮是否已检测到说话 / 最近一次有声时刻 */
+  /** live 阶段 VAD：本轮是否已检测到说话 / 最近一次有声时刻 / 自适应阈值实例 */
   const liveSpokeRef = useRef(false);
   const liveLastVoiceAtRef = useRef(0);
-  /** live 阶段最长录音兜底定时器（首次检测到说话时启动） */
-  const liveVadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const liveVadRef = useRef(new AdaptiveVad());
   /** finishRecording 最新引用（onLevel 回调经此调用，避免闭包过期） */
   const finishRecordingRef = useRef<(() => void) | null>(null);
   /** 资格提问 / 示范选择的识别失败重试计数 */
@@ -318,11 +317,33 @@ export default function Practice() {
   useEffect(() => {
     if (timerIdle) return;
     const timer = setInterval(() => {
-      // 倒计时只作参考显示：到 0 不强制结束（结束时机由 AI 判断，见 timeUp 信号）；对话可继续
+      // 倒计时到 0 自动结束本场（见下方 effect）；结束时机也可由 AI 判断提前触发（timeUp 信号）
       setRemaining((prev) => (prev <= 1 ? 0 : prev - 1));
     }, 1000);
     return () => clearInterval(timer);
   }, [timerIdle]);
+
+  // ===== 倒计时到点（如地推 20 分钟）自动结束：不再开新轮，提示用户结束并评分 =====
+  useEffect(() => {
+    if (remaining > 0) {
+      countdownLiveRef.current = true;
+      return;
+    }
+    if (!countdownLiveRef.current || timeUp) return;
+    if (phaseRef.current !== 'live') return;
+    const st = statusRef.current;
+    if (st === 'loading' || st === 'failed' || st === 'ended' || st === 'evaluating' || st === 'paused') return;
+    timeUpRef.current = true;
+    setTimeUp(true);
+    if (isRecordingRef.current) {
+      // 正在说的话收尾提交最后一轮，AI 回复后进入已结束态；服务端同样会按 timeUp 收口
+      finishRecordingRef.current?.();
+    } else if (st === 'user_turn') {
+      setStatusBoth('time_up');
+    }
+    // thinking / speaking：等对方说完，由 afterAiDone 落到 time_up
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remaining, timeUp]);
 
   // ===== 语音通道：会话恢复后即建立（开场动画期间并行完成 ASR/AI 就绪） =====
   useEffect(() => {
@@ -350,15 +371,11 @@ export default function Practice() {
         levelAtRef.current = now;
         setMicLevel(Math.min(1, rms * 3));
       }
-      // live 阶段自动断句：检测到说话后连续静音 VAD_SILENCE_MS，自动关麦提交本轮；一直不说话则持续等
+      // live 阶段自动断句：检测到说话后连续静音 VAD_SILENCE_MS，自动关麦提交本轮；一直不说话则持续等；
+      // 单次发言不设时长上限，学员（地推）停下来才视为本轮表达结束
       if (!isRecordingRef.current) return;
-      if (rms > VAD_RMS_THRESHOLD) {
-        if (!liveSpokeRef.current) {
-          liveSpokeRef.current = true;
-          // 最长录音兜底：开口后始终不停顿也强制收尾
-          if (liveVadTimerRef.current) clearTimeout(liveVadTimerRef.current);
-          liveVadTimerRef.current = setTimeout(() => finishRecordingRef.current?.(), LIVE_MAX_RECORD_MS);
-        }
+      if (liveVadRef.current.isSpeech(rms)) {
+        if (!liveSpokeRef.current) liveSpokeRef.current = true;
         liveLastVoiceAtRef.current = now;
         return;
       }
@@ -408,10 +425,6 @@ export default function Practice() {
       }
       guidanceRecRef.current?.stop();
       guidanceRecRef.current = null;
-      if (liveVadTimerRef.current) {
-        clearTimeout(liveVadTimerRef.current);
-        liveVadTimerRef.current = null;
-      }
       isRecordingRef.current = false;
       liveSpokeRef.current = false;
       liveLastVoiceAtRef.current = 0;
@@ -670,7 +683,7 @@ export default function Practice() {
   };
 
   /**
-   * 自动聆听：RMS 音量检测说话开始，连续静音约 2.5s 判停，最大 15s 兜底。
+   * 自动聆听：AdaptiveVad 自适应检测说话开始，连续静音约 1.5s 判停，最大 60s 兜底。
    * resolve：micError=true 表示麦克风不可用（micErrorMsg 为具体原因）；audio=null 表示被外部中断（阶段切换/进 live）。
    */
   const autoListen = () =>
@@ -691,6 +704,7 @@ export default function Practice() {
       guidanceCancelRef.current = () => finish(null);
 
       const rec = new PcmRecorder();
+      const vad = new AdaptiveVad();
       const chunks: ArrayBuffer[] = [];
       rec.onChunk = (buf) => chunks.push(buf);
       let spoke = false;
@@ -698,7 +712,7 @@ export default function Practice() {
       rec.onLevel = (rms) => {
         if (settled) return;
         const now = Date.now();
-        if (rms > VAD_RMS_THRESHOLD) {
+        if (vad.isSpeech(rms)) {
           spoke = true;
           lastVoiceAt = now;
           return;
@@ -739,8 +753,11 @@ export default function Practice() {
     setQualifyHint('');
     qualifyRetryRef.current = 0;
     setQualifyStage('asking');
+    // 记录当前令牌：跳过指引/进 live 会使其失效，合成回来后不得再播放
+    const token = demoTokenRef.current;
     try {
       const clip = await ttsClip(sessionId, question, 'coach');
+      if (demoTokenRef.current !== token || phaseRef.current !== 'qualify') return;
       await playClip(clip.audioBase64);
     } catch {
       /* 提问音频失败不影响回答 */
@@ -776,8 +793,10 @@ export default function Practice() {
         await askQualifyQuestion(q + 1);
       } else if (res.experienced) {
         // 有经验：不看示范，直接进模拟演练（学员扮销售、AI 扮客户）；先口播说明，避免学员误以为进了示范模式
+        const token = demoTokenRef.current;
         try {
           const clip = await ttsClip(sessionId, '好的，你有相关经验，那我们跳过示范，直接进入模拟演练。', 'coach');
+          if (demoTokenRef.current !== token || phaseRef.current !== 'qualify') return;
           await playClip(clip.audioBase64);
         } catch {
           /* 提示音频失败不影响进入练习 */
@@ -1076,15 +1095,16 @@ export default function Practice() {
         const t = ev.turn;
         if (t) {
           const trainee: TranscriptTurn = { ...t.traineeTurn, speaker: 'trainee' };
-          const personaTurn: TranscriptTurn = { ...t.personaTurn, speaker: 'persona' };
+          const personaTurn: TranscriptTurn | null = t.personaTurn ? { ...t.personaTurn, speaker: 'persona' } : null;
           // 双场制切场旁白（speaker=coach）：追加到对话记录展示
           const narrator: TranscriptTurn | null = t.narratorTurn ? { ...t.narratorTurn, speaker: 'coach' } : null;
+          const child: TranscriptTurn | null = t.childTurn ? { ...t.childTurn, speaker: 'child' } : null;
           setMessages((prev) => {
             const seqs = new Set(prev.map((m) => `${m.seq}:${m.speaker}`));
-            const add = [trainee, personaTurn, ...(narrator ? [narrator] : [])].filter((m) => !seqs.has(`${m.seq}:${m.speaker}`));
+            const add = [trainee, ...(personaTurn ? [personaTurn] : []), ...(child ? [child] : []), ...(narrator ? [narrator] : [])].filter((m) => !seqs.has(`${m.seq}:${m.speaker}`));
             return [...prev, ...add];
           });
-          setReplyText(t.personaTurn.text);
+          setReplyText(t.personaTurn?.text ?? t.childTurn?.text ?? '');
           applyTurnMeta(t.remainingSeconds, t.timeUp);
           enqueueQuizzes(t.pendingQuizzes);
         }
@@ -1112,8 +1132,8 @@ export default function Practice() {
     setStatusBoth('thinking');
     try {
       const res = await sendTurn(sessionId, text);
-      setMessages((prev) => [...prev, res.traineeTurn, res.personaTurn, ...(res.narratorTurn ? [res.narratorTurn] : [])]);
-      setReplyText(res.personaTurn.text);
+      setMessages((prev) => [...prev, res.traineeTurn, ...(res.personaTurn ? [res.personaTurn] : []), ...(res.childTurn ? [res.childTurn] : []), ...(res.narratorTurn ? [res.narratorTurn] : [])]);
+      setReplyText(res.personaTurn?.text ?? res.childTurn?.text ?? '');
       if (res.bandKey) setBandKey(res.bandKey);
       applyTurnMeta(res.remainingSeconds, res.timeUp);
       enqueueQuizzes(res.pendingQuizzes);
@@ -1142,10 +1162,6 @@ export default function Practice() {
     isRecordingRef.current = false;
     liveSpokeRef.current = false;
     liveLastVoiceAtRef.current = 0;
-    if (liveVadTimerRef.current) {
-      clearTimeout(liveVadTimerRef.current);
-      liveVadTimerRef.current = null;
-    }
     recorder.stop();
     socket.send({ type: 'finish' });
     setIsRecording(false);
@@ -1178,9 +1194,10 @@ export default function Practice() {
       return;
     }
     socket.send({ type: 'start' });
-    // 新一轮录音：重置 VAD 状态，判停逻辑随 onLevel 回调生效
+    // 新一轮录音：重置 VAD 状态（含自适应噪声底），判停逻辑随 onLevel 回调生效
     liveSpokeRef.current = false;
     liveLastVoiceAtRef.current = 0;
+    liveVadRef.current = new AdaptiveVad();
     isRecordingRef.current = true;
     setIsRecording(true);
     setStatusBoth('user_turn');
@@ -1253,10 +1270,6 @@ export default function Practice() {
         isRecordingRef.current = false;
         liveSpokeRef.current = false;
         liveLastVoiceAtRef.current = 0;
-        if (liveVadTimerRef.current) {
-          clearTimeout(liveVadTimerRef.current);
-          liveVadTimerRef.current = null;
-        }
         recorderRef.current?.stop();
         setIsRecording(false);
         setMicLevel(0);
@@ -1314,10 +1327,6 @@ export default function Practice() {
       isRecordingRef.current = false;
       liveSpokeRef.current = false;
       liveLastVoiceAtRef.current = 0;
-      if (liveVadTimerRef.current) {
-        clearTimeout(liveVadTimerRef.current);
-        liveVadTimerRef.current = null;
-      }
       recorderRef.current?.stop();
       setIsRecording(false);
     }
@@ -1798,11 +1807,11 @@ export default function Practice() {
                   <div key={`${m.seq}:${m.speaker}`} className={`msg ${m.speaker === 'trainee' ? 'msg-me' : ''}`}>
                     <div
                       className="bubble"
-                      style={m.speaker === 'coach' ? { background: '#FFF0EE', borderColor: '#FFD9D2', maxWidth: '100%' } : undefined}
+                      style={m.speaker === 'coach' ? { background: '#FFF0EE', borderColor: '#FFD9D2', maxWidth: '100%' } : m.speaker === 'child' ? { background: '#FFF8E1', borderColor: '#FFE9A8' } : undefined}
                     >
                       {m.text}
                       <div className="meta">
-                        {m.speaker === 'trainee' ? '我' : m.speaker === 'persona' ? personaName : m.isHint ? '💡 教练提示' : '🎓 AI 教练'}
+                        {m.speaker === 'trainee' ? '我' : m.speaker === 'persona' ? personaName : m.speaker === 'child' ? '孩子' : m.isHint ? '💡 教练提示' : '🎓 AI 教练'}
                       </div>
                     </div>
                   </div>

@@ -8,6 +8,8 @@ dist
 uploads
 # 对练录像本地存储（VIDEO_STORAGE_DIR 默认值）
 data/videos
+# 学员语音留存（评分测量离线核查）
+packages/api-gateway/recordings
 *.tsbuildinfo
 *.db
 *.db-journal

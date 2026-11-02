@@ -7,6 +7,7 @@ import type {
   Session,
   SkillScore,
   QuizScore,
+  VoiceBaseline,
 } from '@grasp-mvp/core';
 import { judgeItem } from './judge.js';
 import { runRuleChecks } from './rules.js';
@@ -30,6 +31,8 @@ export interface ScoreOptions {
   skillPointNames?: Record<string, string>;
   /** 新手指引流程配置的重点评分维度（第5步）；有值时 judge prompt 追加从严要求，缺省行为不变 */
   scoringFocus?: string[];
+  /** 学员个人语音基线（平静音高/响度）：提供后 ruleStats.voice 附带 f0LiftSemitones/loudnessLiftDb */
+  voiceBaseline?: VoiceBaseline;
 }
 
 /** 评分过程日志器最小接口 */
@@ -50,7 +53,7 @@ export async function scoreSession(
   gateway: LLMGateway,
   options: ScoreOptions = {}
 ): Promise<ScoreReport> {
-  const { violations: ruleViolations, stats } = runRuleChecks(session, scenario.coverageTopics ?? []);
+  const { violations: ruleViolations, stats } = runRuleChecks(session, scenario.coverageTopics ?? [], options.voiceBaseline);
   // 分类场景（评分库驱动）：评什么完全由分类库决定，规则层只产出统计指标（供 judge 判定语声语调类标准），
   // 不产出库外违规项（话题覆盖/口头禅/红线）；无分类的存量场景保持完整规则层
   const violations = scenario.category ? [] : ruleViolations;

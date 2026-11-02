@@ -98,6 +98,50 @@ describe('judgeItem 定量计分（quantitativeRule）', () => {
     expect(result.score).toBe(30);
     expect(result.rationale).toContain('无数据');
   });
+
+  it('锚点线性插值：区间内连续取分，无档位悬崖', async () => {
+    const pointsDef: ScoreItemDef = {
+      ...def,
+      id: 'item-points',
+      name: '语速调',
+      scoringMode: 'score',
+      quantitativeRule: {
+        blocks: [
+          {
+            label: '激情度',
+            maxScore: 100,
+            metrics: [
+              {
+                metric: 'pitchVarSemitones',
+                points: [
+                  { value: 4.5, score: 45 },
+                  { value: 5.5, score: 70 },
+                  { value: 7, score: 100 },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const gateway = gatewayWith(JSON.stringify({ rationale: 'ok', betterScript: '' }));
+    const statsAt = (pitch: number) => ({
+      ...voiceStats,
+      voice: { ...voiceStats.voice, pitchVarSemitones: pitch },
+    });
+    // 区间中点：4.5~5.5 之间 5.0 → (45+70)/2 ≈ 58（四舍五入）
+    const mid = await judgeItem(pointsDef, session, gateway, undefined, undefined, statsAt(5.0));
+    expect(mid.score).toBe(58);
+    // 差 0.02 不再翻档：5.49 与 5.51 只差 1 分
+    const justBelow = await judgeItem(pointsDef, session, gateway, undefined, undefined, statsAt(5.49));
+    const justAbove = await judgeItem(pointsDef, session, gateway, undefined, undefined, statsAt(5.51));
+    expect(Math.abs(justAbove.score - justBelow.score)).toBeLessThanOrEqual(1);
+    // 两端外取端点分
+    const low = await judgeItem(pointsDef, session, gateway, undefined, undefined, statsAt(2.0));
+    expect(low.score).toBe(45);
+    const high = await judgeItem(pointsDef, session, gateway, undefined, undefined, statsAt(9.0));
+    expect(high.score).toBe(100);
+  });
 });
 
 describe('judgeItem betterScript', () => {

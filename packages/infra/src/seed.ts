@@ -720,7 +720,7 @@ export function buildSeedData(): SeedData {
         personaConfigId: 'persona-zhao',
         skillPointIds: ['sp-icebreak'],
         successCriteria: { passScore: 70 },
-        durationMinutes: 8,
+        durationMinutes: 20,
         difficulty: 2,
         coverageTopics: ['地推开场', '陌生破冰', '驻足引导'],
         personaTitle: '接送孩子路过的家长，脚步匆匆',

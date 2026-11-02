@@ -10,6 +10,24 @@ import { getCachedPreferences, getPreferredSpeechRate } from './api';
 
 // ---------- 麦克风采集 ----------
 
+/**
+ * 自适应 VAD：按近期静音块估计噪声底，语音阈值随之浮动。
+ * 浏览器 AGC 关闭后，不同麦克风的原始电平差异很大，固定阈值会把轻声说话误判为静音（话没说完被切断）。
+ */
+export class AdaptiveVad {
+  private noiseFloor = 0.006;
+  /** 当前语音判定阈值（噪声底 ×2.5，钳制在 0.005~0.02） */
+  threshold(): number {
+    return Math.min(0.02, Math.max(0.005, this.noiseFloor * 2.5));
+  }
+  /** 输入一个音频块 RMS，返回是否语音；非语音块缓慢更新噪声底 */
+  isSpeech(rms: number): boolean {
+    if (rms > this.threshold()) return true;
+    this.noiseFloor = Math.max(0.002, this.noiseFloor * 0.95 + rms * 0.05);
+    return false;
+  }
+}
+
 const TARGET_SAMPLE_RATE = 16000;
 /** 每个上行音频块约 100ms */
 const CHUNK_MS = 100;
@@ -50,7 +68,9 @@ export class PcmRecorder {
     }
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({
-        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+        // autoGainControl 必须关闭：AGC 会把响的压轻、轻的抬响，
+        // 直接抹平响度动态范围，导致激情度量化评分失真
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: false },
       });
     } catch (err) {
       const name = err instanceof DOMException ? err.name : '';
@@ -343,8 +363,9 @@ export interface VoiceServerEvent {
   isFinal?: boolean;
   turn?: {
     traineeTurn: { seq: number; speaker: string; text: string; at: string };
-    personaTurn: { seq: number; speaker: string; text: string; at: string };
+    personaTurn?: { seq: number; speaker: string; text: string; at: string };
     narratorTurn?: { seq: number; speaker: string; text: string; at: string };
+    childTurn?: { seq: number; speaker: string; text: string; at: string };
     remainingSeconds: number;
     timeUp?: boolean;
     pendingQuizzes?: QuizQuestion[];

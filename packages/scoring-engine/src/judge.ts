@@ -15,9 +15,27 @@ const METRIC_LABELS: Record<string, { label: string; unit: string }> = {
   loudnessRangeDb: { label: '响度动态范围', unit: 'dB' },
   speechRateCpm: { label: '真实语速', unit: '字/分钟' },
   avgLoudnessDbfs: { label: '平均响度', unit: 'dBFS' },
+  medianF0Hz: { label: '音高中位数', unit: 'Hz' },
+  f0LiftSemitones: { label: '音高抬升（相对个人基线）', unit: '半音' },
+  loudnessLiftDb: { label: '响度提升（相对个人基线）', unit: 'dB' },
 };
 
-/** 定量查表：metric 值命中区间得对应分；缺数据按中间分 50 计 */
+/** 锚点线性插值：points 按 value 升序，区间内线性插值，两端外取端点分（支持钟形：分数可先升后降） */
+function scoreByPoints(points: NonNullable<QuantitativeRule['blocks'][number]['metrics'][number]['points']>, value: number): number {
+  const sorted = [...points].sort((a, b) => a.value - b.value);
+  if (value <= sorted[0].value) return sorted[0].score;
+  if (value >= sorted[sorted.length - 1].value) return sorted[sorted.length - 1].score;
+  for (let i = 1; i < sorted.length; i++) {
+    if (value < sorted[i].value) {
+      const a = sorted[i - 1];
+      const b = sorted[i];
+      return Math.round(a.score + ((value - a.value) / (b.value - a.value)) * (b.score - a.score));
+    }
+  }
+  return sorted[sorted.length - 1].score;
+}
+
+/** 定量查表：metric 值命中区间得对应分；配了 points 走线性插值；缺数据按中间分 50 计 */
 function scoreMetric(
   rule: QuantitativeRule['blocks'][number]['metrics'][number],
   voice: ScoreReport['ruleStats']['voice']
@@ -25,7 +43,8 @@ function scoreMetric(
   const raw = voice?.[rule.metric];
   const value = typeof raw === 'number' ? raw : null;
   if (value === null) return { score: 50, value: null };
-  for (const b of rule.bands) {
+  if (rule.points?.length) return { score: scoreByPoints(rule.points, value), value };
+  for (const b of rule.bands ?? []) {
     if ((b.min === undefined || value >= b.min) && (b.max === undefined || value < b.max)) {
       return { score: b.score, value };
     }
@@ -36,12 +55,12 @@ function scoreMetric(
 /** 确定性定量计分：块得分 = 各 metric 区间得分均值 / 100 × 块满分 */
 function computeQuantScore(
   rule: QuantitativeRule,
-  stats?: ScoreReport['ruleStats']
+  voice?: ScoreReport['ruleStats']['voice']
 ): { total: number; blockLines: string[] } {
   let total = 0;
   const blockLines: string[] = [];
   for (const block of rule.blocks) {
-    const parts = block.metrics.map((m) => scoreMetric(m, stats?.voice));
+    const parts = block.metrics.map((m) => scoreMetric(m, voice));
     const totalWeight = block.metrics.reduce((s, m) => s + (m.weight ?? 1), 0);
     const avg = parts.reduce((s, p, i) => s + p.score * (block.metrics[i].weight ?? 1), 0) / totalWeight;
     const blockScore = Math.round((avg / 100) * block.maxScore);
@@ -67,7 +86,7 @@ async function narrateQuantScore(
   det: { total: number; blockLines: string[] }
 ): Promise<{ rationale: string; betterScript: string }> {
   const transcriptLines = session.transcript
-    .map((t) => `[${t.seq}] ${t.speaker === 'trainee' ? '学员' : t.speaker === 'coach' ? '旁白' : '客户'}：${t.text}`)
+    .map((t) => `[${t.seq}] ${t.speaker === 'trainee' ? (t.addressedToChild ? '学员（对孩子说）' : '学员') : t.speaker === 'coach' ? '旁白' : t.speaker === 'child' ? '孩子' : '客户'}：${t.text}`)
     .join('\n');
   const prompt = [
     def.judgePrompt,
@@ -125,6 +144,15 @@ function buildStatsLines(stats: ScoreReport['ruleStats']): string[] {
       `- 平均响度/音量（avgLoudnessDbfs）：${stats.voice.avgLoudnessDbfs} dBFS（受麦克风距离影响，只做粗判）`,
       `- 真实语速（speechRateCpm）：${stats.voice.speechRateCpm} 字/分钟（按实际说话时长计，已剔除停顿）`
     );
+    if (stats.voice.medianF0Hz != null) {
+      lines.push(`- 音高中位数（medianF0Hz）：${stats.voice.medianF0Hz} Hz（整体音区，对八度跳变噪声稳健）`);
+    }
+    if (stats.voice.f0LiftSemitones != null) {
+      lines.push(
+        `- 音高抬升（f0LiftSemitones）：${stats.voice.f0LiftSemitones} 半音（相对该学员个人平静基线；激情"音高抬升"型表现的核心指标）`,
+        `- 响度提升（loudnessLiftDb）：${stats.voice.loudnessLiftDb} dB（相对该学员个人平静基线）`
+      );
+    }
   } else {
     lines.push('学员语音声学量化数据：无（本场为文字对练或录音不可用，激情度/音量/音调类维度无量化依据，不得凭文字猜测打分）');
   }
@@ -140,7 +168,7 @@ function buildJudgePrompt(
   stats?: ScoreReport['ruleStats']
 ): string {
   const transcriptLines = session.transcript
-    .map((t) => `[${t.seq}] ${t.speaker === 'trainee' ? '学员' : t.speaker === 'coach' ? '旁白' : '客户'}：${t.text}`)
+    .map((t) => `[${t.seq}] ${t.speaker === 'trainee' ? (t.addressedToChild ? '学员（对孩子说）' : '学员') : t.speaker === 'coach' ? '旁白' : t.speaker === 'child' ? '孩子' : '客户'}：${t.text}`)
     .join('\n');
   const scenarioLines: string[] = [];
   if (scenario) {
@@ -251,7 +279,29 @@ export async function judgeItem(
   // 确定性定量计分：配置了 quantitativeRule 的标准跳过 LLM 打分，按语音量化数据查表，
   // LLM 只写评语——分数永不动摇（缺声学数据时按中间分计并在明细中注明）
   if (def.scoringMode === 'score' && def.quantitativeRule) {
-    const det = computeQuantScore(def.quantitativeRule, stats);
+    // 孩子语气标准：本场没有任何对孩子说的轮次 → 直接 0 分（不是"无数据"，是没做这件事）。
+    // 有孩子对话但纯文字（无声学数据）才保留无数据中间分
+    if (def.voiceChannel === 'child' && stats && (stats.childDialogueTurns ?? 0) === 0) {
+      return {
+        itemId: def.id,
+        itemName: def.name,
+        skillPointId: def.skillPointId,
+        levelKey: 'score',
+        levelLabel: '得分',
+        score: 0,
+        quote: '',
+        quoteTurnSeq: 0,
+        rationale: '本场未与孩子对话。该标准只考核与孩子说话的语气，没有此类轮次即没有践行该行为，计 0 分。',
+        confidence: 0.98,
+        judgeAgree: true,
+        isReference: false,
+        isObservation: def.isObservation,
+        layer: def.layer,
+      };
+    }
+    // voiceChannel='child' 的标准（与孩子说话的语气）只统计对孩子说的轮次
+    const voice = def.voiceChannel === 'child' ? stats?.voiceChild : stats?.voice;
+    const det = computeQuantScore(def.quantitativeRule, voice);
     const narrative = await narrateQuantScore(def, session, gateway, scenario, det);
     return {
       itemId: def.id,
