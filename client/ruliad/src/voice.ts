@@ -10,6 +10,24 @@ import { getCachedPreferences, getPreferredSpeechRate } from './api';
 
 // ---------- 麦克风采集 ----------
 
+/**
+ * 自适应 VAD：按近期静音块估计噪声底，语音阈值随之浮动。
+ * 浏览器 AGC 关闭后，不同麦克风的原始电平差异很大，固定阈值会把轻声说话误判为静音（话没说完被切断）。
+ */
+export class AdaptiveVad {
+  private noiseFloor = 0.006;
+  /** 当前语音判定阈值（噪声底 ×2.5，钳制在 0.005~0.02） */
+  threshold(): number {
+    return Math.min(0.02, Math.max(0.005, this.noiseFloor * 2.5));
+  }
+  /** 输入一个音频块 RMS，返回是否语音；非语音块缓慢更新噪声底 */
+  isSpeech(rms: number): boolean {
+    if (rms > this.threshold()) return true;
+    this.noiseFloor = Math.max(0.002, this.noiseFloor * 0.95 + rms * 0.05);
+    return false;
+  }
+}
+
 const TARGET_SAMPLE_RATE = 16000;
 /** 每个上行音频块约 100ms */
 const CHUNK_MS = 100;
@@ -50,7 +68,9 @@ export class PcmRecorder {
     }
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({
-        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+        // autoGainControl 必须关闭：AGC 会把响的压轻、轻的抬响，
+        // 直接抹平响度动态范围，导致激情度量化评分失真
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: false },
       });
     } catch (err) {
       const name = err instanceof DOMException ? err.name : '';
@@ -84,39 +104,43 @@ export class PcmRecorder {
     this.running = true;
   }
 
+  private emitPcm(block: number[], ratio: number) {
+    const outLen = Math.floor(block.length / ratio);
+    if (outLen <= 0) return;
+    const pcm = new Int16Array(outLen);
+    for (let i = 0; i < outLen; i++) {
+      const srcIdx = i * ratio;
+      const lo = Math.floor(srcIdx);
+      const hi = Math.min(lo + 1, block.length - 1);
+      const frac = srcIdx - lo;
+      const v = block[lo] * (1 - frac) + block[hi] * frac;
+      pcm[i] = Math.max(-32768, Math.min(32767, Math.round(v * 32767)));
+    }
+    this.onChunk?.(pcm.buffer);
+  }
+
   private handleSamples(samples: Float32Array) {
     const ctx = this.ctx;
     if (!ctx || !this.running) return;
     const ratio = ctx.sampleRate / TARGET_SAMPLE_RATE;
-    // 计算能量（在原始采样率上即可）
     let sum = 0;
     for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
-    this.onLevel?.(Math.sqrt(sum / samples.length));
-    // onLevel 回调可能同步触发 stop()（如 VAD 判停），此时本块直接丢弃
-    if (!this.running || this.ctx !== ctx) return;
+    const rms = Math.sqrt(sum / samples.length);
 
-    // 线性插值重采样到 16kHz
-    for (let i = 0; i < samples.length; i++) {
-      this.pending.push(samples[i]);
-    }
+    for (let i = 0; i < samples.length; i++) this.pending.push(samples[i]);
     const chunkSrcLen = Math.floor((CHUNK_MS / 1000) * ctx.sampleRate);
     while (this.pending.length >= chunkSrcLen) {
-      const block = this.pending.splice(0, chunkSrcLen);
-      const outLen = Math.floor(block.length / ratio);
-      const pcm = new Int16Array(outLen);
-      for (let i = 0; i < outLen; i++) {
-        const srcIdx = i * ratio;
-        const lo = Math.floor(srcIdx);
-        const hi = Math.min(lo + 1, block.length - 1);
-        const frac = srcIdx - lo;
-        const v = block[lo] * (1 - frac) + block[hi] * frac;
-        pcm[i] = Math.max(-32768, Math.min(32767, Math.round(v * 32767)));
-      }
-      this.onChunk?.(pcm.buffer);
+      this.emitPcm(this.pending.splice(0, chunkSrcLen), ratio);
     }
+
+    // 先送出当前声音，再让 VAD 判停，避免话尾的当前音频块被丢弃
+    this.onLevel?.(rms);
   }
 
   stop() {
+    if (this.running && this.ctx && this.pending.length > 0) {
+      this.emitPcm(this.pending, this.ctx.sampleRate / TARGET_SAMPLE_RATE);
+    }
     this.running = false;
     // 先摘掉消息回调，停止后在途的 worklet 消息不再进入 handleSamples
     if (this.node) this.node.port.onmessage = null;
@@ -343,7 +367,9 @@ export interface VoiceServerEvent {
   isFinal?: boolean;
   turn?: {
     traineeTurn: { seq: number; speaker: string; text: string; at: string };
-    personaTurn: { seq: number; speaker: string; text: string; at: string };
+    personaTurn?: { seq: number; speaker: string; text: string; at: string };
+    narratorTurn?: { seq: number; speaker: string; text: string; at: string };
+    childTurn?: { seq: number; speaker: string; text: string; at: string };
     remainingSeconds: number;
     timeUp?: boolean;
     pendingQuizzes?: QuizQuestion[];

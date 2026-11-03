@@ -120,7 +120,7 @@ export interface Session {
 
 export interface TranscriptTurn {
   seq: number;
-  speaker: 'trainee' | 'persona' | 'coach';
+  speaker: 'trainee' | 'persona' | 'coach' | 'child';
   text: string;
   at: string;
   isHint?: boolean;
@@ -366,7 +366,12 @@ export interface QuizQuestion {
 
 export interface TurnResult {
   traineeTurn: TranscriptTurn;
-  personaTurn: TranscriptTurn;
+  /** 客户应答轮；孩子模式下销售对孩子说话时无客户轮（由 childTurn 承担主应答） */
+  personaTurn?: TranscriptTurn;
+  /** 双场制切场旁白（第一小场结束、切换有意向客户时下发；speaker=coach） */
+  narratorTurn?: TranscriptTurn;
+  /** 孩子作答轮（客户转头问孩子时下发；speaker=child） */
+  childTurn?: TranscriptTurn;
   arousal?: number | null;
   bandKey?: string | null;
   remainingSeconds: number;

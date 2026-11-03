@@ -15,6 +15,59 @@ export interface ScoreLevel {
   description: string;
 }
 
+/** 定量计分区间：metric 值命中 [min, max) 时得 score 分（0-100），bands 按声明顺序首个命中生效 */
+export interface QuantMetricBand {
+  min?: number;
+  max?: number;
+  score: number;
+}
+
+/** 定量计分锚点：metric 值 value 对应 score 分（0-100）；相邻锚点间线性插值，两端外取端点分 */
+export interface QuantMetricPoint {
+  value: number;
+  score: number;
+}
+
+/** 定量计分 metric：语音声学量化数据之一；weight 为块内权重（缺省 1，按权重加权平均） */
+export interface QuantMetricRule {
+  metric:
+    | 'pitchVarSemitones'
+    | 'loudnessRangeDb'
+    | 'speechRateCpm'
+    | 'avgLoudnessDbfs'
+    | 'medianF0Hz'
+    | 'f0LiftSemitones'
+    | 'loudnessLiftDb';
+  bands?: QuantMetricBand[];
+  /**
+   * 锚点线性插值（优先于 bands）：按 value 升序排列，命中区间在两锚点间线性插值，
+   * 消除区间边界的分数悬崖；支持钟形评分（锚点分数先升后降）
+   */
+  points?: QuantMetricPoint[];
+  /** 块内权重（缺省 1）；区分度弱的指标可降权，如 0.3 */
+  weight?: number;
+}
+
+/**
+ * 确定性定量计分规则：配置后该标准跳过 LLM 打分，由代码按语音量化数据查表计分
+ * （块得分 = 各 metric 区间得分按 weight 加权平均 / 100 × maxScore，weight 缺省 1，
+ * 缺数据的 metric 按 50 分计），LLM 只负责根据已定分数写评语与话术建议，无法再自由改分。
+ */
+export interface QuantitativeRule {
+  blocks: Array<{
+    /** 计分块名（如 激情度/语速/音调/音量） */
+    label: string;
+    maxScore: number;
+    metrics: QuantMetricRule[];
+  }>;
+}
+
+/** 学员个人语音基线（平静状态的音高中位数与响度）：用于计算音高/响度抬升；存于用户 preferences.voiceBaseline */
+export interface VoiceBaseline {
+  medianF0Hz: number;
+  avgLoudnessDbfs: number;
+}
+
 /** 评分标准定义（行为锚定） */
 export interface ScoreItemDef {
   id: string;
@@ -38,6 +91,10 @@ export interface ScoreItemDef {
    * 如"总分100=激情60+语速20+音量20"），judge 按锚定直接给出总分
    */
   scoringMode?: 'levels' | 'score';
+  /** 确定性定量计分规则（仅 score 模式）：配置后跳过 LLM 打分，按语音量化数据查表计分 */
+  quantitativeRule?: QuantitativeRule;
+  /** 定量评分使用的语音统计通道：缺省=对家长/客户的学员轮次；'child'=只统计对孩子说的轮次（与孩子说话的语气类标准） */
+  voiceChannel?: 'child';
 }
 
 /** 单个评分标准判定结果 */
@@ -120,6 +177,38 @@ export interface ScoreReport {
     avgSpeechRate: number;
     /** 明显停顿次数（学员应答前静默 > 3s） */
     pauseCount: number;
+    /** 学员语音声学特征聚合（来自各语音轮的录音分析；纯文字对练时缺省） */
+    voice?: {
+      /** 有声学特征的语音轮数 */
+      turns: number;
+      /** 平均响度 dBFS（按说话时长加权的各轮均值） */
+      avgLoudnessDbfs: number;
+      /** 响度动态范围 dB（各轮 P90-P10：整场均值×0.5 + 峰值轮×0.5，峰值轮要求 ≥2s 有声） */
+      loudnessRangeDb: number;
+      /** 音调变化幅度（F0 半音标准差：整场均值×0.5 + 峰值轮×0.5；全部轮不可测时为 null） */
+      pitchVarSemitones: number | null;
+      /** 真实语速（字/分钟，学员语音轮总字数 / 实际说话总时长） */
+      speechRateCpm: number;
+      /** 音高中位数 Hz（整场各轮 F0 中位数的融合值；不可测为 null） */
+      medianF0Hz?: number | null;
+      /** 音高抬升（半音）：相对该学员个人平静基线的音高提升，激情"音高抬升"型的核心量；无基线时为 null */
+      f0LiftSemitones?: number | null;
+      /** 响度提升 dB：相对该学员个人平静基线的响度差；无基线时为 null */
+      loudnessLiftDb?: number | null;
+    };
+    /** 对孩子说的学员轮次数（无论有无语音）；0 表示本场未与孩子对话 */
+    childDialogueTurns?: number;
+    /** 对孩子说的学员轮次的独立声学聚合（结构同 voice；无孩子对话时缺省），供「与孩子说话的语气」类标准评分 */
+    voiceChild?: {
+      turns: number;
+      avgLoudnessDbfs: number;
+      loudnessRangeDb: number;
+      pitchVarSemitones: number | null;
+      speechRateCpm: number;
+      medianF0Hz?: number | null;
+      f0LiftSemitones?: number | null;
+      loudnessLiftDb?: number | null;
+    };
   };
   /** 教练总结（LLM 生成，失败时回退模板文案） */
   summary?: string;

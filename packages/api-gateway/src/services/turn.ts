@@ -1,8 +1,8 @@
-import { EventTypes, type QuizQuestion, type QuizQuestionPublic, type Scenario, type ScenarioGuidance, type Session, type TranscriptTurn } from '@grasp-mvp/core';
-import { bandFor, checkConsistency, compilePersona, EmotionTracker, PersonaActor } from '@grasp-mvp/role-engine';
+import { EventTypes, type PersonaConfig, type QuizQuestion, type QuizQuestionPublic, type Scenario, type ScenarioGuidance, type Session, type TranscriptTurn, type VoiceFeatures } from '@grasp-mvp/core';
+import { bandFor, checkConsistency, classifyAddressTarget, compilePersona, EmotionTracker, PersonaActor, replyAsChild, ruleCheck } from '@grasp-mvp/role-engine';
 import type { RouteContext } from '../ctx.js';
 import { mkEvent } from '../events.js';
-import { drillScriptPrompt, archetypePrompt, resolveDrillScript } from './drill.js';
+import { drillScriptPrompt, archetypePrompt, resolveDrillScript, initialCustomerArchetype, FIRST_SCENE_MAX_MS, GIVE_UP_PATTERN, SCENE_TRANSITION_NARRATION } from './drill.js';
 
 /** 一致性校验重试仍失败时的兜底角色化文案 */
 const CONSISTENCY_FALLBACK = '这个我不太清楚，你接着说。';
@@ -10,8 +10,8 @@ const CONSISTENCY_FALLBACK = '这个我不太清楚，你接着说。';
 const CONSISTENCY_CORRECTION = '（注意：上一次回复出戏或泄露了不该说的信息，务必保持角色，不要暴露 AI 身份或考核相关信息。）';
 /** 系统级开场白触发词：电话接通后自动播放问候，不存入 transcript */
 const SYSTEM_GREETING_TOKEN = '__SYSTEM_GREETING__';
-/** 学员轮数极端安全上限：防止对话无限进行（正常演练远低于此；结束时机由 AI 判断，不由倒计时决定） */
-const MAX_LIVE_TURNS = 40;
+/** 学员轮数极端安全上限：仅作防止对话无限进行的兜底（20 分钟对练正常轮数可能远超 40；结束时机由 AI 判断 + 倒计时到点决定） */
+const MAX_LIVE_TURNS = 200;
 
 export function remainingSeconds(session: Session, scenario: Scenario, overrideSeconds?: number): number {
   const totalSeconds = overrideSeconds ?? scenario.durationMinutes * 60;
@@ -43,15 +43,31 @@ export async function effectiveCountdownSeconds(
   return countdownSecondsOf(scenario, guidance);
 }
 
-/** 加载 persona 运行时（编译后的 bundle + 原始配置 + 演练剧本 + 本场客户类型），配置缺失返回 undefined */
+/** 中性兜底陪练员：陪练员库为空或场景未绑定时使用——演练行为完全由场景设定与演练剧本驱动，不携带任何角色库设定 */
+function fallbackPersona(scenario: Scenario): PersonaConfig {
+  return {
+    id: 'persona-neutral-fallback',
+    tenantId: scenario.tenantId,
+    version: 1,
+    name: '客户',
+    background: '本场演练的客户，行为完全由场景设定与演练剧本决定。',
+    elementIds: [],
+    behaviorBands: [
+      { minArousal: 0, maxArousal: 1, key: 'neutral', instruction: '按演练剧本与对话情境自然反应' },
+    ],
+    knowledgeBoundary: { mustNotKnow: [], loadedKnowledge: [] },
+  };
+}
+
+/** 加载 persona 运行时（编译后的 bundle + 原始配置 + 演练剧本 + 本场客户类型）；陪练员缺失时用中性兜底角色，保证演练只受场景与剧本影响 */
 export async function loadRuntime(
   ctx: RouteContext,
   scenario: Scenario,
   difficulty?: number,
   archetype?: 'uninterested' | 'interested'
 ) {
-  const personaConfig = await ctx.store.getPersonaConfig(scenario.personaConfigId);
-  if (!personaConfig) return undefined;
+  const personaConfig =
+    (await ctx.store.getPersonaConfig(scenario.personaConfigId)) ?? fallbackPersona(scenario);
   const elements = await ctx.store.listElements({});
 
   // 加载产品知识库：场景级 productKBId 优先于陪练员级 productKBId
@@ -64,10 +80,18 @@ export async function loadRuntime(
     productKB = await ctx.store.getProductKB(personaConfig.tenantId);
   }
 
-  const bundle = compilePersona(personaConfig, elements, productKB, scenario);
+  // 演练剧本优先解析：有剧本时客户行为只由剧本+本场客户类型决定（剧情参照为唯一行为来源），
+  // 不再注入场景难度、指引配置、人设要素等其他指令，避免与剧本中的行为约束冲突
+  const drillScript = await resolveDrillScript(ctx.store, scenario).catch(() => undefined);
+
+  const bundle = drillScript
+    ? compilePersona(personaConfig, [], undefined, undefined)
+    : compilePersona(personaConfig, elements, productKB, scenario);
 
   // 注入新手指引流程配置的第4步参数：难度系数说明（选定档位的客户行为要求）+ 演练真实度标准库
-  const guidance = await ctx.store.getScenarioGuidance(scenario.id).catch(() => undefined);
+  const guidance = drillScript
+    ? undefined
+    : await ctx.store.getScenarioGuidance(scenario.id).catch(() => undefined);
   if (guidance) {
     const level =
       guidance.difficultyLevels.find((l) => l.level === (difficulty ?? guidance.defaultDifficulty)) ??
@@ -92,7 +116,6 @@ export async function loadRuntime(
   }
 
   // 注入演练剧本（整篇剧情参照）：LLM 依此理解谁先开口、客户如何回应、何时自然结束
-  const drillScript = await resolveDrillScript(ctx.store, scenario).catch(() => undefined);
   if (drillScript) {
     bundle.systemPrompt = `${bundle.systemPrompt}\n\n${drillScriptPrompt(drillScript)}`;
   }
@@ -105,11 +128,19 @@ export async function loadRuntime(
 
 export interface TurnResult {
 traineeTurn: TranscriptTurn;
-personaTurn: TranscriptTurn;
+/** 客户应答轮；孩子模式下销售对孩子说话时无客户轮（由 childTurn 承担主应答） */
+personaTurn?: TranscriptTurn;
+/** 双场制切场旁白（第一小场结束、切换有意向客户时下发；speaker=coach，不参与轮次与评分统计） */
+narratorTurn?: TranscriptTurn;
+/** 孩子回答轮（客户转头问孩子时由独立 LLM 以孩子口吻生成；speaker=child，不计入学员评分统计） */
+childTurn?: TranscriptTurn;
+/** 首句 TTS 预合成结果（与语义审查并行；审查违例重生成后作废为 undefined） */
+warmupAudio?: Buffer;
+warmupFormat?: string;
 arousal: number | null;
 bandKey: string | null;
 remainingSeconds: number;
-/** AI 判断本场对练应自然结束（剧情终点/目标达成/客户离开），或达到极端轮数上限；不再由倒计时驱动 */
+/** AI 判断本场对练应自然结束（剧情终点/目标达成/客户离开）、倒计时用尽（到点自动结束），或达到极端轮数上限 */
 timeUp?: boolean;
 /** 本轮触发的待弹出考题（脱敏视图，不含答案） */
 pendingQuizzes?: QuizQuestionPublic[];
@@ -177,7 +208,10 @@ export async function runTurn(
   ctx: RouteContext,
   session: Session,
   scenario: Scenario,
-  text: string
+  text: string,
+  voiceFeatures?: VoiceFeatures,
+  /** 首句 TTS 预合成：与语义一致性审查并行执行，响应延迟取两者最大值而非相加 */
+  ttsWarmup?: (text: string) => Promise<{ audio: Buffer; format: string } | null>
 ): Promise<TurnResult | null> {
   const { store, gateway } = ctx;
   const isSystemGreeting = text === SYSTEM_GREETING_TOKEN;
@@ -195,20 +229,73 @@ export async function runTurn(
     speaker: 'trainee',
     text: displayText,
     at: now,
+    ...(voiceFeatures && !isSystemGreeting ? { voiceFeatures } : {}),
   };
   const guidance = await store.getScenarioGuidance(scenario.id).catch(() => undefined);
   const totalSeconds = countdownSecondsOf(scenario, guidance);
   const lastTrace = session.emotionTrace[session.emotionTrace.length - 1];
   const traineeTurnCount = session.transcript.filter((t) => t.speaker === 'trainee').length;
 
-  // 结束时机由 AI 判断（replyWithSignal 的 shouldClose），不再由倒计时/maxTurns 强制收口；
-  // 仅保留学员轮数极端上限 MAX_LIVE_TURNS 兜底，防止对话无限进行
+  // ---- 孩子模式：家长问孩子后激活。学员发言先经路由器判定对话对象——
+  // 对孩子说的由孩子角色直接应答（该轮语音不参与声学考核）；转向家长则退出孩子模式走正常客户应答 ----
+  if (session.childMode && !isSystemGreeting) {
+    const target = await classifyAddressTarget(gateway.forTask('actor'), session.transcript, text);
+    if (target === 'child') {
+      traineeTurn.addressedToChild = true;
+      const childText = (
+        await replyAsChild(gateway.forTask('actor'), [...session.transcript, traineeTurn], text).catch(() => '')
+      ).trim();
+      const childReplyTurn: TranscriptTurn = {
+        seq: traineeTurn.seq + 1,
+        speaker: 'child',
+        text: childText || '（孩子抿着嘴没说话）',
+        at: new Date().toISOString(),
+      };
+      await store.updateSession(session.id, {
+        transcript: [...session.transcript, traineeTurn, childReplyTurn],
+        childMode: true,
+      });
+      void store.appendEvent(
+        mkEvent(EventTypes.SESSION_TURN, {
+          tenantId: session.tenantId,
+          sessionId: session.id,
+          userId: session.userId,
+          payload: { seq: traineeTurn.seq, text: displayText, addressedToChild: true },
+        })
+      );
+      const pendingQuizzes = await checkQuizTriggers(ctx, session, scenario, displayText, traineeTurn.seq);
+      const left = remainingSeconds(session, scenario, totalSeconds);
+      return {
+        traineeTurn,
+        childTurn: childReplyTurn,
+        arousal: lastTrace?.arousal ?? null,
+        bandKey: lastTrace?.bandKey ?? null,
+        remainingSeconds: left,
+        timeUp: left <= 0 || traineeTurnCount + 1 >= MAX_LIVE_TURNS,
+        pendingQuizzes: pendingQuizzes.length > 0 ? pendingQuizzes.map(toPublicQuiz) : undefined,
+      };
+    }
+    // 学员转向家长：退出孩子模式，本轮起恢复客户应答
+    session = { ...session, childMode: false };
+    await store.updateSession(session.id, { childMode: false });
+  }
+
+  // 结束时机：AI 判断（replyWithSignal 的 shouldClose）+ 倒计时到点自动结束；
+  // MAX_LIVE_TURNS 仅作防止对话无限进行的极端兜底
   const runtime = await loadRuntime(ctx, scenario, session.difficulty, session.customerArchetype);
   if (!runtime) {
     console.error('[runTurn] persona 运行时加载失败, scenarioId=', scenario.id, 'personaConfigId=', scenario.personaConfigId);
     return null;
   }
-  const { bundle } = runtime;
+  const { bundle, drillScript } = runtime;
+
+  // 双场制判定：第一场（不感兴趣）+ 剧本声明了概率原则
+  const dualScene =
+    session.customerArchetype === 'uninterested' &&
+    !!drillScript &&
+    initialCustomerArchetype(drillScript.content) === 'uninterested';
+  // 学员明确放弃当前客户（"那打扰您了"等话术）：跳过 LLM 回复，客户直接离场，立即切场
+  const traineeGaveUp = GIVE_UP_PATTERN.test(text);
 
   // 请求无状态：用上轮 arousal 重建 tracker
   const tracker = new EmotionTracker(
@@ -221,34 +308,66 @@ export async function runTurn(
 
   const actor = new PersonaActor(gateway.forTask('actor'));
   const transcriptSoFar = [...session.transcript, traineeTurn];
-  // LLM 回复时顺带判断本场是否应自然结束（shouldClose）：剧情终点/目标达成/谈判破裂/客户离开
-  let { text: replyText, shouldClose } = await actor.replyWithSignal(bundle, band, transcriptSoFar, session.coachIntensity);
+  let replyText: string;
+  let shouldClose = false;
+  let asksChild = false;
+  let warmupAudio: Buffer | undefined;
+  let warmupFormat: string | undefined;
+  if (!isSystemGreeting && dualScene && traineeGaveUp) {
+    // 快速通道：不再调用 LLM 生成客户回复与一致性校验
+    replyText = '（客户摆了摆手，快步走远了）';
+  } else {
+    // LLM 回复时顺带判断本场是否应自然结束（shouldClose）：剧情终点/目标达成/谈判破裂/客户离开
+    const reply = await actor.replyWithSignal(bundle, band, transcriptSoFar, session.coachIntensity);
+    replyText = reply.text;
+    shouldClose = reply.shouldClose;
+    asksChild = reply.asksChild;
 
-  // 一致性校验：出戏/泄露则带纠正指令重生成一次，仍不通过用兜底文案
-  const firstCheck = await checkConsistency(gateway.forTask('judge'), bundle, replyText);
-  if (!firstCheck.pass) {
-    const retryBand = { ...band, instruction: band.instruction + CONSISTENCY_CORRECTION };
+    // 一致性校验分两层：
+    // ① 明显关键词违例（AI 自曝/考核泄露）同步拦截并重生成一次——快，不额外调 LLM；
+    // ② 语义级一致性审查（LLM）与首句 TTS 预合成并行：审查必须通过才播放，
+    //    但等待时间取两者最大值而非相加；语义违例时预合成音频作废、带纠正指令重生成一次。
+    if (ruleCheck(replyText).length > 0) {
+      const retryBand = { ...band, instruction: band.instruction + CONSISTENCY_CORRECTION };
       const retry = await actor.replyWithSignal(bundle, retryBand, transcriptSoFar, session.coachIntensity);
-      const secondCheck = await checkConsistency(gateway.forTask('judge'), bundle, retry.text);
-    if (secondCheck.pass) {
-      replyText = retry.text;
-      shouldClose = retry.shouldClose;
-    } else {
-      replyText = CONSISTENCY_FALLBACK;
-      shouldClose = false;
+      if (ruleCheck(retry.text).length === 0) {
+        replyText = retry.text;
+        shouldClose = retry.shouldClose;
+        asksChild = retry.asksChild;
+      } else {
+        replyText = CONSISTENCY_FALLBACK;
+        shouldClose = false;
+        asksChild = false;
+      }
     }
-    void store.appendEvent(
-      mkEvent(EventTypes.PERSONA_CONSISTENCY_VIOLATION, {
-        tenantId: session.tenantId,
-        sessionId: session.id,
-        userId: session.userId,
-        payload: {
-          seq: traineeTurn.seq,
-          reasons: firstCheck.reasons,
-          repairedBy: secondCheck.pass ? 'regenerate' : 'fallback',
-        },
-      })
-    );
+    const warmupPromise = (ttsWarmup ? ttsWarmup(replyText) : Promise.resolve(null)).catch(() => null);
+    const audit = await checkConsistency(gateway.forTask('judge'), bundle, replyText).catch(() => ({ pass: true, reasons: [] as string[] }));
+    if (!audit.pass) {
+      const retryBand = { ...band, instruction: band.instruction + CONSISTENCY_CORRECTION };
+      const retry = await actor.replyWithSignal(bundle, retryBand, transcriptSoFar, session.coachIntensity);
+      const recheck = await checkConsistency(gateway.forTask('judge'), bundle, retry.text).catch(() => ({ pass: true, reasons: [] as string[] }));
+      if (recheck.pass) {
+        replyText = retry.text;
+        shouldClose = retry.shouldClose;
+        asksChild = retry.asksChild;
+      } else {
+        replyText = CONSISTENCY_FALLBACK;
+        shouldClose = false;
+        asksChild = false;
+      }
+      void store.appendEvent(
+        mkEvent(EventTypes.PERSONA_CONSISTENCY_VIOLATION, {
+          tenantId: session.tenantId,
+          sessionId: session.id,
+          userId: session.userId,
+          payload: { seq: traineeTurn.seq, reasons: audit.reasons, repairedBy: recheck.pass ? 'regenerate' : 'fallback' },
+        })
+      );
+    } else {
+      const warm = await warmupPromise;
+      warmupAudio = warm?.audio;
+      warmupFormat = warm?.format;
+    }
   }
 
   const personaTurn: TranscriptTurn = {
@@ -262,11 +381,57 @@ export async function runTurn(
     ...session.emotionTrace,
     { seq: personaTurn.seq, arousal: snapshot.arousal, bandKey: snapshot.bandKey, at: personaTurn.at },
   ];
+
+  // ---- 孩子作答：客户本轮转头向孩子提问（[[CHILD]]）时，由独立 LLM 以孩子口吻回答，问题不由销售作答 ----
+  let childTurn: TranscriptTurn | undefined;
+  if (asksChild && !isSystemGreeting && replyText.trim()) {
+    const childText = await replyAsChild(gateway.forTask('actor'), [...transcriptSoFar, personaTurn], replyText).catch(() => '');
+    if (childText.trim()) {
+      childTurn = {
+        seq: personaTurn.seq + 1,
+        speaker: 'child',
+        text: childText.trim(),
+        at: new Date().toISOString(),
+      };
+    }
+  }
+
+  // ---- 双场制切场：第一场（不感兴趣）满 100 秒、学员说出放弃类话术、或 LLM 判定对话自然结束时，
+  // 旁白切换到第二场（潜在意向）。第一场客户离开是预期剧情，不结束整场演练；
+  // 旁白轮 speaker=coach，不计入轮次与评分统计
+  let narratorTurn: TranscriptTurn | undefined;
+  const firstSceneElapsedMs =
+    Date.now() - new Date(session.liveStartedAt ?? session.startedAt).getTime() - (session.pausedMs ?? 0);
+  if (
+    !isSystemGreeting &&
+    dualScene &&
+    (firstSceneElapsedMs >= FIRST_SCENE_MAX_MS || traineeGaveUp || shouldClose)
+  ) {
+    shouldClose = false;
+    narratorTurn = {
+      seq: (childTurn ?? personaTurn).seq + 1,
+      speaker: 'coach',
+      text: SCENE_TRANSITION_NARRATION,
+      at: new Date().toISOString(),
+    };
+    // 新客户情绪重置为基线，并将会话客户类型切换为"潜在意向"（下一轮起生效）
+    const baseArousal = bundle.dynamics.baseArousal;
+    emotionTrace.push({
+      seq: narratorTurn.seq,
+      arousal: baseArousal,
+      bandKey: bandFor(baseArousal, bundle.behaviorBands).key,
+      at: narratorTurn.at,
+    });
+    await store.updateSession(session.id, { customerArchetype: 'interested' });
+  }
+
   // 系统开场白：不保存到 transcript（仅作为接通问候播放），避免seq不连续
   if (!isSystemGreeting) {
     await store.updateSession(session.id, {
-      transcript: [...transcriptSoFar, personaTurn],
+      transcript: [...transcriptSoFar, personaTurn, ...(childTurn ? [childTurn] : []), ...(narratorTurn ? [narratorTurn] : [])],
       emotionTrace,
+      // 家长问孩子 → 激活孩子模式：下一轮起学员发言经路由器分配给孩子或家长
+      ...(childTurn ? { childMode: true } : {}),
     });
   }
 
@@ -290,14 +455,20 @@ payload: { arousal: snapshot.arousal, bandKey: snapshot.bandKey, triggeredBy: sn
 // ---- 考题触发检测 ----
 const pendingQuizzes = await checkQuizTriggers(ctx, session, scenario, displayText, traineeTurn.seq);
 
+const left = remainingSeconds(session, scenario, totalSeconds);
 return {
 traineeTurn,
 personaTurn,
+narratorTurn,
+childTurn,
+warmupAudio,
+warmupFormat,
 arousal: snapshot.arousal,
 bandKey: snapshot.bandKey,
-remainingSeconds: remainingSeconds(session, scenario, totalSeconds),
-// AI 判断本场应自然结束（剧情终点/目标达成/客户离开），或达到极端轮数上限；倒计时用尽不再强制结束
-timeUp: shouldClose || traineeTurnCount + 1 >= MAX_LIVE_TURNS,
+remainingSeconds: left,
+// 结束条件：AI 判断本场应自然结束（剧情终点/目标达成/客户离开）、倒计时到点自动结束、
+// 或达到极端轮数上限；双场制第一小场客户的离开是预期切场，不视为整场结束
+timeUp: shouldClose || left <= 0 || traineeTurnCount + 1 >= MAX_LIVE_TURNS,
 pendingQuizzes: pendingQuizzes.length > 0 ? pendingQuizzes.map(toPublicQuiz) : undefined,
 };
 }

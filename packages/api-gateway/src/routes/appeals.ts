@@ -236,6 +236,7 @@ async function performReReview(
     '{"verdict":"agree"或"disagree"或"partial","rationale":"复评理由","suggestedScore":数字或null}',
     'verdict 含义：agree=维持原评 | disagree=支持学员异议（原评有误） | partial=部分支持',
     'suggestedScore 仅在 verdict 为 disagree 或 partial 时给出建议分数，agree 时为 null',
+    '复评纪律：只依据被申诉的这条评分标准本身判定对错，复评理由中禁止引入该标准之外的评判维度或销售技巧常识。',
   ].join('\n');
 
   const result = await gateway.forTask('judge').chat([{ role: 'user', content: prompt }], { jsonMode: true });

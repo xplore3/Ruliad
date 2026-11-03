@@ -19,7 +19,7 @@ function fmtDateTime(iso: string) {
   return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-const SPEAKER_LABEL: Record<string, string> = { trainee: '我', persona: '客户', coach: '教练' };
+const SPEAKER_LABEL: Record<string, string> = { trainee: '我', persona: '客户', coach: '教练', child: '孩子' };
 
 export default function Review() {
   const navigate = useNavigate();

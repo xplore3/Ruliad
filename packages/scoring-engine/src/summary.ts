@@ -1,10 +1,12 @@
-import type { LLMGateway, Scenario, ScoreItemResult, Session } from '@grasp-mvp/core';
+import type { LLMGateway, Scenario, ScoreItemDef, ScoreItemResult, Session } from '@grasp-mvp/core';
 
 export interface SummaryInput {
   totalScore: number;
   passed: boolean;
   fatalViolation: boolean;
   items: ScoreItemResult[];
+  /** 本场评分标准库原文（行为锚定/档位定义），总结只允许依据这些内容点评 */
+  defs?: ScoreItemDef[];
   fillerTotal: number;
 }
 
@@ -39,19 +41,32 @@ export function buildFallbackSummary(scenario: Scenario, input: SummaryInput): s
 }
 
 function buildSummaryPrompt(scenario: Scenario, input: SummaryInput): string {
+  // 喂评分标准库原文（名称+行为锚定+档位）与得分，但不喂 judge 自由文本理由——
+  // LLM 拿库里的标准做点评依据，库外概念（如"共情"）没有渗入路径
+  const defById = new Map((input.defs ?? []).map((d) => [d.id, d]));
   const itemLines = input.items
-    .map((i) => `- ${i.itemName}：${i.score} 分（${i.levelLabel ?? i.levelKey}）${i.rationale ? `，${i.rationale}` : ''}`)
+    .map((i) => {
+      const def = defById.get(i.itemId);
+      const anchorLines: string[] = [];
+      if (def?.behaviorAnchor) anchorLines.push(`  行为锚定：${def.behaviorAnchor}`);
+      if (def?.levels?.length) {
+        anchorLines.push(
+          `  档位定义：${def.levels.map((l) => `${l.label}（${l.score}分）${l.description ? `：${l.description}` : ''}`).join('；')}`
+        );
+      }
+      return [`- ${i.itemName}：${i.score} 分（${i.levelLabel ?? i.levelKey}）`, ...anchorLines].join('\n');
+    })
     .join('\n');
   return [
     '你是一位销售培训教练，请根据本场对练评分结果，给学员写一段总结点评。',
     `练习场景：${scenario.name}`,
     `总分：${input.totalScore} 分，${input.passed ? '已通过' : '未通过'}（及格线 ${scenario.successCriteria.passScore} 分）`,
     input.fatalViolation ? '本场命中合规红线（一票否决）。' : '',
-    '各评分标准：',
+    '各评分标准（来自评分标准库，是本场全部评分依据，除此之外不存在其他评分维度）：',
     itemLines || '（无评分标准）',
     input.fillerTotal > 0 ? `口头禅共出现 ${input.fillerTotal} 次。` : '',
     '要求：教练口吻，先总体评价，再指出一个最值得保持的亮点和一个最需要改进的点，最后给一条可执行的练习建议；150 字以内。',
-    '只允许围绕上面列出的评分标准进行点评，禁止引入评分标准之外的评判维度（哪怕它们是销售技巧常识）；没有列出的方面一律不提。',
+    '铁律：只允许依据上面列出的评分标准（名称、行为锚定、档位定义）及其得分进行点评和建议，禁止提及标准原文未涵盖的任何维度、技巧或概念（例如共情、倾听、提问等，除非标准原文里明确写了）；亮点、改进点、练习建议都必须能对应到上面某一条标准。',
     '请只输出 JSON：{"summary":"总结文案"}',
   ]
     .filter(Boolean)

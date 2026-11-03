@@ -10,7 +10,7 @@ import type {
 function buildVideoJudgeText(session: Session, scenario: Scenario, frameCount: number): string {
   const transcriptLines = session.transcript
     .filter((t) => t.speaker !== 'coach')
-    .map((t) => `[${t.seq}] ${t.speaker === 'trainee' ? '学员' : '客户'}：${t.text}`)
+    .map((t) => `[${t.seq}] ${t.speaker === 'trainee' ? '学员' : t.speaker === 'child' ? '孩子' : '客户'}：${t.text}`)
     .join('\n');
   return [
     '你是一名销售训练评审专家。以下是学员与客户对练的视频关键帧（按时间顺序均匀截取）与对话转写。',

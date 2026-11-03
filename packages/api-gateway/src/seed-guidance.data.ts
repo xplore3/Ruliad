@@ -348,7 +348,7 @@ export const SCENARIO_GUIDANCES: ScenarioGuidance[] = [
       },
     ],
     defaultDifficulty: 1,
-    duration: { targetMinutes: 5, minTurns: 6, maxTurns: 30, countdownSeconds: 300 },
+    duration: { targetMinutes: 20, minTurns: 6, maxTurns: 60, countdownSeconds: 1200 },
     scoringFocus: ['破冰开场', '异议处理', '促单时机', '致谢收尾'],
   },
   // ══ 2. 咨询接待 ══

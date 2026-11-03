@@ -1,4 +1,4 @@
-import type { RuleViolation, ScoreReport, Session } from '@grasp-mvp/core';
+import type { RuleViolation, ScoreReport, Session, VoiceBaseline } from '@grasp-mvp/core';
 
 /** 合规红线词（一票否决） */
 const REDLINE_PATTERN = /保证提分|包过|百分百考上名校|考不上全额退款|绝对有效果|一夜逆袭/;
@@ -27,7 +27,8 @@ function countOccurrences(text: string, word: string): number {
  */
 export function runRuleChecks(
   session: Session,
-  coverageTopics: string[]
+  coverageTopics: string[],
+  voiceBaseline?: VoiceBaseline
 ): { violations: RuleViolation[]; stats: ScoreReport['ruleStats'] } {
   const violations: RuleViolation[] = [];
   const traineeTurns = session.transcript.filter((t) => t.speaker === 'trainee');
@@ -133,6 +134,15 @@ export function runRuleChecks(
     }
   }
 
+  // ---- 语音声学特征聚合：各学员语音轮的录音分析，按实际说话时长加权 ----
+  // 对孩子说的学员轮次不参与主语音考核（激情/音高/响度/语速）：跟孩子说话要温柔，不该用激情考核；
+  // 孩子轮次单独聚合为 voiceChild，供「与孩子说话的语气」标准量化评分
+  const voiceTurns = traineeTurns.filter((t) => t.voiceFeatures && !t.addressedToChild);
+  const childVoiceTurns = traineeTurns.filter((t) => t.voiceFeatures && t.addressedToChild);
+  const voice = aggregateVoiceTurns(voiceTurns, voiceBaseline);
+  const voiceChild = aggregateVoiceTurns(childVoiceTurns, voiceBaseline);
+  const childDialogueTurns = traineeTurns.filter((t) => t.addressedToChild).length;
+
   return {
     violations,
     stats: {
@@ -143,6 +153,69 @@ export function runRuleChecks(
       talkRatio,
       avgSpeechRate,
       pauseCount,
+      childDialogueTurns,
+      ...(voice ? { voice } : {}),
+      ...(voiceChild ? { voiceChild } : {}),
     },
   };
+}
+
+/** 语音轮声学聚合：按说话时长加权 + 峰值轮融合；有基线时附音高/响度抬升 */
+function aggregateVoiceTurns(
+  voiceTurns: Array<{ text: string; voiceFeatures?: import('@grasp-mvp/core').VoiceFeatures }>,
+  voiceBaseline?: VoiceBaseline
+): NonNullable<ScoreReport['ruleStats']['voice']> | undefined {
+  if (voiceTurns.length === 0) return undefined;
+  const totalVoicedMs = voiceTurns.reduce((sum, t) => sum + (t.voiceFeatures?.voicedMs ?? 0), 0);
+  if (totalVoicedMs <= 0) return undefined;
+  const wavg = (pick: (f: NonNullable<(typeof voiceTurns)[number]['voiceFeatures']>) => number) =>
+    voiceTurns.reduce((sum, t) => sum + pick(t.voiceFeatures!) * t.voiceFeatures!.voicedMs, 0) / totalVoicedMs;
+  const pitchTurns = voiceTurns.filter((t) => t.voiceFeatures?.pitchVarSemitones != null);
+  const pitchMs = pitchTurns.reduce((sum, t) => sum + t.voiceFeatures!.voicedMs, 0);
+  const voiceChars = voiceTurns.reduce((sum, t) => sum + t.text.length, 0);
+  // 激情类指标（音调变化/响度起伏）取"整场均值 × 0.5 + 峰值轮 × 0.5"：
+  // 纯整场均值会被大段平稳讲解稀释，最有激情的开场/异议处理轮体现不出来；
+  // 峰值轮要求 ≥2s 有声，避免短促感叹词造成虚高
+  const PEAK_MIN_VOICED_MS = 2000;
+  const blendPeak = (pick: (f: NonNullable<(typeof voiceTurns)[number]['voiceFeatures']>) => number): number => {
+    const mean = wavg(pick);
+    const eligible = voiceTurns.filter((t) => t.voiceFeatures!.voicedMs >= PEAK_MIN_VOICED_MS);
+    if (eligible.length === 0) return mean;
+    const peak = Math.max(...eligible.map((t) => pick(t.voiceFeatures!)));
+    return (mean + peak) / 2;
+  };
+  const pitchPeakBlend = (): number | null => {
+    if (pitchMs === 0) return null;
+    const mean =
+      pitchTurns.reduce((sum, t) => sum + t.voiceFeatures!.pitchVarSemitones! * t.voiceFeatures!.voicedMs, 0) / pitchMs;
+    const eligible = pitchTurns.filter((t) => t.voiceFeatures!.voicedMs >= PEAK_MIN_VOICED_MS);
+    if (eligible.length === 0) return mean;
+    const peak = Math.max(...eligible.map((t) => t.voiceFeatures!.pitchVarSemitones!));
+    return (mean + peak) / 2;
+  };
+  const voice: NonNullable<ScoreReport['ruleStats']['voice']> = {
+    turns: voiceTurns.length,
+    avgLoudnessDbfs: Math.round(wavg((f) => f.avgLoudnessDbfs) * 10) / 10,
+    loudnessRangeDb: Math.round(blendPeak((f) => f.loudnessRangeDb) * 10) / 10,
+    pitchVarSemitones: pitchPeakBlend() === null ? null : Math.round(pitchPeakBlend()! * 100) / 100,
+    speechRateCpm: Math.round(voiceChars / (totalVoicedMs / 60000)),
+  };
+  // 音高中位数与基线抬升：激情"音高抬升"型表现的核心量（方差类指标对持续高亢无效）
+  const f0Turns = voiceTurns.filter((t) => t.voiceFeatures?.medianF0Hz != null && t.voiceFeatures.medianF0Hz > 0);
+  if (f0Turns.length > 0) {
+    const f0Ms = f0Turns.reduce((s, t) => s + t.voiceFeatures!.voicedMs, 0);
+    const mean = f0Turns.reduce((s, t) => s + t.voiceFeatures!.medianF0Hz! * t.voiceFeatures!.voicedMs, 0) / f0Ms;
+    const eligible = f0Turns.filter((t) => t.voiceFeatures!.voicedMs >= PEAK_MIN_VOICED_MS);
+    const peak = eligible.length ? Math.max(...eligible.map((t) => t.voiceFeatures!.medianF0Hz!)) : mean;
+    const sessionF0 = (mean + peak) / 2;
+    voice.medianF0Hz = Math.round(sessionF0);
+    if (voiceBaseline) {
+      voice.f0LiftSemitones = Math.round(12 * Math.log2(sessionF0 / voiceBaseline.medianF0Hz) * 100) / 100;
+      voice.loudnessLiftDb = Math.round((voice.avgLoudnessDbfs - voiceBaseline.avgLoudnessDbfs) * 10) / 10;
+    } else {
+      voice.f0LiftSemitones = null;
+      voice.loudnessLiftDb = null;
+    }
+  }
+  return voice;
 }
