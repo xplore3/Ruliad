@@ -31,7 +31,7 @@ function pcmRMS(buf: Buffer): number {
 }
 
 /** VAD 配置 */
-const VAD_SILENCE_MS = 1500; // 静音持续时间触发断句（2.5s 等待感明显；自适应阈值保证准确性后放宽到 1.5s）
+const VAD_SILENCE_MS = 1000; // 静音持续时间触发断句；保留话尾音频与阶段文本后可缩短等待
 const VAD_CHUNK_MS = 100; // 每 100ms 检测一次
 
 /** VAD 自适应阈值范围与噪声倍率：AGC 关闭后不同麦克风的原始电平差异大，
@@ -282,8 +282,9 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
       let speaking = false; // ASR 流已建立、尚未出最终结果
       let processing = false; // asr_final 已出、runTurn/回复处理中
       let ttsPlaying = false;
-      /** 本轮已累积的识别文本（paraformer 句末会多次回调 onFinal，文本为累计全量） */
+      /** 本轮最新识别文本（句末结果为累计全量，阶段结果包含最后半句） */
       let latestText = '';
+      let latestIsFinal = false;
       /** 本轮上行音频块（PCM16），回合落库前做声学特征提取 */
       let audioChunks: Buffer[] = [];
       /** 客户端已点「结束本轮」：等 ASR 收尾后统一落回合，说话中不做自动断句 */
@@ -302,6 +303,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
         processing = false;
         ttsPlaying = false;
         latestText = '';
+        latestIsFinal = false;
         audioChunks = [];
         clientFinish = false;
         finishing = false;
@@ -450,13 +452,17 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
         speaking = true;
         asrStream = speech.asr.createStream({
           onPartial: (text) => {
-            if (myRound === round) send({ type: 'asr_partial', text });
+            if (myRound !== round) return;
+            latestText = text;
+            latestIsFinal = false;
+            send({ type: 'asr_partial', text });
           },
           // paraformer 句末会多次回调（累计文本）：用户一直说话时不自动断句、不收尾，
           // 只刷新字幕；只有客户端点了「结束本轮」（clientFinish）才真正落回合
           onFinal: (text) => {
             if (myRound !== round) return;
             latestText = text;
+            latestIsFinal = true;
             send({ type: 'asr_partial', text });
             if (clientFinish) doFinish(myRound);
           },
@@ -496,7 +502,12 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
           case 'finish':
             // 用户一直说话时不自动断句：仅在客户端明确结束本轮时收尾
             clientFinish = true;
-            if (asrStream) {
+            if (asrStream && latestIsFinal) {
+              // 句末已确认且之后没有阶段文本，无需等待 task-finished
+              asrStream.close();
+              asrStream = null;
+              doFinish(round);
+            } else if (asrStream) {
               asrStream.finish();
             } else {
               doFinish(round);
@@ -573,6 +584,10 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
       let roundAudio: Buffer[] = []; // 本轮全部上行音频（供回合落库前声学特征提取）
       let vadSilenceStart = 0; // 静音开始时间戳（0 = 未在静音）
       let vadHasSpeech = false; // 本轮检测到过语音
+      let latestText = '';
+      let latestIsFinal = false;
+      let finishRequested = false;
+      let finalHandled = false;
 
       const send = (msg: Record<string, unknown>) => {
         if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(msg));
@@ -585,6 +600,13 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
           asrStream = null;
         }
         listening = false;
+      };
+
+      const completeASR = (myRound: number, text: string) => {
+        if (myRound !== round || finalHandled) return;
+        finalHandled = true;
+        send({ type: 'asr_final', text });
+        void handleUserSpeech(myRound, text);
       };
 
       /** 终止当前轮（打断/断连清理） */
@@ -600,6 +622,10 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
         roundAudio = [];
         vadSilenceStart = 0;
         vadHasSpeech = false;
+        latestText = '';
+        latestIsFinal = false;
+        finishRequested = false;
+        finalHandled = false;
         return active;
       };
 
@@ -764,12 +790,20 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
         );
         asrStream = speech.asr.createStream({
           onPartial: (text) => {
-            if (myRound === round) send({ type: 'asr_partial', text });
+            if (myRound !== round) return;
+            latestText = text;
+            latestIsFinal = false;
+            send({ type: 'asr_partial', text });
           },
           onFinal: (text) => {
             if (myRound !== round) return;
-            send({ type: 'asr_final', text });
-            void handleUserSpeech(myRound, text);
+            latestText = text;
+            latestIsFinal = true;
+            if (finishRequested) completeASR(myRound, text);
+            else send({ type: 'asr_partial', text });
+          },
+          onFinished: () => {
+            if (myRound === round && finishRequested) completeASR(myRound, latestText);
           },
           onError: (err) => {
             if (myRound !== round) return;
@@ -788,7 +822,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
 
       /** VAD 处理：检测到静音后自动 finish ASR */
       const processVAD = () => {
-        if (!listening || closed) return;
+        if (!listening || closed || finishRequested) return;
 
         // 将累积的音频拼成一块做 VAD 检测
         const buf = Buffer.concat(vadBuffer);
@@ -806,10 +840,10 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
           }
           const silenceMs = Date.now() - vadSilenceStart;
           if (silenceMs >= VAD_SILENCE_MS) {
-            // 静音超时：自动结束本轮 ASR
-            if (asrStream) {
-              asrStream.finish();
-            }
+            finishRequested = true;
+            // 已有句末结果且之后没有新的阶段文本时可直接提交，无需再等识别流关闭
+            if (latestIsFinal) completeASR(round, latestText);
+            else asrStream?.finish();
           }
         }
       };

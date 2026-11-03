@@ -10,7 +10,6 @@ import { decideOpening, initialCustomerArchetype, resolveDrillScript } from '../
 import { personaVoice } from './voice.js';
 import { readFramesAsDataUrls } from '../services/video-store.js';
 
-const MAX_HINTS = 3;
 const REVIEW_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** 生成报告所需的最少对话句数：学员一句 + 客户一句为一轮，完成 2 轮（4 句对话，不含教练提示）前不生成报告 */
@@ -434,80 +433,6 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
       }
     }
   );
-
-  // 教练提示（仅 practice，最多 3 次）
-  app.post<{ Params: { id: string } }>('/sessions/:id/hint', async (request, reply) => {
-    const session = await store.getSession(request.params.id);
-    if (!session || session.userId !== request.userId) {
-      return reply.code(404).send({ error: '会话不存在' });
-    }
-    if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
-    if (session.pausedAt) return reply.code(409).send({ error: '会话已暂停，请先继续' });
-    if (session.mode !== 'practice') return reply.code(400).send({ error: '仅 practice 模式可用提示' });
-    if (session.hintsUsed >= MAX_HINTS) return reply.code(409).send({ error: '提示次数已用完' });
-
-    const scenario = await store.getScenario(session.scenarioId);
-    const transcriptText = session.transcript
-      .map((t) => `[${t.seq}] ${t.speaker === 'trainee' ? '学员' : t.speaker === 'persona' ? '客户' : t.speaker === 'child' ? '孩子' : '教练'}：${t.text}`)
-      .join('\n');
-
-    const scenarioLines: string[] = [];
-    if (scenario) {
-      scenarioLines.push(`本场场景：${scenario.name}`);
-      if (scenario.methodology) scenarioLines.push(`销售方法论：${scenario.methodology}`);
-      if (scenario.script?.purpose) scenarioLines.push(`本场目标：${scenario.script.purpose}`);
-      if (scenario.script?.assessmentPoints && scenario.script.assessmentPoints.length > 0) {
-        scenarioLines.push(`主要考核点：${scenario.script.assessmentPoints.join('、')}`);
-      }
-      const topics = scenario.coverageTopics ?? [];
-      if (topics.length > 0) {
-        const traineeAll = session.transcript
-          .filter((t) => t.speaker === 'trainee')
-          .map((t) => t.text)
-          .join('\n');
-        const hits = topics.filter((t) => traineeAll.includes(t));
-        const misses = topics.filter((t) => !traineeAll.includes(t));
-        if (hits.length > 0) scenarioLines.push(`话题已覆盖：${hits.join('、')}`);
-        if (misses.length > 0) scenarioLines.push(`话题未覆盖：${misses.join('、')}（建议优先往未覆盖话题引导）`);
-      }
-    }
-
-    const result = await gateway.forTask('judge').chat([
-      {
-        role: 'user',
-        content: [
-          '你是销售教练。结合本场场景配置与以下对话，给学员一句不超过40字的下一步话术建议。',
-          ...scenarioLines,
-          '',
-          transcriptText,
-        ].join('\n'),
-      },
-    ]);
-
-    const hintTurn: TranscriptTurn = {
-      seq: session.transcript.length + 1,
-      speaker: 'coach',
-      text: result.content,
-      at: new Date().toISOString(),
-      isHint: true,
-    };
-    const hintsUsed = session.hintsUsed + 1;
-    await store.updateSession(session.id, {
-      transcript: [...session.transcript, hintTurn],
-      hintsUsed,
-    });
-
-    void store.appendEvent(
-      mkEvent(EventTypes.SESSION_HINT_USED, {
-        tenantId: session.tenantId,
-        sessionId: session.id,
-        userId: session.userId,
-        payload: { seq: hintTurn.seq, hintsUsed },
-      })
-    );
-
-    return { hintTurn, hintsRemaining: MAX_HINTS - hintsUsed };
-  });
 
   // AI 教练开场白（进入练习页时调用）：介绍本场练习内容并询问是否准备好。
   // coachOpening 首次生成后缓存在会话上；query voice=1 时附带教练与 persona 开场白的 TTS 音频（base64 wav）。

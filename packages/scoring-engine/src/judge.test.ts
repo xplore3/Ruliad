@@ -86,9 +86,10 @@ describe('judgeItem 定量计分（quantitativeRule）', () => {
     expect(result.score).toBe(60);
     expect(result.rationale).toContain('表现有激情');
     expect(result.rationale).toContain('激情度40/40');
+    expect(result.rationale).not.toMatch(/半音|dB|Hz|F0|RMS|标准差|动态范围|个人基线/);
   });
 
-  it('缺声学数据时按中间分计并注明', async () => {
+  it('缺声学数据时按中间分计并用易懂语言注明', async () => {
     const gateway = gatewayWith('不是 JSON'); // LLM 也失败 → 回退计表明细
     const result = await judgeItem(quantDef, session, gateway, undefined, undefined, {
       ...voiceStats,
@@ -96,7 +97,8 @@ describe('judgeItem 定量计分（quantitativeRule）', () => {
     });
     // 全部 metric 无数据：每块 50% → 40×0.5 + 20×0.5 = 30
     expect(result.score).toBe(30);
-    expect(result.rationale).toContain('无数据');
+    expect(result.rationale).toContain('语音数据不足');
+    expect(result.rationale).not.toMatch(/半音|dB|Hz|F0|RMS|标准差|动态范围|个人基线/);
   });
 
   it('锚点线性插值：区间内连续取分，无档位悬崖', async () => {

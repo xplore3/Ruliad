@@ -3,7 +3,6 @@ import { useParams, useNavigate, useSearchParams, Navigate } from 'react-router-
 import {
   fetchSession,
   sendTurn,
-  requestHint,
   endSession,
   pauseSession,
   resumeSession,
@@ -53,7 +52,6 @@ interface ScenarioInfo {
   coverageTopics?: string[];
 }
 
-const MAX_HINTS = 3;
 const AUTO_MIC_KEY = 'grasp-auto-mic';
 const PERSONA_FALLBACK_MS = 10000;
 
@@ -61,9 +59,8 @@ const PERSONA_FALLBACK_MS = 10000;
 const GUIDE_CHOICE_QUESTION = '想再听一个版本的示范，还是开始模拟练习？';
 /** 自动聆听 VAD 参数（参考服务端 voice.ts 的 RMS + 静音判停思路）：新手指引与 live 阶段共用；
  * 语音判定用 AdaptiveVad 自适应噪声底，不再使用固定 RMS 阈值 */
-const VAD_SILENCE_MS = 1500;
-const VAD_MAX_RECORD_MS = 60000;
-/** 自动聆听识别失败的重试上限，超过后给出文字提示 */
+const VAD_SILENCE_MS = 1000;
+const VAD_MAX_RECORD_MS = 60000;/** 自动聆听识别失败的重试上限，超过后给出文字提示 */
 const GUIDANCE_MAX_RETRY = 2;
 
 /** 资格问题：仅以指引配置为准；无指引配置时不做资格提问（不再使用硬编码回退题库） */
@@ -124,8 +121,6 @@ export default function Practice() {
   const [remaining, setRemaining] = useState(0);
   const [timeUp, setTimeUp] = useState(false);
   const [bandKey, setBandKey] = useState<string | null>(null);
-  const [hintsRemaining, setHintsRemaining] = useState(MAX_HINTS);
-  const [hintLoading, setHintLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [textInput, setTextInput] = useState('');
   const [isRecording, setIsRecording] = useState(false);
@@ -272,7 +267,6 @@ export default function Practice() {
           .catch(() => { /* 拉取失败：保持 null，走回退逻辑 */ });
         // 初始开场白（seq:1 的客户第一句话）不进对话记录，从用户的实际对练开始展示
         setMessages((session.transcript ?? []).filter((t) => !(t.seq === 1 && t.speaker === 'persona')));
-        setHintsRemaining(Math.max(0, MAX_HINTS - (session.hintsUsed ?? 0)));
         applyTurnMeta(remainingSeconds);
         const lastEmotion = session.emotionTrace?.[session.emotionTrace.length - 1];
         if (lastEmotion?.bandKey) setBandKey(lastEmotion.bandKey);
@@ -1297,28 +1291,6 @@ export default function Practice() {
     }
   };
 
-  // ===== 教练提示 =====
-  const handleHint = async () => {
-    if (!sessionId || hintLoading || hintsRemaining <= 0) return;
-    if (statusRef.current !== 'user_turn' && statusRef.current !== 'thinking' && statusRef.current !== 'speaking') return;
-    setHintLoading(true);
-    try {
-      const res = await requestHint(sessionId);
-      setMessages((prev) => [...prev, res.hintTurn]);
-      setHintsRemaining(res.hintsRemaining);
-    } catch (err) {
-      const statusCode = (err as { response?: { status?: number } })?.response?.status;
-      if (statusCode === 409) {
-        setHintsRemaining(0);
-        setErrorMsg('提示次数已用完');
-      } else {
-        setErrorMsg(apiError(err));
-      }
-    } finally {
-      setHintLoading(false);
-    }
-  };
-
   // ===== 结束并评分 =====
   const handleStop = async () => {
     if (!sessionId || statusRef.current === 'evaluating') return;
@@ -1826,16 +1798,6 @@ export default function Practice() {
                 {sessionMode === 'practice' && (
                   <button
                     className="rbtn"
-                    onClick={handleHint}
-                    disabled={!inLive || status === 'paused' || hintsRemaining <= 0 || hintLoading || status === 'loading' || status === 'ended' || status === 'evaluating'}
-                    title={`教练提示（剩余 ${hintsRemaining} 次）`}
-                  >
-                    💡{hintsRemaining}
-                  </button>
-                )}
-                {sessionMode === 'practice' && (
-                  <button
-                    className="rbtn"
                     onClick={handlePauseToggle}
                     disabled={!canPause && status !== 'paused'}
                     title={status === 'paused' ? '继续练习' : '暂停练习'}
@@ -1935,21 +1897,6 @@ export default function Practice() {
                 {bandKey && <li>对方状态：{bandKey}</li>}
               </ul>
             </div>
-            {sessionMode === 'practice' && (
-              <div className="card panel">
-                <h3 style={{ marginBottom: '8px', fontSize: '15px', fontWeight: 700 }}>💡 教练提示</h3>
-                <div style={{ fontSize: '13px', color: '#6B7280', marginBottom: '10px' }}>
-                  卡住时可以向教练求助，本场剩余 {hintsRemaining} 次
-                </div>
-                <button
-                  className="btn btn-primary btn-sm"
-                  onClick={handleHint}
-                  disabled={!inLive || status === 'paused' || hintsRemaining <= 0 || hintLoading || status === 'loading' || status === 'ended' || status === 'evaluating'}
-                >
-                  {hintLoading ? '生成中…' : hintsRemaining > 0 ? `给我提示（剩 ${hintsRemaining} 次）` : '次数已用完'}
-                </button>
-              </div>
-            )}
           </aside>
         </div>
       </main>

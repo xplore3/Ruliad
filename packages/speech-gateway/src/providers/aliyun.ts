@@ -144,6 +144,8 @@ export class AliyunSpeechProvider implements ASRProvider, TTSProvider {
     let finishRequested = false;
     let finalEmitted = false;
     let finalText = '';
+    let latestText = '';
+    let emittedFinalText = '';
     const pendingChunks: Buffer[] = [];
 
     const sendCmd = (action: string, payload: Record<string, unknown>) => {
@@ -192,17 +194,21 @@ export class AliyunSpeechProvider implements ASRProvider, TTSProvider {
         const text: string = sentence.text ?? '';
         if (!text) return;
         if (sentence.end_time == null) {
-          handlers.onPartial(finalText + text);
+          latestText = finalText + text;
+          handlers.onPartial(latestText);
         } else {
           finalText += text;
+          latestText = finalText;
+          emittedFinalText = finalText;
           finalEmitted = true;
           handlers.onFinal(finalText);
         }
       } else if (event === 'task-finished') {
-        // finish 后一句完整结果都没回来：补发一次 onFinal（可能为空串），保证调用方能收尾
-        if (finishRequested && !finalEmitted) {
+        // 收尾时补上尚未落句的阶段文本，避免最后一个半句在已有完整句时被丢掉
+        if (finishRequested && (!finalEmitted || latestText !== emittedFinalText)) {
           finalEmitted = true;
-          handlers.onFinal(finalText);
+          emittedFinalText = latestText;
+          handlers.onFinal(latestText);
         }
         handlers.onFinished?.();
         ws.close();
@@ -257,7 +263,7 @@ export class AliyunSpeechProvider implements ASRProvider, TTSProvider {
   async synthesize(text: string, opts?: TTSOptions): Promise<TTSResult> {
     // 清理文本：移除控制字符、零-width字符等阿里 TTS 不支持的字符
     const cleanText = text
-      .replace(/[ -]/g, '') // 移除控制字符
+      .replace(/[\u0000-\u001f\u007f]/g, '') // 移除控制字符
       .replace(/[﻿-￾]/g, '') // 移除 BOM 和零-width字符
       .trim();
     if (!cleanText) {

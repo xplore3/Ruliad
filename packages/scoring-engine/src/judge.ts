@@ -56,15 +56,18 @@ function scoreMetric(
 function computeQuantScore(
   rule: QuantitativeRule,
   voice?: ScoreReport['ruleStats']['voice']
-): { total: number; blockLines: string[] } {
+): { total: number; blockLines: string[]; userBlockLines: string[]; hasMissingData: boolean } {
   let total = 0;
+  let hasMissingData = false;
   const blockLines: string[] = [];
+  const userBlockLines: string[] = [];
   for (const block of rule.blocks) {
     const parts = block.metrics.map((m) => scoreMetric(m, voice));
     const totalWeight = block.metrics.reduce((s, m) => s + (m.weight ?? 1), 0);
     const avg = parts.reduce((s, p, i) => s + p.score * (block.metrics[i].weight ?? 1), 0) / totalWeight;
     const blockScore = Math.round((avg / 100) * block.maxScore);
     total += blockScore;
+    hasMissingData ||= parts.some((p) => p.value === null);
     const detail = block.metrics
       .map((m, i) => {
         const meta = METRIC_LABELS[m.metric] ?? { label: m.metric, unit: '' };
@@ -73,17 +76,18 @@ function computeQuantScore(
       })
       .join('，');
     blockLines.push(`${block.label}${blockScore}/${block.maxScore}（${detail}）`);
+    userBlockLines.push(`${block.label}${blockScore}/${block.maxScore}`);
   }
-  return { total, blockLines };
+  return { total, blockLines, userBlockLines, hasMissingData };
 }
 
-/** 定量计分后的 LLM 评语：分数已由代码定死，LLM 只写理由与话术示范，失败回退计表明细 */
+/** 定量计分后的 LLM 评语：分数已由代码定死，LLM 只写面向学员的理由与话术示范 */
 async function narrateQuantScore(
   def: ScoreItemDef,
   session: Session,
   gateway: LLMGateway,
   scenario: Scenario | undefined,
-  det: { total: number; blockLines: string[] }
+  det: { total: number; blockLines: string[]; hasMissingData: boolean }
 ): Promise<{ rationale: string; betterScript: string }> {
   const transcriptLines = session.transcript
     .map((t) => `[${t.seq}] ${t.speaker === 'trainee' ? (t.addressedToChild ? '学员（对孩子说）' : '学员') : t.speaker === 'coach' ? '旁白' : t.speaker === 'child' ? '孩子' : '客户'}：${t.text}`)
@@ -93,12 +97,12 @@ async function narrateQuantScore(
     `评分标准：${def.name}`,
     `行为锚定：${def.behaviorAnchor}`,
     ...(scenario ? [`练习场景：${scenario.name}`] : []),
-    '定量计分结果（由代码按评分标准确定性算出，必须在理由中原样引用，不得更改任何分数）：',
+    '定量计分结果（分数不得更改；技术数据仅供你理解判定，不得原样搬进给学员的评语）：',
     ...det.blockLines,
     `总分：${det.total}/100`,
     '对话记录：',
     transcriptLines,
-    '请只输出 JSON：{"rationale":"判定理由（引用上面的量化数据与分数解释，不得改分，不得提及标准之外的维度）","betterScript":"针对扣分块的更优话术示范，不超过60字；无扣分给空字符串"}',
+    '请只输出 JSON：{"rationale":"面向销售学员的判定理由，用自然培训语言说明表现，例如“开场有感染力，但整体语速偏快”“声音还可以更有力量”；可以引用各项得分和总分，禁止出现半音、分贝、dB、dBFS、Hz、F0、RMS、P90、标准差、动态范围、个人基线、音高、响度、抬升、声学、量化等专业术语或英文缩写","betterScript":"针对扣分块的更优话术示范，不超过60字；无扣分给空字符串"}',
   ].join('\n');
   try {
     const result = await gateway.forTask('judge').chat([{ role: 'user', content: prompt }], { jsonMode: true });
@@ -108,7 +112,7 @@ async function narrateQuantScore(
       betterScript: String(parsed.betterScript ?? ''),
     };
   } catch {
-    return { rationale: '', betterScript: '' };
+    return { rationale: det.hasMissingData ? '语音数据不足的项目按中间分计。' : '', betterScript: '' };
   }
 }
 
@@ -196,6 +200,7 @@ function buildJudgePrompt(
     '2. rationale 只能陈述与本标准直接相关的表现证据，不得点评本标准未涵盖的方面，哪怕学员在那些方面表现很差也一个字不提。',
     '3. betterScript 只能针对本标准的扣分点，不得夹带其他维度的建议。',
     '4. 场景与剧本信息仅供理解对话背景，不作为额外评分维度。',
+    '5. rationale 和 dimensions 是给销售学员看的，必须使用自然、易懂的培训语言，例如“语速偏快”“声音起伏不足”“语气不够亲切”；即使上方包含声学统计，也不得在评语中输出半音、分贝、dB、dBFS、Hz、F0、RMS、P90、标准差、动态范围、个人基线、音高、响度、抬升、声学、量化等专业术语或英文缩写。',
     ...(scoringFocus?.length
       ? [`本次演练重点评分维度：${scoringFocus.join('、')}。打分时对这些维度从严、并明确指出该维度表现。`]
       : []),
@@ -313,8 +318,8 @@ export async function judgeItem(
       quote: '',
       quoteTurnSeq: 0,
       rationale: narrative.rationale
-        ? `${narrative.rationale}（${det.blockLines.join('；')}）`
-        : det.blockLines.join('；'),
+        ? `${narrative.rationale}（${det.userBlockLines.join('；')}）`
+        : det.userBlockLines.join('；'),
       betterScript: narrative.betterScript || undefined,
       confidence: 0.98,
       judgeAgree: true,

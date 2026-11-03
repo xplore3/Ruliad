@@ -104,39 +104,43 @@ export class PcmRecorder {
     this.running = true;
   }
 
+  private emitPcm(block: number[], ratio: number) {
+    const outLen = Math.floor(block.length / ratio);
+    if (outLen <= 0) return;
+    const pcm = new Int16Array(outLen);
+    for (let i = 0; i < outLen; i++) {
+      const srcIdx = i * ratio;
+      const lo = Math.floor(srcIdx);
+      const hi = Math.min(lo + 1, block.length - 1);
+      const frac = srcIdx - lo;
+      const v = block[lo] * (1 - frac) + block[hi] * frac;
+      pcm[i] = Math.max(-32768, Math.min(32767, Math.round(v * 32767)));
+    }
+    this.onChunk?.(pcm.buffer);
+  }
+
   private handleSamples(samples: Float32Array) {
     const ctx = this.ctx;
     if (!ctx || !this.running) return;
     const ratio = ctx.sampleRate / TARGET_SAMPLE_RATE;
-    // 计算能量（在原始采样率上即可）
     let sum = 0;
     for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
-    this.onLevel?.(Math.sqrt(sum / samples.length));
-    // onLevel 回调可能同步触发 stop()（如 VAD 判停），此时本块直接丢弃
-    if (!this.running || this.ctx !== ctx) return;
+    const rms = Math.sqrt(sum / samples.length);
 
-    // 线性插值重采样到 16kHz
-    for (let i = 0; i < samples.length; i++) {
-      this.pending.push(samples[i]);
-    }
+    for (let i = 0; i < samples.length; i++) this.pending.push(samples[i]);
     const chunkSrcLen = Math.floor((CHUNK_MS / 1000) * ctx.sampleRate);
     while (this.pending.length >= chunkSrcLen) {
-      const block = this.pending.splice(0, chunkSrcLen);
-      const outLen = Math.floor(block.length / ratio);
-      const pcm = new Int16Array(outLen);
-      for (let i = 0; i < outLen; i++) {
-        const srcIdx = i * ratio;
-        const lo = Math.floor(srcIdx);
-        const hi = Math.min(lo + 1, block.length - 1);
-        const frac = srcIdx - lo;
-        const v = block[lo] * (1 - frac) + block[hi] * frac;
-        pcm[i] = Math.max(-32768, Math.min(32767, Math.round(v * 32767)));
-      }
-      this.onChunk?.(pcm.buffer);
+      this.emitPcm(this.pending.splice(0, chunkSrcLen), ratio);
     }
+
+    // 先送出当前声音，再让 VAD 判停，避免话尾的当前音频块被丢弃
+    this.onLevel?.(rms);
   }
 
   stop() {
+    if (this.running && this.ctx && this.pending.length > 0) {
+      this.emitPcm(this.pending, this.ctx.sampleRate / TARGET_SAMPLE_RATE);
+    }
     this.running = false;
     // 先摘掉消息回调，停止后在途的 worklet 消息不再进入 handleSamples
     if (this.node) this.node.port.onmessage = null;

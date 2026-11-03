@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams, Navigate } from 'react-router-dom';
-import { fetchSession, endSession, requestHint, pauseSession, resumeSession, apiError, voiceWsUrl } from '../api';
+import { fetchSession, endSession, pauseSession, resumeSession, apiError, voiceWsUrl } from '../api';
 import { PcmRecorder, TtsPlayer, VoiceSocket } from '../voice';
 import type { VoiceServerEvent } from '../voice';
 import QuizModal from '../components/QuizModal';
@@ -60,9 +60,6 @@ export default function Call() {
   /** 场景信息（目标/剧本，来自场景库配置） */
   const [scenarioInfo, setScenarioInfo] = useState<SessionCreated['scenario'] | null>(null);
   const [sessionMode, setSessionMode] = useState<'practice' | 'exam'>('practice');
-  const [hintText, setHintText] = useState('');
-  const [hintsLeft, setHintsLeft] = useState(0);
-  const [hintLoading, setHintLoading] = useState(false);
   /** 随场考题队列（逐题弹窗作答） */
   const [quizQueue, setQuizQueue] = useState<QuizQuestion[]>([]);
 
@@ -101,7 +98,6 @@ export default function Call() {
         setScenarioInfo(res.scenario);
         setScenarioId(res.session.scenarioId);
         setSessionMode(res.session.mode);
-        setHintsLeft(Math.max(0, 3 - (res.session.hintsUsed ?? 0)));
         setRemainingSeconds(res.remainingSeconds);
         if (res.session.status !== 'active') {
           endedRef.current = true;
@@ -239,21 +235,6 @@ export default function Call() {
     if (!answered) dismissedQuizIdsRef.current.add(quiz.id);
     setQuizQueue((prev) => prev.filter((q) => q.id !== quiz.id));
     if (phase === 'connected' && !isMuted && !isPaused) void startRecorder();
-  };
-
-  /** 教练提示（仅 practice 模式，消耗本场提示次数） */
-  const handleHint = async () => {
-    if (!sessionId || hintLoading || hintsLeft <= 0) return;
-    setHintLoading(true);
-    try {
-      const res = await requestHint(sessionId);
-      setHintText(res.hintTurn.text);
-      setHintsLeft(res.hintsRemaining);
-    } catch (err) {
-      toast(apiError(err, '提示生成失败'));
-    } finally {
-      setHintLoading(false);
-    }
   };
 
   const startRecorder = async () => {
@@ -464,25 +445,7 @@ export default function Call() {
                   ).map((g) => <li key={g}>{g}</li>)}
                 </ul>
               </div>
-              {sessionMode === 'practice' && (
-                <div className="card panel">
-                  <h3 style={{ marginBottom: '8px', fontWeight: 700, fontSize: '15px' }}>💡 教练提示</h3>
-                  {hintText ? (
-                    <p className="small" style={{ marginBottom: 8 }}>{hintText}</p>
-                  ) : (
-                    <p className="small muted" style={{ marginBottom: 8 }}>卡住时可以向教练求助，本场剩余 {hintsLeft} 次</p>
-                  )}
-                  <button
-                    className="btn btn-primary btn-sm"
-                    onClick={handleHint}
-                    disabled={hintLoading || hintsLeft <= 0 || phase !== 'connected'}
-                  >
-                    {hintLoading ? '生成中…' : hintsLeft > 0 ? `给我提示（剩 ${hintsLeft} 次）` : '次数已用完'}
-                  </button>
-                </div>
-              )}
-            </aside>
-          </div>
+            </aside></div>
         </main>
       )}
 

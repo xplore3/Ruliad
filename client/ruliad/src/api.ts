@@ -180,11 +180,6 @@ export async function sendTurn(sessionId: string, text: string) {
   return data as TurnResult;
 }
 
-export async function requestHint(sessionId: string) {
-  const { data } = await api.post(`/sessions/${sessionId}/hint`);
-  return data as { hintTurn: import('./types').TranscriptTurn; hintsRemaining: number };
-}
-
 /** 提交考题答案；返回对错、得分、解析与正确答案（答题后展示用） */
 export async function submitQuizAnswer(sessionId: string, quizId: string, answer: string[]) {
   const { data } = await api.post(`/sessions/${sessionId}/quiz-answer`, { quizId, answer });
