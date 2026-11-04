@@ -17,6 +17,7 @@ function extractJson(content: string): string {
 
 /** 取场景对应分类的演练剧本（该分类下第一条；无分类或无剧本返回 undefined，调用方走兼容行为） */
 export async function resolveDrillScript(store: Store, scenario: Scenario): Promise<DrillScript | undefined> {
+  if (scenario.id === 'scenario-humor-test') return store.getDrillScript('drill-script-humor-test');
   if (!scenario.category) return undefined;
   const list = await store.listDrillScripts(scenario.tenantId, scenario.category).catch(() => []);
   return list.find((s) => s.content.trim());
@@ -42,7 +43,12 @@ export function drillScriptPrompt(script: DrillScript): string {
  * 第二场必定"潜在意向"，避免用户连续随机到无兴趣客户。
  * 未声明返回 undefined（不干预）。
  */
-export function initialCustomerArchetype(content: string): 'uninterested' | undefined {
+export function initialCustomerArchetype(
+  content: string,
+  category?: Scenario['category']
+): 'uninterested' | 'interested' | undefined {
+  if (category === '咨询接待') return 'interested';
+  if (category !== '地推') return undefined;
   if (!/10次应该有5次|一半.*不感兴趣|5次.*不感兴趣/.test(content)) return undefined;
   return 'uninterested';
 }
@@ -54,8 +60,19 @@ export const GIVE_UP_PATTERN = /打扰[你您]?了?|那算了|不打扰|那您�
 /** 切场旁白文案（第一小场结束 → 第二小场开始，学员先开口） */
 export const SCENE_TRANSITION_NARRATION = '这次演练结束，现在开始下一场，请你先说话。';
 
-/** 本场客户类型注入 prompt 的硬约束段落（系统随机确定，整场不变） */
-export function archetypePrompt(archetype: 'uninterested' | 'interested'): string {
+/** 本场客户类型注入 prompt 的硬约束段落 */
+export function archetypePrompt(
+  archetype: 'uninterested' | 'interested',
+  category?: Scenario['category']
+): string {
+  if (category === '咨询接待') {
+    return [
+      '【本场客户类型（必须严格遵守，优先级高于其他行为要求）】明确有兴趣、主动上门咨询的客户。',
+      '客户对课程或服务有明确兴趣，愿意了解并配合咨询流程，不得使用地推第一小场的固定无兴趣反应。',
+      '按咨询接待剧本自然提问、了解课程、预约或成交；不得无故离开或把潜在客户特有的地推拒绝流程带入本场景。',
+      '客户虽然有兴趣，但永远不会主动提出想试听课、主动约试听时间或要求安排试听；试听只能由销售主动提出并推动。客户可以回答销售提出的时间选择，但不能替销售发起邀约。',
+    ].join('\n');
+  }
   return archetype === 'uninterested'
     ? [
         '【本场客户类型（系统随机确定，必须严格遵守，优先级高于其他行为要求）】不感兴趣的客户。',

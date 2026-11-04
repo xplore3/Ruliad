@@ -85,6 +85,18 @@ describe('analyzePcm16', () => {
   });
 });
 
+describe('语气辅助证据', () => {
+  it('同步保留音调音量曲线、停顿和连续发声段', () => {
+    const f = analyzePcm16(synth([[220, 0.2, 700], [0, 0, 400], [220, 0.2, 700]]))!;
+    expect(f.prosody).toBeDefined();
+    expect(f.prosody!.pitchCurve.length).toBeGreaterThan(0);
+    expect(f.prosody!.loudnessCurve.length).toBeGreaterThan(0);
+    expect(f.prosody!.pauses.some((p) => p.durationMs >= 200)).toBe(true);
+    expect(f.prosody!.elongatedSegments.length).toBeGreaterThan(0);
+    expect(f.prosody!.laughterCue.status).toBe('unknown');
+  });
+});
+
 describe('wavToPcm', () => {
   it('剥离 WAV 头返回 data 块', () => {
     const pcm = synth([[220, 0.2, 500]]);

@@ -313,6 +313,7 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
       isObservation: body.isObservation ?? false,
       category: body.category,
       scoringMode: body.scoringMode,
+      deductionOnly: body.deductionOnly,
     };
     await store.upsertScoreItemDef(def);
     return reply.code(201).send(def);
@@ -337,6 +338,7 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
         isObservation: body.isObservation ?? existing.isObservation,
         category: body.category ?? existing.category,
         scoringMode: body.scoringMode ?? existing.scoringMode,
+        deductionOnly: body.deductionOnly ?? existing.deductionOnly,
       };
       const error = validateScoreItemBody(merged);
       if (error) return reply.code(400).send({ error });

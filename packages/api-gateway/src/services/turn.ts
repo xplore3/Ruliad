@@ -1,5 +1,5 @@
 import { EventTypes, type PersonaConfig, type QuizQuestion, type QuizQuestionPublic, type Scenario, type ScenarioGuidance, type Session, type TranscriptTurn, type VoiceFeatures } from '@grasp-mvp/core';
-import { bandFor, checkConsistency, classifyAddressTarget, compilePersona, EmotionTracker, PersonaActor, replyAsChild, ruleCheck } from '@grasp-mvp/role-engine';
+import { analyzeExpressionIntent, bandFor, checkConsistency, classifyAddressTarget, compilePersona, EmotionTracker, PersonaActor, replyAsChild, ruleCheck, shouldCustomerLeave } from '@grasp-mvp/role-engine';
 import type { RouteContext } from '../ctx.js';
 import { mkEvent } from '../events.js';
 import { drillScriptPrompt, archetypePrompt, resolveDrillScript, initialCustomerArchetype, FIRST_SCENE_MAX_MS, GIVE_UP_PATTERN, SCENE_TRANSITION_NARRATION } from './drill.js';
@@ -119,9 +119,10 @@ export async function loadRuntime(
   if (drillScript) {
     bundle.systemPrompt = `${bundle.systemPrompt}\n\n${drillScriptPrompt(drillScript)}`;
   }
-  // 注入本场客户类型（开场时系统随机确定并存在会话上，整场不变）：概率化原则由代码落地，不交给 LLM
-  if (archetype) {
-    bundle.systemPrompt = `${bundle.systemPrompt}\n\n${archetypePrompt(archetype)}`;
+  // 注入本场客户类型：地推按双场制执行；咨询接待固定为有兴趣客户（包括旧会话）
+  const effectiveArchetype = scenario.category === '咨询接待' ? 'interested' : archetype;
+  if (effectiveArchetype) {
+    bundle.systemPrompt = `${bundle.systemPrompt}\n\n${archetypePrompt(effectiveArchetype, scenario.category)}`;
   }
   return { personaConfig, bundle, productKB, drillScript };
 }
@@ -231,29 +232,61 @@ export async function runTurn(
     at: now,
     ...(voiceFeatures && !isSystemGreeting ? { voiceFeatures } : {}),
   };
+  const intentPromise = voiceFeatures && !isSystemGreeting
+    ? analyzeExpressionIntent(gateway.forTask('actor'), traineeTurn, `${scenario.name}${scenario.script?.purpose ? `：${scenario.script.purpose}` : ''}`)
+    : Promise.resolve(undefined);
   const guidance = await store.getScenarioGuidance(scenario.id).catch(() => undefined);
   const totalSeconds = countdownSecondsOf(scenario, guidance);
   const lastTrace = session.emotionTrace[session.emotionTrace.length - 1];
   const traineeTurnCount = session.transcript.filter((t) => t.speaker === 'trainee').length;
+  const expressionIntent = await intentPromise;
+  if (expressionIntent) traineeTurn.expressionIntent = expressionIntent;
 
   // ---- 孩子模式：家长问孩子后激活。学员发言先经路由器判定对话对象——
-  // 对孩子说的由孩子角色直接应答（该轮语音不参与声学考核）；转向家长则退出孩子模式走正常客户应答 ----
+  // 对孩子说的由孩子角色直接应答；第二次沟通仍抗拒时家长直接带走孩子并结束 ----
   if (session.childMode && !isSystemGreeting) {
     const target = await classifyAddressTarget(gateway.forTask('actor'), session.transcript, text);
     if (target === 'child') {
       traineeTurn.addressedToChild = true;
-      const childText = (
-        await replyAsChild(gateway.forTask('actor'), [...session.transcript, traineeTurn], text).catch(() => '')
-      ).trim();
+      const childReply = await replyAsChild(gateway.forTask('actor'), [...session.transcript, traineeTurn], text)
+        .catch(() => ({ text: '', resistant: true }));
       const childReplyTurn: TranscriptTurn = {
         seq: traineeTurn.seq + 1,
         speaker: 'child',
-        text: childText || '（孩子抿着嘴没说话）',
+        text: childReply.text.trim() || '（孩子抿着嘴没说话）',
         at: new Date().toISOString(),
       };
+      const childAttemptCount = (session.childAttemptCount ?? 0) + 1;
+      const pendingQuizzes = await checkQuizTriggers(ctx, session, scenario, displayText, traineeTurn.seq);
+      const left = remainingSeconds(session, scenario, totalSeconds);
+
+      if (childAttemptCount >= 2 && childReply.resistant) {
+        const personaTurn: TranscriptTurn = {
+          seq: childReplyTurn.seq + 1,
+          speaker: 'persona',
+          text: '（家长牵起孩子的手）孩子还是不太愿意，我们先走了。',
+          at: new Date().toISOString(),
+        };
+        await store.updateSession(session.id, {
+          transcript: [...session.transcript, traineeTurn, childReplyTurn, personaTurn],
+          childMode: false,
+          childAttemptCount,
+        });
+        return {
+          traineeTurn,
+          personaTurn,
+          arousal: lastTrace?.arousal ?? null,
+          bandKey: lastTrace?.bandKey ?? null,
+          remainingSeconds: left,
+          timeUp: true,
+          pendingQuizzes: pendingQuizzes.length > 0 ? pendingQuizzes.map(toPublicQuiz) : undefined,
+        };
+      }
+
       await store.updateSession(session.id, {
         transcript: [...session.transcript, traineeTurn, childReplyTurn],
         childMode: true,
+        childAttemptCount,
       });
       void store.appendEvent(
         mkEvent(EventTypes.SESSION_TURN, {
@@ -263,8 +296,6 @@ export async function runTurn(
           payload: { seq: traineeTurn.seq, text: displayText, addressedToChild: true },
         })
       );
-      const pendingQuizzes = await checkQuizTriggers(ctx, session, scenario, displayText, traineeTurn.seq);
-      const left = remainingSeconds(session, scenario, totalSeconds);
       return {
         traineeTurn,
         childTurn: childReplyTurn,
@@ -289,11 +320,12 @@ export async function runTurn(
   }
   const { bundle, drillScript } = runtime;
 
-  // 双场制判定：第一场（不感兴趣）+ 剧本声明了概率原则
+  // 双场制只适用于地推：咨询接待永不进入固定无兴趣小场
   const dualScene =
+    scenario.category === '地推' &&
     session.customerArchetype === 'uninterested' &&
     !!drillScript &&
-    initialCustomerArchetype(drillScript.content) === 'uninterested';
+    initialCustomerArchetype(drillScript.content, scenario.category) === 'uninterested';
   // 学员明确放弃当前客户（"那打扰您了"等话术）：跳过 LLM 回复，客户直接离场，立即切场
   const traineeGaveUp = GIVE_UP_PATTERN.test(text);
 
@@ -313,7 +345,21 @@ export async function runTurn(
   let asksChild = false;
   let warmupAudio: Buffer | undefined;
   let warmupFormat: string | undefined;
-  if (!isSystemGreeting && dualScene && traineeGaveUp) {
+  const lastSceneCoachIndex = session.transcript
+    .map((t) => t.speaker === 'coach' && t.text === SCENE_TRANSITION_NARRATION)
+    .lastIndexOf(true);
+  const isOpening = !session.transcript.slice(lastSceneCoachIndex + 1).some((t) => t.speaker === 'trainee');
+  const offPoint = scenario.category === '地推' && !isSystemGreeting && await shouldCustomerLeave(
+    gateway.forTask('actor'),
+    transcriptSoFar,
+    drillScript?.content ?? bundle.systemPrompt,
+    isOpening
+  ).catch(() => false);
+  if (offPoint) {
+    // 开场不合格、明显跑题或持续无目的闲聊：潜在客户不再配合，强制结束
+    replyText = '（客户看了看时间，打断销售）抱歉，我们还有事，先走了。';
+    shouldClose = true;
+  } else if (!isSystemGreeting && dualScene && traineeGaveUp) {
     // 快速通道：不再调用 LLM 生成客户回复与一致性校验
     replyText = '（客户摆了摆手，快步走远了）';
   } else {
@@ -385,12 +431,13 @@ export async function runTurn(
   // ---- 孩子作答：客户本轮转头向孩子提问（[[CHILD]]）时，由独立 LLM 以孩子口吻回答，问题不由销售作答 ----
   let childTurn: TranscriptTurn | undefined;
   if (asksChild && !isSystemGreeting && replyText.trim()) {
-    const childText = await replyAsChild(gateway.forTask('actor'), [...transcriptSoFar, personaTurn], replyText).catch(() => '');
-    if (childText.trim()) {
+    const childReply = await replyAsChild(gateway.forTask('actor'), [...transcriptSoFar, personaTurn], replyText)
+      .catch(() => ({ text: '', resistant: true }));
+    if (childReply.text.trim()) {
       childTurn = {
         seq: personaTurn.seq + 1,
         speaker: 'child',
-        text: childText.trim(),
+        text: childReply.text.trim(),
         at: new Date().toISOString(),
       };
     }
@@ -430,8 +477,8 @@ export async function runTurn(
     await store.updateSession(session.id, {
       transcript: [...transcriptSoFar, personaTurn, ...(childTurn ? [childTurn] : []), ...(narratorTurn ? [narratorTurn] : [])],
       emotionTrace,
-      // 家长问孩子 → 激活孩子模式：下一轮起学员发言经路由器分配给孩子或家长
-      ...(childTurn ? { childMode: true } : {}),
+      // 家长问孩子 → 激活孩子模式，并从销售第一次说服孩子起计算两轮机会
+      ...(childTurn ? { childMode: true, childAttemptCount: 0 } : {}),
     });
   }
 

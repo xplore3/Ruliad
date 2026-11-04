@@ -37,7 +37,8 @@ export interface QuantMetricRule {
     | 'avgLoudnessDbfs'
     | 'medianF0Hz'
     | 'f0LiftSemitones'
-    | 'loudnessLiftDb';
+    | 'loudnessLiftDb'
+    | 'fluencyScore';
   bands?: QuantMetricBand[];
   /**
    * 锚点线性插值（优先于 bands）：按 value 升序排列，命中区间在两锚点间线性插值，
@@ -91,6 +92,8 @@ export interface ScoreItemDef {
    * 如"总分100=激情60+语速20+音量20"），judge 按锚定直接给出总分
    */
   scoringMode?: 'levels' | 'score';
+  /** 独立扣分项：score 表示从最终总分扣减的分数，不参与加权平均或技能点得分 */
+  deductionOnly?: boolean;
   /** 确定性定量计分规则（仅 score 模式）：配置后跳过 LLM 打分，按语音量化数据查表计分 */
   quantitativeRule?: QuantitativeRule;
   /** 定量评分使用的语音统计通道：缺省=对家长/客户的学员轮次；'child'=只统计对孩子说的轮次（与孩子说话的语气类标准） */
@@ -119,6 +122,8 @@ export interface ScoreItemResult {
   /** 不一致项：复盘中标注"参考" */
   isReference: boolean;
   isObservation: boolean;
+  /** true 时 score 为最终总分扣减金额，而非该项百分制得分 */
+  isDeduction?: boolean;
   layer: 'company' | 'team' | 'personal';
 }
 
@@ -177,6 +182,8 @@ export interface ScoreReport {
     avgSpeechRate: number;
     /** 明显停顿次数（学员应答前静默 > 3s） */
     pauseCount: number;
+    /** 表达流畅度（0-100）：100 为流畅，每次明显停顿扣 15 分、每个口头禅扣 5 分，最低 0 分 */
+    fluencyScore?: number;
     /** 学员语音声学特征聚合（来自各语音轮的录音分析；纯文字对练时缺省） */
     voice?: {
       /** 有声学特征的语音轮数 */

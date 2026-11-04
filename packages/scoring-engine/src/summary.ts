@@ -19,7 +19,11 @@ export function buildFallbackSummary(scenario: Scenario, input: SummaryInput): s
   if (input.fatalViolation) {
     lines.push('注意：本次话术命中合规红线，一票否决，务必避免任何效果承诺类表述。');
   }
-  const scored = input.items.filter((i) => !i.isObservation);
+  const scored = input.items.filter((i) => !i.isObservation && !i.isDeduction);
+  const deductions = input.items.filter((i) => i.isDeduction && i.score > 0);
+  if (deductions.length > 0) {
+    lines.push(`扣分项：${deductions.map((i) => `${i.itemName}扣 ${i.score} 分`).join('，')}。`);
+  }
   if (scored.length > 0) {
     const best = [...scored].sort((a, b) => b.score - a.score)[0];
     const worst = [...scored].sort((a, b) => a.score - b.score)[0];
@@ -54,7 +58,7 @@ function buildSummaryPrompt(scenario: Scenario, input: SummaryInput): string {
           `  档位定义：${def.levels.map((l) => `${l.label}（${l.score}分）${l.description ? `：${l.description}` : ''}`).join('；')}`
         );
       }
-      return [`- ${i.itemName}：${i.score} 分（${i.levelLabel ?? i.levelKey}）`, ...anchorLines].join('\n');
+      return [def?.deductionOnly ? `- ${i.itemName}：从最终总分扣 ${i.score} 分` : `- ${i.itemName}：${i.score} 分（${i.levelLabel ?? i.levelKey}）`, ...anchorLines].join('\n');
     })
     .join('\n');
   return [

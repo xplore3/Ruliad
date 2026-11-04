@@ -15,15 +15,15 @@ import { getCachedPreferences, getPreferredSpeechRate } from './api';
  * 浏览器 AGC 关闭后，不同麦克风的原始电平差异很大，固定阈值会把轻声说话误判为静音（话没说完被切断）。
  */
 export class AdaptiveVad {
-  private noiseFloor = 0.006;
-  /** 当前语音判定阈值（噪声底 ×2.5，钳制在 0.005~0.02） */
+  private noiseFloor = 0.004;
+  /** 当前语音判定阈值（噪声底 ×2，钳制在 0.003~0.015），兼顾轻声发言 */
   threshold(): number {
-    return Math.min(0.02, Math.max(0.005, this.noiseFloor * 2.5));
+    return Math.min(0.015, Math.max(0.003, this.noiseFloor * 2));
   }
-  /** 输入一个音频块 RMS，返回是否语音；非语音块缓慢更新噪声底 */
+  /** 输入一个音频块 RMS，返回是否语音；非语音块慢速更新噪声底，避免把轻声发言学成噪声 */
   isSpeech(rms: number): boolean {
     if (rms > this.threshold()) return true;
-    this.noiseFloor = Math.max(0.002, this.noiseFloor * 0.95 + rms * 0.05);
+    this.noiseFloor = Math.max(0.0015, this.noiseFloor * 0.999 + rms * 0.001);
     return false;
   }
 }

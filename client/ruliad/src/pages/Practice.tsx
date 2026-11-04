@@ -59,7 +59,7 @@ const PERSONA_FALLBACK_MS = 10000;
 const GUIDE_CHOICE_QUESTION = '想再听一个版本的示范，还是开始模拟练习？';
 /** 自动聆听 VAD 参数（参考服务端 voice.ts 的 RMS + 静音判停思路）：新手指引与 live 阶段共用；
  * 语音判定用 AdaptiveVad 自适应噪声底，不再使用固定 RMS 阈值 */
-const VAD_SILENCE_MS = 1000;
+const VAD_SILENCE_MS = 2500;
 const VAD_MAX_RECORD_MS = 60000;/** 自动聆听识别失败的重试上限，超过后给出文字提示 */
 const GUIDANCE_MAX_RETRY = 2;
 
@@ -1188,10 +1188,9 @@ export default function Practice() {
       return;
     }
     socket.send({ type: 'start' });
-    // 新一轮录音：重置 VAD 状态（含自适应噪声底），判停逻辑随 onLevel 回调生效
+    // 新一轮只重置发言状态；保留已学习的噪声底，避免每轮都按初始阈值误判轻声
     liveSpokeRef.current = false;
     liveLastVoiceAtRef.current = 0;
-    liveVadRef.current = new AdaptiveVad();
     isRecordingRef.current = true;
     setIsRecording(true);
     setStatusBoth('user_turn');

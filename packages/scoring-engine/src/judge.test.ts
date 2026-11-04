@@ -144,6 +144,25 @@ describe('judgeItem 定量计分（quantitativeRule）', () => {
     const high = await judgeItem(pointsDef, session, gateway, undefined, undefined, statsAt(9.0));
     expect(high.score).toBe(100);
   });
+
+  it('表达流畅度按确定性指标折算为独立 10 分块', async () => {
+    const fluencyDef: ScoreItemDef = {
+      ...def,
+      id: 'item-fluency',
+      scoringMode: 'score',
+      quantitativeRule: {
+        blocks: [{
+          label: '表达流畅度',
+          maxScore: 10,
+          metrics: [{ metric: 'fluencyScore', points: [{ value: 0, score: 0 }, { value: 100, score: 100 }] }],
+        }],
+      },
+    };
+    const gateway = gatewayWith(JSON.stringify({ rationale: '说话比较流畅', betterScript: '' }));
+    const result = await judgeItem(fluencyDef, session, gateway, undefined, undefined, { ...voiceStats, fluencyScore: 80 });
+    expect(result.score).toBe(8);
+    expect(result.rationale).toContain('表达流畅度8/10');
+  });
 });
 
 describe('judgeItem betterScript', () => {

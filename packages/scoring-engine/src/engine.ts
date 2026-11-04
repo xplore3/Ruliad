@@ -94,9 +94,13 @@ export async function scoreSession(
   }
 
   const weightOf = new Map(relevantDefs.map((d) => [d.id, d.weight]));
-  const scored = items.filter((i) => !i.isObservation);
+  const deductionIds = new Set(relevantDefs.filter((d) => d.deductionOnly).map((d) => d.id));
+  const scored = items.filter((i) => !i.isObservation && !deductionIds.has(i.itemId));
+  const deduction = items
+    .filter((i) => deductionIds.has(i.itemId))
+    .reduce((sum, i) => sum + Math.max(0, i.score), 0);
 
-  // 技能点维度：组内加权平均，满分 100
+  // 技能点维度：组内加权平均，满分 100；独立扣分项只影响最终总分
   const bySkill = new Map<string, ScoreItemResult[]>();
   for (const item of scored) {
     const list = bySkill.get(item.skillPointId) ?? [];
@@ -112,9 +116,9 @@ export async function scoreSession(
     maxScore: 100,
   }));
 
-  const totalScore = Math.round(
-    weightedAverage(scored.map((i) => ({ score: i.score, weight: weightOf.get(i.itemId) ?? 1 })))
-  );
+  const totalScore = Math.max(0, Math.round(
+    weightedAverage(scored.map((i) => ({ score: i.score, weight: weightOf.get(i.itemId) ?? 1 }))) - deduction
+  ));
 
   const fatalViolation = violations.some((v) => v.fatal);
   const passed = totalScore >= scenario.successCriteria.passScore && !fatalViolation;

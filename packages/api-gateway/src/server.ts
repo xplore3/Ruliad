@@ -43,7 +43,7 @@ const port = Number(process.env.API_PORT ?? '3060');
 const host = process.env.API_HOST ?? '0.0.0.0';
 const DEFAULT_TENANT = 'tenant-demo';
 
-const app = Fastify({ logger: true });
+const app = Fastify({ logger: true, bodyLimit: 4 * 1024 * 1024 });
 
 const store = createStore();
 const gateway = createLLMGateway(process.env, {

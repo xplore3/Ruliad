@@ -10,6 +10,7 @@ uploads
 data/videos
 # 学员语音留存（评分测量离线核查）
 packages/api-gateway/recordings
+client/ruliad/certs
 *.tsbuildinfo
 *.db
 *.db-journal
