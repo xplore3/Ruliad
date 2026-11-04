@@ -612,6 +612,12 @@ h2.bar::before { content: ''; width: 4px; height: 16px; border-radius: 2px; back
   .ops { position: sticky; bottom: calc(10px + env(safe-area-inset-bottom)); order: 2; }
 }
 
+/* ===== 报告页顶部栏 ===== */
+.topbar { display: flex; align-items: center; gap: 12px; padding: 14px 20px; background: #fff; border-bottom: 1px solid #EBEBEF; position: sticky; top: 0; z-index: 50; }
+.topbar .back-btn { width: 36px; height: 36px; border-radius: 50%; background: #F7F7F8; display: flex; align-items: center; justify-content: center; color: #6B7280; cursor: pointer; border: none; transition: background .15s, color .15s; flex-shrink: 0; }
+.topbar .back-btn:hover { background: #FFF0EE; color: #FF6B5B; }
+.topbar-title { font-size: 17px; font-weight: 700; color: #1F2329; }
+
 /* ===== 报告页 ===== */
 .page-review { max-width: 1000px; margin: 0 auto; padding: 24px 24px 60px; }
 .head-card { display: flex; gap: 26px; align-items: center; padding: 26px 28px; flex-wrap: wrap; }
@@ -621,12 +627,16 @@ h2.bar::before { content: ''; width: 4px; height: 16px; border-radius: 2px; back
 .up { color: #2FAE7B; font-weight: 700; font-size: 13px; }
 .verdict { font-size: 14.5px; margin: 6px 0 10px; }
 .stage { display: flex; flex-direction: column; gap: 14px; padding: 20px 24px; }
-.stage-row { display: grid; grid-template-columns: 88px 1fr 44px; gap: 12px; align-items: center; }
+.stage-row { display: grid; grid-template-columns: auto 1fr 44px; gap: 12px; align-items: center; } 
+.stage-title { font-size: 15px; font-weight: 700; white-space: nowrap; }
 .bar-inner { display: block; height: 100%; border-radius: 999px; }
 .bar-inner.g { background: #2FAE7B; }
 .bar-inner.a { background: #F5A623; }
 .bar-inner.c { background: #FF6B5B; }
-.stage-note { font-size: 12.5px; color: #6B7280; grid-column: 1/-1; margin-top: -6px; display: flex; gap: 8px; flex-wrap: wrap; }
+.stage-note { font-size: 12.5px; color: #6B7280; grid-column: 1/-1; margin-top: -6px; display: flex; flex-direction: column; gap: 4px; flex-wrap: wrap; }
+.numbered-list { display: flex; flex-direction: column; gap: 2px; }
+.numbered-item { display: flex; gap: 6px; line-height: 1.6; }
+.num-dot { color: #FF6B5B; font-weight: 600; flex-shrink: 0; }
 .stage-note a { color: #FF6B5B; font-weight: 600; }
 .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
 .metric { padding: 16px 18px; }

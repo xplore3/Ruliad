@@ -633,6 +633,12 @@ export async function qualifyAnswer(sessionId: string, q: number, audio: ArrayBu
   return data as { text: string; experienced: boolean | null };
 }
 
+/** 资格提问回答（流式识别已出文本）：直接传文本，服务端跳过 ASR */
+export async function qualifyAnswerText(sessionId: string, q: number, text: string) {
+  const { data } = await api.post(`/sessions/${sessionId}/qualify-answer?q=${q}`, { text });
+  return data as { text: string; experienced: boolean | null };
+}
+
 /** 获取一版示范对话剧本；无示范模式时 lines 为空且 hasDemo=false */
 export async function fetchDemo(sessionId: string, version: number) {
   const { data } = await api.post(`/sessions/${sessionId}/demo`, { version });
@@ -653,6 +659,12 @@ export async function demoChoice(sessionId: string, audio: ArrayBuffer) {
   return data as { text: string; choice: 'replay' | 'practice' };
 }
 
+/** 示范播完后的语音选择（流式识别已出文本）：直接传文本，服务端跳过 ASR */
+export async function demoChoiceText(sessionId: string, text: string) {
+  const { data } = await api.post(`/sessions/${sessionId}/demo-choice`, { text });
+  return data as { text: string; choice: 'replay' | 'practice' };
+}
+
 /** 任意文本合成语音；voiceRole 选择音色（默认 persona），arousal 控制情绪唤醒度，excitement 为激情倍率；rate 取设置页默认语速偏好；soft 表示对小朋友说话（放轻放缓，避免吓到孩子） */
 export async function ttsClip(sessionId: string, text: string, voiceRole: GuidanceVoiceRole = 'persona', arousal?: number, excitement?: number, soft?: boolean) {
   const rate = getPreferredSpeechRate();
@@ -668,8 +680,8 @@ export async function ttsClip(sessionId: string, text: string, voiceRole: Guidan
 
 // ====== 语音 WebSocket =======
 
-/** 语音 WS 地址（token 经 query 传递，浏览器 WS 无法带 header） */
-export function voiceWsUrl(sessionId: string, kind: 'voice' | 'voice-call' = 'voice'): string {
+/** 语音 WS 地址（token 经 query 传递，浏览器 WS 无法带 header）；asr-stream = 新手指引流式识别通道 */
+export function voiceWsUrl(sessionId: string, kind: 'voice' | 'voice-call' | 'asr-stream' = 'voice'): string {
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const token = encodeURIComponent(getToken() ?? '');
   return `${proto}//${window.location.host}/api/v1/sessions/${sessionId}/${kind}?token=${token}`;

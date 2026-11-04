@@ -13,6 +13,8 @@ import {
   fetchBriefing,
   fetchGuidance,
   demoChoice,
+  demoChoiceText,
+  qualifyAnswerText,
   ttsClip,
   apiError,
   getStoredUser,
@@ -20,7 +22,7 @@ import {
   type DemoLine,
 } from '../api';
 import type { ScenarioGuidance } from '../lib/guidance';
-import { AdaptiveVad, PcmRecorder, TtsPlayer, VoiceSocket, type VoiceServerEvent } from '../voice';
+import { AdaptiveVad, AsrStreamClient, PcmRecorder, TtsPlayer, VoiceSocket, type VoiceServerEvent } from '../voice';
 import QuizModal from '../components/QuizModal';
 import type { QuizQuestion, TranscriptTurn } from '../types';
 
@@ -60,6 +62,8 @@ const GUIDE_CHOICE_QUESTION = '想再听一个版本的示范，还是开始模�
 /** 自动聆听 VAD 参数（参考服务端 voice.ts 的 RMS + 静音判停思路）：新手指引与 live 阶段共用；
  * 语音判定用 AdaptiveVad 自适应噪声底，不再使用固定 RMS 阈值 */
 const VAD_SILENCE_MS = 2500;
+/** 新手指引（资格提问/示范选择）的判停静音时长：回答通常简短，比 live 阶段更激进地收尾 */
+const GUIDE_VAD_SILENCE_MS = 800;
 const VAD_MAX_RECORD_MS = 60000;/** 自动聆听识别失败的重试上限，超过后给出文字提示 */
 const GUIDANCE_MAX_RETRY = 2;
 
@@ -173,8 +177,12 @@ export default function Practice() {
   const turnAudioDoneRef = useRef(true);
   /** 暂停/继续请求在途互斥：防止 pauseSession 未返回时用户又点继续，两个请求乱序落库 */
   const pauseTogglingRef = useRef(false);
-  /** 新手指引专用录音器（独立于语音回合的 VoiceSocket 链路） */
+  /** 新手指引专用录音器（独立于语音回合的 VoiceSocket 链路）；整个指引阶段复用同一条麦克风流 */
   const guidanceRecRef = useRef<PcmRecorder | null>(null);
+  /** 新手指引流式识别通道（asr-stream）：边说边识别，失败回退整段上传批量识别 */
+  const asrSocketRef = useRef<AsrStreamClient | null>(null);
+  /** 资格提问各题音频预合成缓存（guidance 落定后即并行预合成；'skip' = 跳过示范提示音） */
+  const qualifyClipsRef = useRef<Map<string, Promise<{ audioBase64: string } | null>>>(new Map());
   /** guidance 镜像（async 链路中读取最新值，避免闭包过期） */
   const guidanceRef = useRef<ScenarioGuidance | null>(null);
   /** 在途的 guidance 请求（「我准备好了」点击时若未落定会先等它） */
@@ -263,6 +271,8 @@ export default function Practice() {
             if (cancelled) return;
             guidanceRef.current = res.guidance ?? null;
             setGuidance(res.guidance ?? null);
+            // 有资格提问：语音模式下立即并行预合成各题音频，点「我准备好了」后不再等 TTS
+            if (res.guidance?.qualifyQuestions?.length) prefetchQualifyClips();
           })
           .catch(() => { /* 拉取失败：保持 null，走回退逻辑 */ });
         // 初始开场白（seq:1 的客户第一句话）不进对话记录，从用户的实际对练开始展示
@@ -419,6 +429,8 @@ export default function Practice() {
       }
       guidanceRecRef.current?.stop();
       guidanceRecRef.current = null;
+      asrSocketRef.current?.close();
+      asrSocketRef.current = null;
       isRecordingRef.current = false;
       liveSpokeRef.current = false;
       liveLastVoiceAtRef.current = 0;
@@ -641,6 +653,9 @@ export default function Practice() {
     }
     guidanceRecRef.current?.stop();
     guidanceRecRef.current = null;
+    // 指引阶段被打断/结束：识别通道一并关闭，下次聆听时重建
+    asrSocketRef.current?.close();
+    asrSocketRef.current = null;
     setGuideRec('idle');
   };
 
@@ -676,14 +691,44 @@ export default function Practice() {
     return merged.buffer;
   };
 
+  /** 建立（或复用）流式识别通道；连接失败返回 null，调用方回退整段上传批量识别 */
+  const ensureAsrSocket = async (): Promise<AsrStreamClient | null> => {
+    if (!sessionId) return null;
+    const existing = asrSocketRef.current;
+    if (existing?.isOpen) return existing;
+    const sock = new AsrStreamClient(voiceWsUrl(sessionId, 'asr-stream'));
+    try {
+      await sock.connect();
+      sock.onClose = () => {
+        if (asrSocketRef.current === sock) asrSocketRef.current = null;
+      };
+      asrSocketRef.current = sock;
+      return sock;
+    } catch {
+      return null;
+    }
+  };
+
   /**
-   * 自动聆听：AdaptiveVad 自适应检测说话开始，连续静音约 1.5s 判停，最大 60s 兜底。
-   * resolve：micError=true 表示麦克风不可用（micErrorMsg 为具体原因）；audio=null 表示被外部中断（阶段切换/进 live）。
+   * 自动聆听：AdaptiveVad 自适应检测说话开始，连续静音 GUIDE_VAD_SILENCE_MS 判停，最大 60s 兜底。
+   * 优先走 asr-stream 流式识别（边说边识别，onPartial 实时字幕，说完立即出文本）；
+   * 通道不可用/出错时回退整段上传批量识别（resolve audio，调用方走原 HTTP ASR）。
+   * resolve：text 非空 = 流式识别文本（无需再上传）；audio 非空 = 需批量识别的原始 PCM；
+   * micError=true 表示麦克风不可用；audio/text 均空表示被外部中断（阶段切换/进 live）。
    */
-  const autoListen = () =>
-    new Promise<{ audio: ArrayBuffer | null; micError: boolean; micErrorMsg?: string }>((resolve) => {
+  const autoListen = (opts?: { onPartial?: (text: string) => void }) =>
+    new Promise<{ audio: ArrayBuffer | null; text?: string; micError: boolean; micErrorMsg?: string }>((resolve) => {
       let settled = false;
-      const finish = (audio: ArrayBuffer | null, micError = false, micErrorMsg = '') => {
+      // 整个指引阶段复用同一条麦克风流：避免每题重复 getUserMedia + AudioContext 初始化
+      const rec = guidanceRecRef.current ?? new PcmRecorder();
+      guidanceRecRef.current = rec;
+      const vad = new AdaptiveVad();
+      const chunks: ArrayBuffer[] = [];
+      let spoke = false;
+      let lastVoiceAt = 0;
+      let streamSock: AsrStreamClient | null = null;
+
+      const finish = (result: { audio: ArrayBuffer | null; text?: string; micError: boolean; micErrorMsg?: string }) => {
         if (settled) return;
         settled = true;
         guidanceCancelRef.current = null;
@@ -691,18 +736,37 @@ export default function Practice() {
           clearTimeout(vadTimerRef.current);
           vadTimerRef.current = null;
         }
-        guidanceRecRef.current?.stop();
-        guidanceRecRef.current = null;
-        resolve({ audio, micError, micErrorMsg });
+        // 录音器不释放：摘掉回调保留麦克风流，供下一题复用（stopGuidanceMedia/组件清理时才真正 stop）
+        rec.onChunk = null;
+        rec.onLevel = null;
+        resolve(result);
       };
-      guidanceCancelRef.current = () => finish(null);
+      guidanceCancelRef.current = () => {
+        streamSock?.cancel();
+        finish({ audio: null, micError: false });
+      };
 
-      const rec = new PcmRecorder();
-      const vad = new AdaptiveVad();
-      const chunks: ArrayBuffer[] = [];
-      rec.onChunk = (buf) => chunks.push(buf);
-      let spoke = false;
-      let lastVoiceAt = 0;
+      /** 判停/超时后的统一收尾：流式通道在则等 asr_final，否则整段音频交调用方批量识别 */
+      const finishRound = () => {
+        if (streamSock) {
+          const sock = streamSock;
+          sock
+            .finish()
+            .then((text) => {
+              const t = text.trim();
+              // 流式空结果：回退批量兜底（音频仍在本地的 chunks 里）
+              finish(t ? { audio: null, text: t, micError: false } : { audio: mergePcmChunks(chunks), micError: false });
+            })
+            .catch(() => finish({ audio: mergePcmChunks(chunks), micError: false }));
+        } else {
+          finish({ audio: spoke ? mergePcmChunks(chunks) : new ArrayBuffer(0), micError: false });
+        }
+      };
+
+      rec.onChunk = (buf) => {
+        chunks.push(buf);
+        streamSock?.sendAudio(buf);
+      };
       rec.onLevel = (rms) => {
         if (settled) return;
         const now = Date.now();
@@ -712,29 +776,57 @@ export default function Practice() {
           return;
         }
         // 检测到开始说话后，连续静音视为说完
-        if (spoke && lastVoiceAt && now - lastVoiceAt >= VAD_SILENCE_MS) {
-          finish(mergePcmChunks(chunks));
+        if (spoke && lastVoiceAt && now - lastVoiceAt >= GUIDE_VAD_SILENCE_MS) {
+          finishRound();
         }
       };
-      guidanceRecRef.current = rec;
+
+      // 与录音启动并行建立流式识别通道；通道就绪前说完的极短回答自然落到批量兜底
+      void ensureAsrSocket().then((sock) => {
+        if (settled || !sock) return;
+        streamSock = sock;
+        sock.onPartial = (t) => opts?.onPartial?.(t);
+        sock.startRound();
+      });
+
       rec
         .start()
         .then(() => {
           if (settled) return;
           // 最大录音时长兜底：有说过话就提交，全程未说话提交空音频（后端按未识别处理）
-          vadTimerRef.current = setTimeout(
-            () => finish(spoke ? mergePcmChunks(chunks) : new ArrayBuffer(0)),
-            VAD_MAX_RECORD_MS
-          );
+          vadTimerRef.current = setTimeout(finishRound, VAD_MAX_RECORD_MS);
         })
         .catch((err) =>
-          finish(null, true, err instanceof Error && err.message ? err.message : '麦克风不可用，请检查浏览器授权后刷新重试')
+          finish({
+            audio: null,
+            micError: true,
+            micErrorMsg: err instanceof Error && err.message ? err.message : '麦克风不可用，请检查浏览器授权后刷新重试',
+          })
         );
     });
 
   // ===== 新手指引：资格提问 =====
+
+  /** 预合成资格提问各环节音频：问题文本静态可知，提前并行合成，答题回来即播不再等 TTS */
+  const prefetchQualifyClips = () => {
+    if (!sessionId) return;
+    const questions = resolveQualifyQuestions(guidanceRef.current, scenario);
+    const cache = qualifyClipsRef.current;
+    questions.forEach((question, i) => {
+      const key = `q${i + 1}`;
+      if (!cache.has(key)) cache.set(key, ttsClip(sessionId, question, 'coach').catch(() => null));
+    });
+    if (!cache.has('skip')) {
+      cache.set(
+        'skip',
+        ttsClip(sessionId, '好的，你有相关经验，那我们跳过示范，直接进入模拟演练。', 'coach').catch(() => null)
+      );
+    }
+  };
+
   const beginQualify = async () => {
     setPhaseBoth('qualify');
+    prefetchQualifyClips();
     await askQualifyQuestion(1);
   };
 
@@ -750,9 +842,10 @@ export default function Practice() {
     // 记录当前令牌：跳过指引/进 live 会使其失效，合成回来后不得再播放
     const token = demoTokenRef.current;
     try {
-      const clip = await ttsClip(sessionId, question, 'coach');
+      // 优先用预合成缓存（点击「我准备好了」时已并行发起），未命中再现场合成
+      const clip = await (qualifyClipsRef.current.get(`q${q}`) ?? ttsClip(sessionId, question, 'coach'));
       if (demoTokenRef.current !== token || phaseRef.current !== 'qualify') return;
-      await playClip(clip.audioBase64);
+      if (clip) await playClip(clip.audioBase64);
     } catch {
       /* 提问音频失败不影响回答 */
     }
@@ -761,13 +854,15 @@ export default function Practice() {
     await autoAnswerQualify(q);
   };
 
-  /** 资格提问的全自动语音回答：自动录音 → VAD 判停 → 上传识别 → 自动进入下一环节 */
+  /** 资格提问的全自动语音回答：自动录音 → VAD 判停 → 流式识别（失败回退批量上传）→ 自动进入下一环节 */
   const autoAnswerQualify = async (q: number) => {
     if (!sessionId || phaseRef.current !== 'qualify' || statusRef.current === 'paused') return;
     const totalQ = resolveQualifyQuestions(guidanceRef.current, scenario).length;
     setQualifyStage('recording');
-    const { audio, micError, micErrorMsg } = await autoListen();
-    if (phaseRef.current !== 'qualify' || (!audio && !micError)) return;
+    const { audio, text, micError, micErrorMsg } = await autoListen({
+      onPartial: (t) => setQualifyText(`我：${t}…`),
+    });
+    if (phaseRef.current !== 'qualify' || (!audio && !text && !micError)) return;
     // 聆听期间可能被暂停（autoListen 被中断返回空音频，此处再兜一次）
     if ((statusRef.current as PracticeStatus) === 'paused') return;
     if (micError) {
@@ -778,7 +873,7 @@ export default function Practice() {
     setQualifyStage('uploading');
     setErrorMsg('');
     try {
-      const res = await qualifyAnswer(sessionId, q, audio!);
+      const res = text ? await qualifyAnswerText(sessionId, q, text) : await qualifyAnswer(sessionId, q, audio!);
       if (phaseRef.current !== 'qualify') return;
       if (!res.text) throw new Error('empty asr');
       setQualifyText(`我：${res.text}`);
@@ -789,9 +884,10 @@ export default function Practice() {
         // 有经验：不看示范，直接进模拟演练（学员扮销售、AI 扮客户）；先口播说明，避免学员误以为进了示范模式
         const token = demoTokenRef.current;
         try {
-          const clip = await ttsClip(sessionId, '好的，你有相关经验，那我们跳过示范，直接进入模拟演练。', 'coach');
+          const clip = await (qualifyClipsRef.current.get('skip') ??
+            ttsClip(sessionId, '好的，你有相关经验，那我们跳过示范，直接进入模拟演练。', 'coach'));
           if (demoTokenRef.current !== token || phaseRef.current !== 'qualify') return;
-          await playClip(clip.audioBase64);
+          if (clip) await playClip(clip.audioBase64);
         } catch {
           /* 提示音频失败不影响进入练习 */
         }
@@ -998,12 +1094,14 @@ export default function Practice() {
     await autoAnswerGuideChoice();
   };
 
-  /** 示范选择的全自动语音回答：自动录音 → VAD 判停 → 上传识别 → 自动执行选择 */
+  /** 示范选择的全自动语音回答：自动录音 → VAD 判停 → 流式识别（失败回退批量上传）→ 自动执行选择 */
   const autoAnswerGuideChoice = async () => {
     if (!sessionId || phaseRef.current !== 'guide' || statusRef.current === 'paused') return;
     setGuideRec('recording');
-    const { audio, micError, micErrorMsg } = await autoListen();
-    if (phaseRef.current !== 'guide' || (!audio && !micError)) return;
+    const { audio, text, micError, micErrorMsg } = await autoListen({
+      onPartial: (t) => setGuideText(`我：${t}…`),
+    });
+    if (phaseRef.current !== 'guide' || (!audio && !text && !micError)) return;
     // 聆听期间可能被暂停（autoListen 被中断返回空音频，此处再兜一次）
     if ((statusRef.current as PracticeStatus) === 'paused') return;
     setGuideRec('idle');
@@ -1014,7 +1112,7 @@ export default function Practice() {
     setGuideRec('uploading');
     setErrorMsg('');
     try {
-      const res = await demoChoice(sessionId, audio!);
+      const res = text ? await demoChoiceText(sessionId, text) : await demoChoice(sessionId, audio!);
       if (!res.text) throw new Error('empty asr');
       setGuideText(`我：${res.text}`);
       setGuideHint('');
@@ -1378,11 +1476,18 @@ export default function Practice() {
         </div>
       </header>
 
-      {/* ===== 手机标题栏 ===== */}
-      <div className="mtopbar">
-        <span className="back cursor-pointer" onClick={handleBack}>←</span>
-        {scenario?.name ?? '练习'}
-        <span className="right font-din">{formatTime(remaining)}</span>
+      {/* ===== 手机标题栏（仅手机端显示；场景名/时长已在下方目标条与计时中展示，这里只保留返回按钮） ===== */}
+      <div className="mtopbar md:hidden sticky top-0 z-50 h-[52px] bg-white border-b border-line flex items-center px-3 shrink-0">
+        <button
+          onClick={handleBack}
+          className="w-9 h-9 rounded-full bg-warm-bg flex items-center justify-center text-text-secondary hover:bg-line transition-colors shrink-0"
+          title="返回"
+          aria-label="返回"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+        </button>
       </div>
 
       {/* ===== 三栏布局 ===== */}
