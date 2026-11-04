@@ -1,5 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { ASRStream } from '@grasp-mvp/speech-gateway';
 import type { RouteContext } from '../ctx.js';
+import { tokenFailReason, verifyToken } from '../auth.js';
 import {
   composeBriefing,
   getGuidance,
@@ -32,11 +34,23 @@ async function extractAudio(request: FastifyRequest): Promise<{ audio?: Buffer; 
 /**
  * 新手指引流程路由（不写入 transcript，不影响评分与复盘）：
  * - GET  /scenarios/:id/guidance        新手指引流程配置（无配置返回 guidance=null）
- * - POST /sessions/:id/qualify-answer?q=N  资格提问的语音回答 → ASR → LLM 判断是否做过（最后一题给结论并落库）
+ * - POST /sessions/:id/qualify-answer?q=N  资格提问的语音回答 → ASR → LLM 判断是否做过（最后一题给结论并落库）；
+ *   也接受 JSON {text}（流式识别已出文本时跳过 ASR）
  * - POST /sessions/:id/demo             示范剧本交给大模型理解演绎成双人对话（无资源时声明无示范，前端跳过该步骤）
  * - POST /sessions/:id/briefing         教练讲解口播稿（keyPoints + 讲解标准库 → 大模型理解改写，不照念原文）
- * - POST /sessions/:id/demo-choice      示范后的语音选择 → 再听一版 / 开始练习
+ * - POST /sessions/:id/demo-choice      示范后的语音选择 → 再听一版 / 开始练习；也接受 JSON {text}
+ * - GET  /sessions/:id/asr-stream       流式识别通道（WebSocket）：边说边识别，实时出 partial
  */
+
+/** JSON 文本直传（客户端已走流式识别）时取文本；否则返回空串走音频 ASR */
+function textFromBody(request: FastifyRequest): string {
+  const body = request.body;
+  if (!request.isMultipart() && body && typeof body === 'object' && !Buffer.isBuffer(body)) {
+    const text = (body as { text?: unknown }).text;
+    if (typeof text === 'string') return text.trim();
+  }
+  return '';
+}
 export async function guidanceRoutes(app: FastifyInstance, ctx: RouteContext): Promise<void> {
   const { store, gateway, speech } = ctx;
 
@@ -47,6 +61,8 @@ export async function guidanceRoutes(app: FastifyInstance, ctx: RouteContext): P
 
   // 每会话的资格回答暂存（内存态，不落库；刷新后重新走流程即可）
   const qualifyAnswers = new Map<string, string[]>();
+  // 每题识别完成即并行发起"是否有经验"判定，最后一题只等聚合，不再串行等全部 LLM 判定
+  const qualifyJudgments = new Map<string, Promise<boolean>[]>();
 
   // 新手指引流程配置查询
   app.get<{ Params: { id: string } }>('/scenarios/:id/guidance', async (request) => ({
@@ -74,26 +90,33 @@ export async function guidanceRoutes(app: FastifyInstance, ctx: RouteContext): P
         return reply.code(400).send({ error: `q 只能是 1 到 ${questions.length}` });
       }
 
-      const { audio, format } = await extractAudio(request);
-      if (!audio || audio.length === 0) {
-        return reply.code(400).send({ error: '缺少音频：用 multipart/form-data 上传文件，或以 Content-Type: audio/* 直传' });
+      const directText = textFromBody(request);
+      let text = directText;
+      if (!text) {
+        const { audio, format } = await extractAudio(request);
+        if (!audio || audio.length === 0) {
+          return reply.code(400).send({ error: '缺少音频：用 multipart/form-data 上传文件、以 Content-Type: audio/* 直传，或以 JSON 传 {text}' });
+        }
+        text = (await speech.asr.transcribe(audio, format)).trim();
       }
-
-      const text = (await speech.asr.transcribe(audio, format)).trim();
       if (!text) return reply.code(422).send({ error: '未识别到有效语音' });
 
       const answers = qualifyAnswers.get(session.id) ?? [];
       answers[q - 1] = text;
       qualifyAnswers.set(session.id, answers);
 
+      // 该题判定立即并行发起（judgeExperience 单题语义与批量 every() 判定等价）
+      const judgments = qualifyJudgments.get(session.id) ?? [];
+      judgments[q - 1] = judgeExperience(gateway, [{ question: questions[q - 1] as string, answer: text }]);
+      qualifyJudgments.set(session.id, judgments);
+
       if (q < questions.length) return { text, experienced: null };
 
-      // 最后一题：累积所有题（缺答视为"没做过"，宁可进指导模式）
-      const qa: { question: string; answer: string }[] = answers
-        .map((answer, i) => ({ question: questions[i] as string, answer }))
-        .filter((x) => !!x.answer);
-      const experienced = answers[0] ? await judgeExperience(gateway, qa) : false;
+      // 最后一题：聚合各题已并行完成的判定（缺答视为"没做过"，宁可进指导模式）
+      const results = await Promise.all(questions.map((_, i) => judgments[i] ?? Promise.resolve(false)));
+      const experienced = answers[0] ? results.every(Boolean) : false;
       qualifyAnswers.delete(session.id);
+      qualifyJudgments.delete(session.id);
       await store.updateSession(session.id, { qualifyResult: { answers, experienced } });
       return { text, experienced };
     }
@@ -135,16 +158,154 @@ export async function guidanceRoutes(app: FastifyInstance, ctx: RouteContext): P
     if (!session) return reply.code(404).send({ error: '会话不存在' });
     if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
 
-    const { audio, format } = await extractAudio(request);
-    if (!audio || audio.length === 0) {
-      return reply.code(400).send({ error: '缺少音频：用 multipart/form-data 上传文件，或以 Content-Type: audio/* 直传' });
+    const directText = textFromBody(request);
+    let text = directText;
+    if (!text) {
+      const { audio, format } = await extractAudio(request);
+      if (!audio || audio.length === 0) {
+        return reply.code(400).send({ error: '缺少音频：用 multipart/form-data 上传文件、以 Content-Type: audio/* 直传，或以 JSON 传 {text}' });
+      }
+      text = (await speech.asr.transcribe(audio, format)).trim();
     }
-
-    const text = (await speech.asr.transcribe(audio, format)).trim();
     if (!text) return reply.code(422).send({ error: '未识别到有效语音' });
 
     const choice = await judgeDemoChoice(gateway, text);
     const guidance = await getGuidance(store, session.scenarioId);
     return { text, choice, liveIntro: guidance?.liveIntro ?? null };
   });
+
+  // 流式识别通道（WebSocket）：资格提问/示范选择的边说边识别，替代整段上传批量识别。
+  // 客户端发 PCM16 二进制帧；'start' 开新一轮、'finish' 收尾出 asr_final、'cancel' 丢弃本轮。
+  // token 经 query 传入（浏览器 WS 无法带 header），与 voice 路由同款校验
+  app.get<{ Params: { id: string }; Querystring: { token?: string } }>(
+    '/sessions/:id/asr-stream',
+    { websocket: true },
+    (socket, req) => {
+      const token = req.query.token;
+      const payload = token ? verifyToken(token) : null;
+      if (!payload) {
+        req.log.warn(
+          {
+            sessionId: req.params.id,
+            hasToken: !!token,
+            tokenFailReason: token ? tokenFailReason(token) : '缺少 token',
+          },
+          'asr-stream WS 鉴权失败，关闭连接（4401）'
+        );
+        socket.close(4401, '未登录或登录已过期');
+        return;
+      }
+      const sessionId = req.params.id;
+      req.log.info({ sessionId, userId: payload.userId, provider: speech.asr.name }, 'asr-stream WS 已建立');
+
+      // 每连接只允许一轮未完成的识别：round 单调递增，过期轮次的异步回调一律丢弃
+      let round = 0;
+      let asrStream: ASRStream | null = null;
+      let latestText = '';
+      let latestIsFinal = false;
+      let finishRequested = false;
+
+      const send = (msg: Record<string, unknown>) => {
+        if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(msg));
+      };
+
+      const closeStream = () => {
+        if (asrStream) {
+          asrStream.close();
+          asrStream = null;
+        }
+      };
+
+      const complete = (myRound: number) => {
+        if (myRound !== round) return;
+        send({ type: 'asr_final', text: latestText });
+        finishRequested = false;
+        closeStream();
+      };
+
+      const startRound = () => {
+        round++;
+        const myRound = round;
+        closeStream();
+        latestText = '';
+        latestIsFinal = false;
+        finishRequested = false;
+        asrStream = speech.asr.createStream({
+          onPartial: (text) => {
+            if (myRound !== round) return;
+            latestText = text;
+            latestIsFinal = false;
+            send({ type: 'asr_partial', text });
+          },
+          // paraformer 句末会多次回调（累计文本）：只刷新字幕，客户端 finish 后才出 asr_final
+          onFinal: (text) => {
+            if (myRound !== round) return;
+            latestText = text;
+            latestIsFinal = true;
+            send({ type: 'asr_partial', text });
+            if (finishRequested) complete(myRound);
+          },
+          onFinished: () => {
+            if (myRound === round && finishRequested) complete(myRound);
+          },
+          onError: (err) => {
+            if (myRound !== round) return;
+            req.log.warn({ sessionId, err: err.message, provider: speech.asr.name }, 'asr-stream ASR 流错误');
+            send({ type: 'error', message: `ASR：${err.message}` });
+          },
+        });
+      };
+
+      socket.on('message', (data: Buffer, isBinary: boolean) => {
+        if (isBinary) {
+          // 首个音频帧自动开轮（兼容未显式发 start 的客户端）
+          if (!asrStream) startRound();
+          asrStream?.write(data);
+          return;
+        }
+        let msg: { type?: string };
+        try {
+          msg = JSON.parse(data.toString());
+        } catch {
+          send({ type: 'error', message: '无法解析的消息（期望 JSON 文本帧或二进制音频帧）' });
+          return;
+        }
+        switch (msg.type) {
+          case 'start':
+            startRound();
+            break;
+          case 'finish':
+            finishRequested = true;
+            if (!asrStream) {
+              finishRequested = false;
+              send({ type: 'asr_final', text: latestText });
+            } else if (latestIsFinal) {
+              // 句末已确认且之后没有阶段文本，无需等待 task-finished
+              complete(round);
+            } else {
+              asrStream.finish();
+            }
+            break;
+          case 'cancel':
+            round++;
+            finishRequested = false;
+            closeStream();
+            break;
+          default:
+            send({ type: 'error', message: `未知消息类型: ${msg.type ?? '(空)'}` });
+        }
+      });
+
+      socket.on('close', () => {
+        req.log.info({ sessionId }, 'asr-stream WS 关闭');
+        round++;
+        closeStream();
+      });
+      socket.on('error', (err: Error) => {
+        req.log.warn({ sessionId, err: err.message }, 'asr-stream WS 错误');
+        round++;
+        closeStream();
+      });
+    }
+  );
 }

@@ -353,6 +353,109 @@ export class TtsPlayer {
   }
 }
 
+// ---------- 流式识别通道（新手指引资格提问/示范选择） ----------
+
+/**
+ * 流式 ASR 客户端：边说边识别（对应服务端 /sessions/:id/asr-stream）。
+ * onPartial 实时字幕；finish() 等服务端 asr_final 返回最终文本。
+ * 失败（断连/超时/服务端报错）一律 reject，调用方回退整段上传批量识别。
+ */
+export class AsrStreamClient {
+  onPartial: ((text: string) => void) | null = null;
+  onClose: (() => void) | null = null;
+  private ws: WebSocket | null = null;
+  private pendingFinal: {
+    resolve: (text: string) => void;
+    reject: (err: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  } | null = null;
+
+  constructor(private url: string) {}
+
+  connect(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(this.url);
+      this.ws = ws;
+      ws.onopen = () => resolve();
+      ws.onerror = () => reject(new Error('识别通道连接失败'));
+      ws.onmessage = (e) => {
+        if (typeof e.data !== 'string') return;
+        let ev: { type?: string; text?: string; message?: string };
+        try {
+          ev = JSON.parse(e.data);
+        } catch {
+          return;
+        }
+        if (ev.type === 'asr_partial') this.onPartial?.(ev.text ?? '');
+        else if (ev.type === 'asr_final') this.settleFinal(ev.text ?? '');
+        else if (ev.type === 'error') this.failFinal(new Error(ev.message || '识别失败'));
+      };
+      ws.onclose = () => {
+        this.failFinal(new Error('识别通道已断开'));
+        this.onClose?.();
+      };
+    });
+  }
+
+  get isOpen() {
+    return this.ws?.readyState === WebSocket.OPEN;
+  }
+
+  /** 开新一轮识别（服务端重置识别流，旧轮回调作废） */
+  startRound() {
+    if (this.isOpen) this.ws!.send(JSON.stringify({ type: 'start' }));
+  }
+
+  sendAudio(buf: ArrayBuffer) {
+    if (this.isOpen) this.ws!.send(buf);
+  }
+
+  /** 结束本轮：返回服务端 asr_final 的最终识别文本（5s 无响应按失败处理，走批量兜底） */
+  finish(): Promise<string> {
+    return new Promise((resolve, reject) => {
+      if (!this.isOpen) {
+        reject(new Error('识别通道未连接'));
+        return;
+      }
+      this.failFinal(new Error('新一轮 finish 覆盖'));
+      this.pendingFinal = {
+        resolve,
+        reject,
+        timer: setTimeout(() => this.failFinal(new Error('识别结果超时')), 5000),
+      };
+      this.ws!.send(JSON.stringify({ type: 'finish' }));
+    });
+  }
+
+  /** 丢弃本轮（外部打断：暂停/进 live），挂起的 finish 按失败释放 */
+  cancel() {
+    if (this.isOpen) this.ws!.send(JSON.stringify({ type: 'cancel' }));
+    this.failFinal(new Error('已取消'));
+  }
+
+  private settleFinal(text: string) {
+    const pending = this.pendingFinal;
+    if (!pending) return;
+    this.pendingFinal = null;
+    clearTimeout(pending.timer);
+    pending.resolve(text);
+  }
+
+  private failFinal(err: Error) {
+    const pending = this.pendingFinal;
+    if (!pending) return;
+    this.pendingFinal = null;
+    clearTimeout(pending.timer);
+    pending.reject(err);
+  }
+
+  close() {
+    this.failFinal(new Error('识别通道已关闭'));
+    this.ws?.close();
+    this.ws = null;
+  }
+}
+
 // ---------- 语音 WebSocket ----------
 
 import type { QuizQuestion } from './types';

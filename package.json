@@ -22,6 +22,7 @@
   "devDependencies": {
     "concurrently": "^9.2.1",
     "kill-port": "^2.0.1",
+    "selfsigned": "^5.5.0",
     "turbo": "^2.5.0",
     "typescript": "^5.8.0"
   },

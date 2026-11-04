@@ -81,10 +81,11 @@ export default function Review() {
   if (error || !data) {
     return (
       <div className="md:!pb-0">
-        <div className="mtopbar">
-          <span className="back cursor-pointer" onClick={() => navigate(-1)}>←</span>
-          练习报告
-          <span className="right" />
+        <div className="topbar">
+          <button className="back-btn" onClick={() => navigate(-1)} aria-label="返回">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+          </button>
+          <span className="topbar-title">练习报告</span>
         </div>
         <main className="page-review">
           <div className="card" style={{ padding: '32px 24px', textAlign: 'center' }}>
@@ -102,10 +103,11 @@ export default function Review() {
   if (data.skipped || !report) {
     return (
       <div className="md:!pb-0">
-        <div className="mtopbar">
-          <span className="back cursor-pointer" onClick={() => navigate(-1)}>←</span>
-          练习报告
-          <span className="right" />
+        <div className="topbar">
+          <button className="back-btn" onClick={() => navigate(-1)} aria-label="返回">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+          </button>
+          <span className="topbar-title">练习报告</span>
         </div>
         <main className="page-review">
           <div className="card" style={{ padding: '40px 24px', textAlign: 'center' }}>
@@ -216,10 +218,11 @@ export default function Review() {
   return (
     <div className="md:!pb-0">
       {/* 手机顶部栏 */}
-      <div className="mtopbar">
-        <span className="back cursor-pointer" onClick={() => navigate(-1)}>←</span>
-        练习报告
-        <span className="right">报告已生成</span>
+      <div className="topbar">
+        <button className="back-btn" onClick={() => navigate(-1)} aria-label="返回">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+        </button>
+        <span className="topbar-title">练习报告</span>
       </div>
 
       <main className="page-review">
@@ -376,17 +379,36 @@ export default function Review() {
   );
 }
 
+/** 将多段文本按句号/分号/换行切分，渲染为编号列表 */
+function renderNumbered(text: string): React.ReactNode {
+  const parts = text
+    .split(/(?<=。|；|\n)/g)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (parts.length <= 1) return text;
+  return (
+    <span className="numbered-list">
+      {parts.map((p, i) => (
+        <span key={i} className="numbered-item">
+          <span className="num-dot">{i + 1}.</span>
+          <span>{p}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function StageRow({ item, expanded, onToggle }: { item: ScoreItem; expanded: boolean; onToggle: () => void }) {
   const hasEvidence = !!(item.quote || item.betterScript || item.rationale);
   return (
     <div className="stage-row">
-      <b style={{ fontSize: '13.5px', fontWeight: 500 }}>{item.itemName}</b>
+      <b className="stage-title">{item.itemName}</b>
       <div className="bar"><i className={barClass(item.score)} style={{ width: item.isDeduction ? 0 : `${item.score}%` }} /></div>
       <b style={{ color: item.isDeduction ? '#FF6B5B' : scoreColor(item.score), fontSize: '13px', fontWeight: 700 }}>{item.isDeduction ? `-${item.score}` : item.score}</b>
       <div className="stage-note">
-        {item.rationale ?? ''}
+        {item.rationale ? renderNumbered(item.rationale) : ''}
         {hasEvidence && (
-          <a style={{ color: '#FF6B5B', fontWeight: 600, cursor: 'pointer' }} onClick={onToggle}>
+          <a style={{ color: '#FF6B5B', fontWeight: 600, cursor: 'pointer', flexShrink: 0 }} onClick={onToggle}>
             {expanded ? '收起证据 ↑' : '查看证据 ↗'}
           </a>
         )}
@@ -402,13 +424,13 @@ function StageRow({ item, expanded, onToggle }: { item: ScoreItem; expanded: boo
           {item.rationale && (
             <p style={{ marginBottom: '8px' }}>
               <b className="small muted">评分解析</b>
-              <br />{item.rationale}
+              <br />{renderNumbered(item.rationale)}
             </p>
           )}
           {item.betterScript && (
             <p>
               <b className="small muted">建议话术</b>
-              <br />{item.betterScript}
+              <br />{renderNumbered(item.betterScript)}
             </p>
           )}
         </div>

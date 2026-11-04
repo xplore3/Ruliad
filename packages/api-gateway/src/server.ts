@@ -142,7 +142,7 @@ async function main() {
   app.addHook('onRequest', async (request, reply) => {
     const path = request.url.split('?')[0];
     if (PUBLIC_PATHS.has(path) || path === '/docs' || path.startsWith('/docs/')) return;
-    const isVoiceWsPath = /^\/api\/v1\/sessions\/[^/]+\/voice(-call)?$/.test(path);
+    const isVoiceWsPath = /^\/api\/v1\/sessions\/[^/]+\/(voice(-call)?|asr-stream)$/.test(path);
     // 语音对练 WS 升级请求：浏览器 WebSocket 无法带 Authorization header，
     // token 经 query 传入，在 voice 路由内用同一套 verifyToken 校验
     if (request.headers.upgrade === 'websocket' && isVoiceWsPath) {
