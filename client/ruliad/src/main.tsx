@@ -18,6 +18,7 @@ import Login from './pages/Login';
 import Settings from './pages/Settings';
 import Agreement from './pages/Agreement';
 import Privacy from './pages/Privacy';
+import HumorTest from './pages/HumorTest';
 
 function RequireAuth({ children }: { children: ReactNode }) {
   if (!isTokenValid()) return <Navigate to="/login" replace />;
@@ -51,6 +52,14 @@ createRoot(document.getElementById('root')!).render(
         {/* 协议静态页：无需登录，登录页勾选框链接新窗口打开 */}
         <Route path="/agreement" element={<Agreement />} />
         <Route path="/privacy" element={<Privacy />} />
+        <Route
+          path="/humor-test"
+          element={
+            <RequireAuth>
+              <HumorTest />
+            </RequireAuth>
+          }
+        />
         <Route
           path="/practice/:sessionId"
           element={

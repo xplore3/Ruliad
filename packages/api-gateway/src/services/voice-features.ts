@@ -193,10 +193,12 @@ export function analyzePcm16(pcm: Buffer, sampleRate = 16000): VoiceFeatures | n
   const winLen = Math.floor(sampleRate * 0.04);
   const hopLen = Math.floor(sampleRate * 0.02);
   const rawMidi: number[] = [];
+  const pitchCurve: Array<{ atMs: number; f0Hz: number }> = [];
   for (let start = 0; start + winLen <= samples.length; start += hopLen) {
     const r = pitchOfFrame(samples, start, winLen, sampleRate);
     if (r && r.clarity >= PITCH_CLARITY_THRESHOLD) {
       rawMidi.push(69 + 12 * Math.log2(r.f0 / 440));
+      pitchCurve.push({ atMs: Math.round((start + winLen / 2) * 1000 / sampleRate), f0Hz: Math.round(r.f0 * 10) / 10 });
     }
   }
   let pitchVarSemitones: number | null = null;
@@ -213,5 +215,60 @@ export function analyzePcm16(pcm: Buffer, sampleRate = 16000): VoiceFeatures | n
     pitchVarSemitones = Math.round(Math.sqrt(variance) * 100) / 100;
   }
 
-  return { avgLoudnessDbfs, loudnessRangeDb, pitchVarSemitones, medianF0Hz, voicedMs };
+  const runsOf = (speech: boolean) => {
+    const runs: Array<{ startMs: number; endMs: number }> = [];
+    let start = -1;
+    for (let i = 0; i <= voicedFlags.length; i++) {
+      if (i < voicedFlags.length && voicedFlags[i] === speech) {
+        if (start < 0) start = i;
+      } else if (start >= 0) {
+        runs.push({ startMs: start * 20, endMs: i * 20 });
+        start = -1;
+      }
+    }
+    return runs;
+  };
+  const voicedRuns = runsOf(true);
+  const silenceRuns = runsOf(false);
+  const pauses = silenceRuns
+    .filter((run) => run.endMs - run.startMs >= 200)
+    .map((run) => ({ atMs: run.startMs, durationMs: run.endMs - run.startMs }));
+  const elongatedSegments = voicedRuns.filter((run) => run.endMs - run.startMs >= 600);
+  const pauseMs = pauses.reduce((sum, pause) => sum + pause.durationMs, 0);
+  const averageVoicedSegmentMs = voicedRuns.length > 0
+    ? Math.round(voicedRuns.reduce((sum, run) => sum + run.endMs - run.startMs, 0) / voicedRuns.length)
+    : 0;
+  const shortBursts = voicedRuns.filter((run) => run.endMs - run.startMs >= 80 && run.endMs - run.startMs <= 500).length;
+  const laughterPossible = shortBursts >= 3 && (pitchVarSemitones ?? 0) >= 4 && loudnessRangeDb >= 6;
+  const performancePossible =
+    ((pitchVarSemitones ?? 0) >= 6 && loudnessRangeDb >= 8) ||
+    (elongatedSegments.length > 0 && (pitchVarSemitones ?? 0) >= 4 && shortBursts >= 2);
+  const loudnessCurve = frameRms.map((rms, index) => ({ atMs: index * 20, rms: Math.round(rms * 10000) / 10000 }));
+
+  return {
+    avgLoudnessDbfs,
+    loudnessRangeDb,
+    pitchVarSemitones,
+    medianF0Hz,
+    voicedMs,
+    prosody: {
+      pitchCurve,
+      loudnessCurve,
+      pauses,
+      elongatedSegments,
+      rhythm: { voicedMs, pauseMs, averageVoicedSegmentMs },
+      laughterCue: {
+        status: laughterPossible ? 'possible' : 'unknown',
+        reason: laughterPossible
+          ? `检测到 ${shortBursts} 个短促发声段，且音调与音量变化明显，存在笑声线索；不是笑声模型确认`
+          : '短促发声、音调或音量特征不足以确认笑声',
+      },
+      performanceCue: {
+        status: performancePossible ? 'possible' : 'unknown',
+        reason: performancePossible
+          ? '音调/音量起伏或连续发声段呈现明显夸张、表演感线索；不等于幽默判定'
+          : '未发现足够明显的夸张表演感线索',
+      },
+    },
+  };
 }

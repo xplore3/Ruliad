@@ -175,6 +175,7 @@ export interface ScoreItem {
   betterScript?: string;
   confidence?: number;
   isObservation?: boolean;
+  isDeduction?: boolean;
   layer?: string;
 }
 
@@ -235,6 +236,8 @@ export interface ScoreItemDef {
   category?: ScoreCategory;
   /** 打分模式：levels=按档位判定（默认）；score=直接打分 0-100（维度与分值写在行为锚定里） */
   scoringMode?: 'levels' | 'score';
+  /** 独立扣分项：score 表示从最终总分扣减的分数，不参与加权平均 */
+  deductionOnly?: boolean;
 }
 
 export interface GoldenCase {

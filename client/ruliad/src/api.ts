@@ -180,6 +180,18 @@ export async function sendTurn(sessionId: string, text: string) {
   return data as TurnResult;
 }
 
+export async function voiceTurn(sessionId: string, audio: ArrayBuffer) {
+  const { data } = await api.post(`/sessions/${sessionId}/voice-turn`, audio, {
+    headers: { 'Content-Type': 'audio/pcm' },
+  });
+  return data as { userText: string; replyText: string };
+}
+
+export async function scoreHumorTest(sessionId: string) {
+  const { data } = await api.post(`/sessions/${sessionId}/humor-test-score`);
+  return data as { deduction: number; rationale: string; betterScript?: string; userText: string; prosody?: unknown };
+}
+
 /** 提交考题答案；返回对错、得分、解析与正确答案（答题后展示用） */
 export async function submitQuizAnswer(sessionId: string, quizId: string, answer: string[]) {
   const { data } = await api.post(`/sessions/${sessionId}/quiz-answer`, { quizId, answer });

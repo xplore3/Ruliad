@@ -217,4 +217,23 @@ describe('scoreSession', () => {
     expect(report.quizScore!.earned).toBe(10);
     expect(report.quizScore!.total).toBe(20);
   });
+
+  it('独立扣分项直接从最终总分扣减，不进入加权平均或技能点得分', async () => {
+    const deductionGateway: LLMGateway = {
+      forTask: () => new MockLLMProvider((messages) => String(messages[0]?.content).includes('评分标准：销售忌讳')
+        ? JSON.stringify({ score: 20, rationale: '两次忌讳', betterScript: '' })
+        : JSON.stringify({ levelKey: 'poor', rationale: '基础项得分', betterScript: '' })),
+    };
+    const report = await scoreSession(session, scenario, [
+      ...defs,
+      { ...defs[0], id: 'sales-taboo', name: '销售忌讳', scoringMode: 'score', deductionOnly: true, weight: 0 },
+    ], deductionGateway);
+    const taboo = report.items.find((item) => item.itemId === 'sales-taboo');
+    expect(taboo?.score).toBe(20);
+    expect(taboo?.isDeduction).toBe(true);
+    expect(report.totalScore).toBe(10);
+    expect(report.skillScores).toEqual([
+      { skillPointId: 'sp-objection', skillPointName: 'sp-objection', score: 30, maxScore: 100 },
+    ]);
+  });
 });

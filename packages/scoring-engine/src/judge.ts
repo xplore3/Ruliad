@@ -18,6 +18,7 @@ const METRIC_LABELS: Record<string, { label: string; unit: string }> = {
   medianF0Hz: { label: '音高中位数', unit: 'Hz' },
   f0LiftSemitones: { label: '音高抬升（相对个人基线）', unit: '半音' },
   loudnessLiftDb: { label: '响度提升（相对个人基线）', unit: 'dB' },
+  fluencyScore: { label: '表达流畅度', unit: '分' },
 };
 
 /** 锚点线性插值：points 按 value 升序，区间内线性插值，两端外取端点分（支持钟形：分数可先升后降） */
@@ -38,9 +39,10 @@ function scoreByPoints(points: NonNullable<QuantitativeRule['blocks'][number]['m
 /** 定量查表：metric 值命中区间得对应分；配了 points 走线性插值；缺数据按中间分 50 计 */
 function scoreMetric(
   rule: QuantitativeRule['blocks'][number]['metrics'][number],
-  voice: ScoreReport['ruleStats']['voice']
+  voice: ScoreReport['ruleStats']['voice'],
+  fluencyScore?: number
 ): { score: number; value: number | null } {
-  const raw = voice?.[rule.metric];
+  const raw = rule.metric === 'fluencyScore' ? fluencyScore : voice?.[rule.metric];
   const value = typeof raw === 'number' ? raw : null;
   if (value === null) return { score: 50, value: null };
   if (rule.points?.length) return { score: scoreByPoints(rule.points, value), value };
@@ -55,14 +57,15 @@ function scoreMetric(
 /** 确定性定量计分：块得分 = 各 metric 区间得分均值 / 100 × 块满分 */
 function computeQuantScore(
   rule: QuantitativeRule,
-  voice?: ScoreReport['ruleStats']['voice']
+  voice?: ScoreReport['ruleStats']['voice'],
+  fluencyScore?: number
 ): { total: number; blockLines: string[]; userBlockLines: string[]; hasMissingData: boolean } {
   let total = 0;
   let hasMissingData = false;
   const blockLines: string[] = [];
   const userBlockLines: string[] = [];
   for (const block of rule.blocks) {
-    const parts = block.metrics.map((m) => scoreMetric(m, voice));
+    const parts = block.metrics.map((m) => scoreMetric(m, voice, fluencyScore));
     const totalWeight = block.metrics.reduce((s, m) => s + (m.weight ?? 1), 0);
     const avg = parts.reduce((s, p, i) => s + p.score * (block.metrics[i].weight ?? 1), 0) / totalWeight;
     const blockScore = Math.round((avg / 100) * block.maxScore);
@@ -163,6 +166,25 @@ function buildStatsLines(stats: ScoreReport['ruleStats']): string[] {
   return lines;
 }
 
+function buildProsodyLines(session: Session): string[] {
+  const turns = session.transcript.filter((t) => t.speaker === 'trainee' && t.voiceFeatures?.prosody);
+  if (turns.length === 0) return [];
+  const lines = ['逐轮语气辅助证据（同步音频分析；仅作幽默/情绪判断的辅助，不是确定结论）：'];
+  for (const turn of turns.slice(-4)) {
+    const prosody = turn.voiceFeatures!.prosody!;
+    const pitchValues = prosody.pitchCurve.map((point) => point.f0Hz);
+    const pitchRange = pitchValues.length > 0 ? `${Math.round(Math.min(...pitchValues))}~${Math.round(Math.max(...pitchValues))}Hz` : '有效音调帧不足';
+    lines.push(
+      `- 第${turn.seq}轮：音调范围${pitchRange}（${prosody.pitchCurve.length}个音调帧/${prosody.loudnessCurve.length}个音量帧）；停顿${prosody.pauses.length}处；连续长发声段${prosody.elongatedSegments.length}处`
+    );
+  }
+  for (const turn of turns.filter((t) => t.expressionIntent)) {
+    lines.push(`- 第${turn.seq}轮表达方式与意图：语气=${turn.expressionIntent!.tone}，意图=${turn.expressionIntent!.intent}（置信度${turn.expressionIntent!.confidence}）——${turn.expressionIntent!.rationale}`);
+  }
+  lines.push('以上仅为客观语音数据，不预设笑声、表演感或任何其他幽默判断条件。');
+  return lines;
+}
+
 /** 组装 judge prompt：评分标准定义 + 档位 JSON + 场景考核点 + 语音表现统计 + 带 seq 的转写（+ 可选的重点评分维度） */
 function buildJudgePrompt(
   def: ScoreItemDef,
@@ -189,6 +211,7 @@ function buildJudgePrompt(
     ...scenarioLines,
     ...(def.scoringMode === 'score' ? [] : [`可选档位（JSON）：${JSON.stringify(def.levels)}`]),
     ...(stats ? buildStatsLines(stats) : []),
+    ...buildProsodyLines(session),
     '对话记录：',
     transcriptLines,
     def.scoringMode === 'score'
@@ -301,12 +324,13 @@ export async function judgeItem(
         judgeAgree: true,
         isReference: false,
         isObservation: def.isObservation,
+      isDeduction: def.deductionOnly,
         layer: def.layer,
       };
     }
     // voiceChannel='child' 的标准（与孩子说话的语气）只统计对孩子说的轮次
     const voice = def.voiceChannel === 'child' ? stats?.voiceChild : stats?.voice;
-    const det = computeQuantScore(def.quantitativeRule, voice);
+    const det = computeQuantScore(def.quantitativeRule, voice, stats?.fluencyScore);
     const narrative = await narrateQuantScore(def, session, gateway, scenario, det);
     return {
       itemId: def.id,
@@ -325,6 +349,7 @@ export async function judgeItem(
       judgeAgree: true,
       isReference: false,
       isObservation: def.isObservation,
+      isDeduction: def.deductionOnly,
       layer: def.layer,
     };
   }
@@ -355,6 +380,7 @@ export async function judgeItem(
       judgeAgree: agree,
       isReference: !agree,
       isObservation: def.isObservation,
+      isDeduction: def.deductionOnly,
       layer: def.layer,
     };
   }
@@ -380,6 +406,7 @@ export async function judgeItem(
     judgeAgree: agree,
     isReference: !agree,
     isObservation: def.isObservation,
+      isDeduction: def.deductionOnly,
     layer: def.layer,
   };
 }

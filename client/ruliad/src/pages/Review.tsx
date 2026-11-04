@@ -68,7 +68,7 @@ export default function Review() {
     }
   };
 
-  const radarDims = useMemo(() => (data?.report?.items ?? []).slice(0, 6), [data]);
+  const radarDims = useMemo(() => (data?.report?.items ?? []).filter((item) => !item.isDeduction).slice(0, 6), [data]);
 
   if (loading) {
     return (
@@ -178,8 +178,9 @@ export default function Review() {
         )
       )
     : null;
-  const weakest = report.items.length > 0
-    ? [...report.items].sort((a, b) => a.score - b.score)[0]
+  const scoredItems = report.items.filter((item) => !item.isDeduction);
+  const weakest = scoredItems.length > 0
+    ? [...scoredItems].sort((a, b) => a.score - b.score)[0]
     : null;
 
   const metaParts = [
@@ -302,7 +303,7 @@ export default function Review() {
               <div className="dim-list">
                 {report.items.map((d) => (
                   <div key={d.itemId} className="dim">
-                    <b style={d.score < 60 ? { color: '#FF6B5B' } : undefined}>{d.score}</b>
+                    <b style={d.isDeduction || d.score < 60 ? { color: '#FF6B5B' } : undefined}>{d.isDeduction ? `-${d.score}` : d.score}</b>
                     <span>{d.itemName}</span>
                     <span className="act">{d.rationale ?? ''}</span>
                   </div>
@@ -380,8 +381,8 @@ function StageRow({ item, expanded, onToggle }: { item: ScoreItem; expanded: boo
   return (
     <div className="stage-row">
       <b style={{ fontSize: '13.5px', fontWeight: 500 }}>{item.itemName}</b>
-      <div className="bar"><i className={barClass(item.score)} style={{ width: `${item.score}%` }} /></div>
-      <b style={{ color: scoreColor(item.score), fontSize: '13px', fontWeight: 700 }}>{item.score}</b>
+      <div className="bar"><i className={barClass(item.score)} style={{ width: item.isDeduction ? 0 : `${item.score}%` }} /></div>
+      <b style={{ color: item.isDeduction ? '#FF6B5B' : scoreColor(item.score), fontSize: '13px', fontWeight: 700 }}>{item.isDeduction ? `-${item.score}` : item.score}</b>
       <div className="stage-note">
         {item.rationale ?? ''}
         {hasEvidence && (

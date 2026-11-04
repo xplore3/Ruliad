@@ -134,6 +134,8 @@ export function runRuleChecks(
     }
   }
 
+  const fluencyScore = Math.max(0, 100 - pauseCount * 15 - fillerTotal * 5);
+
   // ---- 语音声学特征聚合：各学员语音轮的录音分析，按实际说话时长加权 ----
   // 对孩子说的学员轮次不参与主语音考核（激情/音高/响度/语速）：跟孩子说话要温柔，不该用激情考核；
   // 孩子轮次单独聚合为 voiceChild，供「与孩子说话的语气」标准量化评分
@@ -153,6 +155,7 @@ export function runRuleChecks(
       talkRatio,
       avgSpeechRate,
       pauseCount,
+      fluencyScore,
       childDialogueTurns,
       ...(voice ? { voice } : {}),
       ...(voiceChild ? { voiceChild } : {}),

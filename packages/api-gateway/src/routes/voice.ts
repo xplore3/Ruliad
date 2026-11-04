@@ -31,26 +31,26 @@ function pcmRMS(buf: Buffer): number {
 }
 
 /** VAD 配置 */
-const VAD_SILENCE_MS = 1000; // 静音持续时间触发断句；保留话尾音频与阶段文本后可缩短等待
+const VAD_SILENCE_MS = 2500; // 允许说话中的自然停顿，避免 1 秒静音就把本轮截断
 const VAD_CHUNK_MS = 100; // 每 100ms 检测一次
 
 /** VAD 自适应阈值范围与噪声倍率：AGC 关闭后不同麦克风的原始电平差异大，
  * 固定阈值会把轻声说话误判为静音（话说到一半被切断）。按近期静音块估计噪声底并随之浮动。 */
-const VAD_MIN_THRESHOLD = 0.005;
-const VAD_MAX_THRESHOLD = 0.02;
-const VAD_NOISE_MULTIPLIER = 2.5;
+const VAD_MIN_THRESHOLD = 0.003;
+const VAD_MAX_THRESHOLD = 0.015;
+const VAD_NOISE_MULTIPLIER = 2;
 
-function createAdaptiveVad() {
-  let noiseFloor = 0.006;
+export function createAdaptiveVad() {
+  let noiseFloor = 0.004;
   return {
-    /** 当前语音判定阈值（噪声底 ×2.5，钳制在 0.005~0.02） */
+    /** 当前语音判定阈值（噪声底 ×2，钳制在 0.003~0.015），兼顾轻声发言 */
     threshold(): number {
       return Math.min(VAD_MAX_THRESHOLD, Math.max(VAD_MIN_THRESHOLD, noiseFloor * VAD_NOISE_MULTIPLIER));
     },
-    /** 输入一个音频块 RMS，返回是否语音；非语音块缓慢更新噪声底 */
+    /** 输入一个音频块 RMS，返回是否语音；非语音块慢速更新噪声底，避免把轻声发言学成噪声 */
     isSpeech(rms: number): boolean {
       if (rms > this.threshold()) return true;
-      noiseFloor = Math.max(0.002, noiseFloor * 0.95 + rms * 0.05);
+      noiseFloor = Math.max(0.0015, noiseFloor * 0.999 + rms * 0.001);
       return false;
     },
   };

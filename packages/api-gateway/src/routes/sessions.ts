@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import { EventTypes, type CertRecord, type QuizResult, type Session, type TranscriptTurn, type VoiceBaseline } from '@grasp-mvp/core';
 import { bandFor, PersonaActor } from '@grasp-mvp/role-engine';
-import { scoreSession } from '@grasp-mvp/scoring-engine';
+import { judgeItem, runRuleChecks, scoreSession } from '@grasp-mvp/scoring-engine';
 import type { RouteContext } from '../ctx.js';
 import { mkEvent } from '../events.js';
 import { effectiveCountdownSeconds, loadRuntime, remainingSeconds, runTurn } from '../services/turn.js';
@@ -272,7 +272,11 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
       // 本场客户类型：剧本声明了概率化原则（如"10次应该有5次客户表现出不感兴趣"）时采用双场制——
       // 第一场必定"不感兴趣"（最多 3 轮后旁白切场），第二场必定"潜在意向"，不再随机
       const drillScriptForRoll = await resolveDrillScript(store, scenario).catch(() => undefined);
-      const customerArchetype = drillScriptForRoll ? initialCustomerArchetype(drillScriptForRoll.content) : undefined;
+      const customerArchetype = scenario.category === '咨询接待'
+        ? 'interested'
+        : drillScriptForRoll
+          ? initialCustomerArchetype(drillScriptForRoll.content, scenario.category)
+          : undefined;
 
       const runtime = await loadRuntime(ctx, scenario, undefined, customerArchetype);
       if (!runtime) return reply.code(500).send({ error: '场景对应的 persona 配置缺失' });
@@ -446,8 +450,9 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
       if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
       const scenario = await store.getScenario(session.scenarioId);
       if (!scenario) return reply.code(404).send({ error: '场景已被删除' });
-      const personaConfig = await store.getPersonaConfig(scenario.personaConfigId);
-      if (!personaConfig) return reply.code(500).send({ error: '场景对应的 persona 配置缺失' });
+      const runtime = await loadRuntime(ctx, scenario);
+      if (!runtime) return reply.code(500).send({ error: '场景对应的 persona 配置缺失' });
+      const { personaConfig } = runtime;
 
       let coachText = session.coachOpening;
       if (!coachText) {
@@ -669,6 +674,29 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
       return { ended: false, count };
     }
   );
+
+  // 幽默与虚假承诺独立测试：只评“咨询接待忌讳事项”，不生成完整复盘
+  app.post<{ Params: { id: string } }>('/sessions/:id/humor-test-score', async (request, reply) => {
+    const session = await store.getSession(request.params.id);
+    if (!session || session.userId !== request.userId) {
+      return reply.code(404).send({ error: '会话不存在' });
+    }
+    const scenario = await store.getScenario(session.scenarioId);
+    if (!scenario) return reply.code(404).send({ error: '场景不存在' });
+    const lastTrainee = [...session.transcript].reverse().find((t) => t.speaker === 'trainee');
+    if (!lastTrainee) return reply.code(400).send({ error: '请先完成一轮语音回答' });
+    const def = (await store.listScoreItemDefs(session.tenantId)).find((item) => item.name === '咨询接待忌讳事项');
+    if (!def) return reply.code(500).send({ error: '咨询接待忌讳事项评分标准不存在' });
+    const { stats } = runRuleChecks(session, scenario.coverageTopics ?? []);
+    const result = await judgeItem(def, session, gateway, scenario, undefined, stats);
+    return {
+      deduction: result.score,
+      rationale: result.rationale,
+      betterScript: result.betterScript,
+      userText: lastTrainee.text,
+      prosody: lastTrainee.voiceFeatures?.prosody,
+    };
+  });
 
   // 结束会话并评分
   app.post<{ Params: { id: string } }>('/sessions/:id/end', async (request, reply) => {

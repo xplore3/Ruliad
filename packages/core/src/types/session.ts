@@ -18,6 +18,22 @@ export interface EmotionSnapshot {
 
 /** 学员单轮语音的声学特征（服务端对录音 PCM 的确定性分析，供语声语调类评分标准量化判定。
  *  分析前已做电平归一化，特征与麦克风增益/距离无关；avgLoudnessDbfs 为归一化后的值，仅作诊断参考，不作评分依据） */
+export interface VoiceProsodyAnalysis {
+  /** 20ms 步进的完整音调轨迹（仅高置信帧） */
+  pitchCurve: Array<{ atMs: number; f0Hz: number }>;
+  /** 20ms 帧的完整音量轨迹 */
+  loudnessCurve: Array<{ atMs: number; rms: number }>;
+  /** 明显静音停顿的位置与时长 */
+  pauses: Array<{ atMs: number; durationMs: number }>;
+  /** 连续发声较长、可能包含拖长音的区段（仅作线索，不等同音节级拖长音识别） */
+  elongatedSegments: Array<{ startMs: number; endMs: number }>;
+  rhythm: { voicedMs: number; pauseMs: number; averageVoicedSegmentMs: number };
+  /** 笑声启发式线索：非专用笑声模型确认，证据不足时只能为 unknown */
+  laughterCue: { status: 'possible' | 'unknown'; reason: string };
+  /** 夸张/表演感启发式线索：不等于幽默判定 */
+  performanceCue: { status: 'possible' | 'unknown'; reason: string };
+}
+
 export interface VoiceFeatures {
   /** 平均响度 dBFS（归一化后说话段 RMS 均值；设备相关量，勿用于评分） */
   avgLoudnessDbfs: number;
@@ -29,6 +45,20 @@ export interface VoiceFeatures {
   medianF0Hz?: number | null;
   /** 实际说话时长 ms（剔除静音段），真实语速 = 字数 / voicedMs */
   voicedMs: number;
+  /** 同步提取的语气辅助证据，供幽默/情感色彩判断；启发式线索不能作为唯一判据 */
+  prosody?: VoiceProsodyAnalysis;
+}
+
+export type ExpressionTone = 'playful' | 'serious' | 'uncertain';
+export type ExpressionIntentKind = 'promise' | 'threat' | 'persuasion' | 'request' | 'question' | 'inform' | 'other';
+
+export interface ExpressionIntent {
+  /** 表达方式：是否玩笑/调侃；与表达意图独立，不互斥 */
+  tone: ExpressionTone;
+  /** 表达意图：承诺、威胁、劝说、请求、提问、陈述等 */
+  intent: ExpressionIntentKind;
+  confidence: number;
+  rationale: string;
 }
 
 export interface TranscriptTurn {
@@ -45,6 +75,8 @@ export interface TranscriptTurn {
   addressedToChild?: boolean;
   /** 学员语音轮的声学特征（文字轮/未开启语音分析时无此字段） */
   voiceFeatures?: VoiceFeatures;
+  /** 本轮表达方式与意图：语气（玩笑/认真）与意图（承诺/威胁/劝说等）独立，由全局分析器产生并供对白与评分共用 */
+  expressionIntent?: ExpressionIntent;
 }
 
 export interface Session {
@@ -88,6 +120,8 @@ export interface Session {
   customerArchetype?: 'uninterested' | 'interested';
   /** 孩子对话模式：客户转头问孩子后激活；激活期间学员发言经路由器判定对话对象，对孩子说的由孩子角色应答 */
   childMode?: boolean;
+  /** 从销售第一次说服孩子起计算的沟通轮数；第二轮孩子仍抗拒时家长强制结束 */
+  childAttemptCount?: number;
   startedAt: string;
   endedAt?: string;
 }
