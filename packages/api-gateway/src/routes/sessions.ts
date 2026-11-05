@@ -7,6 +7,7 @@ import type { RouteContext } from '../ctx.js';
 import { mkEvent } from '../events.js';
 import { effectiveCountdownSeconds, loadRuntime, remainingSeconds, runTurn } from '../services/turn.js';
 import { decideOpening, initialCustomerArchetype, resolveDrillScript } from '../services/drill.js';
+import { pickReceptionQuestions } from '../services/reception-questions.js';
 import { personaVoice } from './voice.js';
 import { readFramesAsDataUrls } from '../services/video-store.js';
 
@@ -105,7 +106,8 @@ async function finalizeSession(session: Session, ctx: RouteContext, log?: Fastif
     // 学员个人语音基线（preferences.voiceBaseline）：用于激情"音高/响度抬升"量化评分
     const trainee = await store.getUser(session.userId);
     const voiceBaseline = trainee?.preferences?.voiceBaseline as VoiceBaseline | undefined;
-    report = await scoreSession(completed, scenario, defs, gateway, { videoFrames, log, skillPointNames, scoringFocus: guidance?.scoringFocus, voiceBaseline });
+    const institutionKB = scenario.category === '咨询接待' ? await store.getProductKB(session.tenantId) : undefined;
+    report = await scoreSession(completed, scenario, defs, gateway, { videoFrames, log, skillPointNames, scoringFocus: guidance?.scoringFocus, voiceBaseline, institutionKB });
     log?.info(
       { sessionId: session.id, reportId: report.id, totalScore: report.totalScore, passed: report.passed, ms: Date.now() - scoringStart },
       '结束会话：评分完成'
@@ -278,7 +280,8 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
           ? initialCustomerArchetype(drillScriptForRoll.content, scenario.category)
           : undefined;
 
-      const runtime = await loadRuntime(ctx, scenario, undefined, customerArchetype);
+      const receptionQuestions = scenario.category === '咨询接待' ? pickReceptionQuestions() : undefined;
+      const runtime = await loadRuntime(ctx, scenario, undefined, customerArchetype, receptionQuestions);
       if (!runtime) return reply.code(500).send({ error: '场景对应的 persona 配置缺失' });
       const { personaConfig, bundle, drillScript } = runtime;
 
@@ -323,6 +326,7 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
           ? [{ seq: 1, arousal: bundle.dynamics.baseArousal, bandKey: initialBand.key, at: now }]
           : [],
         hintsUsed: 0,
+        receptionQuestions,
         prevSessionId: prevCompleted?.id,
         examWindowId: mode === 'exam' ? examWindowId : undefined,
         coachIntensity,
@@ -450,7 +454,7 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
       if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
       const scenario = await store.getScenario(session.scenarioId);
       if (!scenario) return reply.code(404).send({ error: '场景已被删除' });
-      const runtime = await loadRuntime(ctx, scenario);
+      const runtime = await loadRuntime(ctx, scenario, session.difficulty, session.customerArchetype, session.receptionQuestions);
       if (!runtime) return reply.code(500).send({ error: '场景对应的 persona 配置缺失' });
       const { personaConfig } = runtime;
 

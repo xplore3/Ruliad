@@ -1,8 +1,9 @@
-import { EventTypes, type PersonaConfig, type QuizQuestion, type QuizQuestionPublic, type Scenario, type ScenarioGuidance, type Session, type TranscriptTurn, type VoiceFeatures } from '@grasp-mvp/core';
+import { EventTypes, type PersonaConfig, type QuizQuestion, type QuizQuestionPublic, type ReceptionQuestion, type Scenario, type ScenarioGuidance, type Session, type TranscriptTurn, type VoiceFeatures } from '@grasp-mvp/core';
 import { analyzeExpressionIntent, bandFor, checkConsistency, classifyAddressTarget, compilePersona, EmotionTracker, PersonaActor, replyAsChild, ruleCheck, shouldCustomerLeave } from '@grasp-mvp/role-engine';
 import type { RouteContext } from '../ctx.js';
 import { mkEvent } from '../events.js';
-import { drillScriptPrompt, archetypePrompt, resolveDrillScript, initialCustomerArchetype, FIRST_SCENE_MAX_MS, GIVE_UP_PATTERN, SCENE_TRANSITION_NARRATION } from './drill.js';
+import { drillScriptPrompt, institutionKnowledgePrompt, archetypePrompt, resolveDrillScript, initialCustomerArchetype, FIRST_SCENE_MAX_MS, GIVE_UP_PATTERN, SCENE_TRANSITION_NARRATION } from './drill.js';
+import { receptionQuestionPrompt } from './reception-questions.js';
 
 /** 一致性校验重试仍失败时的兜底角色化文案 */
 const CONSISTENCY_FALLBACK = '这个我不太清楚，你接着说。';
@@ -64,21 +65,21 @@ export async function loadRuntime(
   ctx: RouteContext,
   scenario: Scenario,
   difficulty?: number,
-  archetype?: 'uninterested' | 'interested'
+  archetype?: 'uninterested' | 'interested',
+  receptionQuestions?: ReceptionQuestion[]
 ) {
   const personaConfig =
     (await ctx.store.getPersonaConfig(scenario.personaConfigId)) ?? fallbackPersona(scenario);
   const elements = await ctx.store.listElements({});
 
-  // 加载产品知识库：场景级 productKBId 优先于陪练员级 productKBId
+  // 场景/陪练员知识库与机构定制库分别加载，避免绑定其他知识库后丢失机构资料
   const kbId = scenario.productKBId ?? personaConfig.productKBId;
-  let productKB;
-  if (kbId) {
-    productKB = await ctx.store.getProductKBById(kbId);
-  } else {
-    // 兜底：取租户默认 KB
-    productKB = await ctx.store.getProductKB(personaConfig.tenantId);
-  }
+  const productKB = kbId
+    ? await ctx.store.getProductKBById(kbId)
+    : await ctx.store.getProductKB(personaConfig.tenantId);
+  const institutionKB = kbId
+    ? await ctx.store.getProductKB(scenario.tenantId)
+    : productKB;
 
   // 演练剧本优先解析：有剧本时客户行为只由剧本+本场客户类型决定（剧情参照为唯一行为来源），
   // 不再注入场景难度、指引配置、人设要素等其他指令，避免与剧本中的行为约束冲突
@@ -118,6 +119,13 @@ export async function loadRuntime(
   // 注入演练剧本（整篇剧情参照）：LLM 依此理解谁先开口、客户如何回应、何时自然结束
   if (drillScript) {
     bundle.systemPrompt = `${bundle.systemPrompt}\n\n${drillScriptPrompt(drillScript)}`;
+  }
+  // 非剧本场景的默认库已由 compilePersona 注入；其余情况都必须显式补上机构定制库
+  if (institutionKB && (drillScript || productKB?.id !== institutionKB.id)) {
+    bundle.systemPrompt = `${bundle.systemPrompt}\n\n${institutionKnowledgePrompt(institutionKB)}`;
+  }
+  if (scenario.category === '咨询接待') {
+    bundle.systemPrompt = `${bundle.systemPrompt}\n\n${receptionQuestionPrompt(receptionQuestions)}`;
   }
   // 注入本场客户类型：地推按双场制执行；咨询接待固定为有兴趣客户（包括旧会话）
   const effectiveArchetype = scenario.category === '咨询接待' ? 'interested' : archetype;
@@ -313,7 +321,7 @@ export async function runTurn(
 
   // 结束时机：AI 判断（replyWithSignal 的 shouldClose）+ 倒计时到点自动结束；
   // MAX_LIVE_TURNS 仅作防止对话无限进行的极端兜底
-  const runtime = await loadRuntime(ctx, scenario, session.difficulty, session.customerArchetype);
+  const runtime = await loadRuntime(ctx, scenario, session.difficulty, session.customerArchetype, session.receptionQuestions);
   if (!runtime) {
     console.error('[runTurn] persona 运行时加载失败, scenarioId=', scenario.id, 'personaConfigId=', scenario.personaConfigId);
     return null;

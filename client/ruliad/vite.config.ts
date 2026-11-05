@@ -6,10 +6,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 
 const sslDir = path.join(os.homedir(), '.vite-ssl');
-const https = fs.existsSync(path.join(sslDir, 'cert.pem'))
+const keyPath = process.env.VITE_HTTPS_KEY ?? path.join(sslDir, 'key.pem');
+const certPath = process.env.VITE_HTTPS_CERT ?? path.join(sslDir, 'cert.pem');
+const https = fs.existsSync(keyPath) && fs.existsSync(certPath)
   ? {
-      key: fs.readFileSync(path.join(sslDir, 'key.pem')),
-      cert: fs.readFileSync(path.join(sslDir, 'cert.pem')),
+      key: fs.readFileSync(keyPath),
+      cert: fs.readFileSync(certPath),
     }
   : undefined;
 

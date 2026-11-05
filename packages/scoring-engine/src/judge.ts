@@ -1,6 +1,7 @@
 import type {
   LLMGateway,
   LLMProvider,
+  ProductKB,
   QuantitativeRule,
   Scenario,
   ScoreItemDef,
@@ -8,6 +9,7 @@ import type {
   ScoreReport,
   Session,
 } from '@grasp-mvp/core';
+import { judgeReceptionAnswers } from './reception.js';
 
 /** 定量 metric 的中文名与单位（用于评语与计分明细） */
 const METRIC_LABELS: Record<string, { label: string; unit: string }> = {
@@ -302,8 +304,12 @@ export async function judgeItem(
   gateway: LLMGateway,
   scenario?: Scenario,
   scoringFocus?: string[],
-  stats?: ScoreReport['ruleStats']
+  stats?: ScoreReport['ruleStats'],
+  institutionKB?: ProductKB
 ): Promise<ScoreItemResult> {
+  if (def.name === '对答得当' && scenario?.category === '咨询接待' && session.receptionQuestions?.length === 10) {
+    return judgeReceptionAnswers(def, session, gateway, institutionKB);
+  }
   // 确定性定量计分：配置了 quantitativeRule 的标准跳过 LLM 打分，按语音量化数据查表，
   // LLM 只写评语——分数永不动摇（缺声学数据时按中间分计并在明细中注明）
   if (def.scoringMode === 'score' && def.quantitativeRule) {

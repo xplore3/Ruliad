@@ -1,5 +1,6 @@
 import type {
   LLMGateway,
+  ProductKB,
   Scenario,
   ScoreItemDef,
   ScoreItemResult,
@@ -33,6 +34,8 @@ export interface ScoreOptions {
   scoringFocus?: string[];
   /** 学员个人语音基线（平静音高/响度）：提供后 ruleStats.voice 附带 f0LiftSemitones/loudnessLiftDb */
   voiceBaseline?: VoiceBaseline;
+  /** 机构定制资料库：咨询接待10题评分时核对机构事实 */
+  institutionKB?: ProductKB;
 }
 
 /** 评分过程日志器最小接口 */
@@ -77,7 +80,7 @@ export async function scoreSession(
   const items: ScoreItemResult[] = [];
   for (const [i, def] of relevantDefs.entries()) {
     const itemStart = Date.now();
-    const item = await judgeItem(def, session, gateway, scenario, options.scoringFocus, stats);
+    const item = await judgeItem(def, session, gateway, scenario, options.scoringFocus, stats, options.institutionKB);
     log?.info(
       {
         sessionId: session.id,

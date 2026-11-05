@@ -37,7 +37,15 @@ export function getToken(): string | null {
 }
 
 export function isTokenValid(): boolean {
-  return !!getToken();
+  const token = getToken();
+  if (!token) return false;
+  try {
+    const encoded = token.split('.')[0].replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(atob(encoded)) as { exp?: number };
+    return typeof payload.exp === 'number' && payload.exp * 1000 > Date.now();
+  } catch {
+    return false;
+  }
 }
 
 export function setToken(token: string) {
@@ -84,7 +92,8 @@ api.interceptors.response.use(
     if (error?.response?.status === 401) {
       clearToken();
       if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
+        const redirect = `${window.location.pathname}${window.location.search}`;
+        window.location.href = `/login?redirect=${encodeURIComponent(redirect)}`;
       }
     }
     return Promise.reject(error);
@@ -96,6 +105,7 @@ export function apiError(err: unknown, fallback = '请求失败，请稍后重�
   if (axios.isAxiosError(err)) {
     const msg = (err.response?.data as { error?: string } | undefined)?.error;
     if (msg) return msg;
+    if (err.code === 'ECONNABORTED') return '处理超时，请检查网络后重试';
   }
   return fallback;
 }
@@ -190,6 +200,37 @@ export async function voiceTurn(sessionId: string, audio: ArrayBuffer) {
 export async function scoreHumorTest(sessionId: string) {
   const { data } = await api.post(`/sessions/${sessionId}/humor-test-score`);
   return data as { deduction: number; rationale: string; betterScript?: string; userText: string; prosody?: unknown };
+}
+
+export interface InstitutionQaItem {
+  question: string;
+  answer: string;
+}
+
+export async function fetchInstitutionOnboardingStatus() {
+  const { data } = await api.get('/institution-onboarding/status');
+  return data as { completed: boolean; questionCount: number; qa: InstitutionQaItem[] };
+}
+
+export async function answerInstitutionQuestions(audio: ArrayBuffer) {
+  const { data } = await api.post('/institution-onboarding/answer', audio, {
+    headers: { 'Content-Type': 'audio/pcm' },
+    timeout: 10 * 60 * 1000,
+  });
+  return data as { qa: InstitutionQaItem[] };
+}
+
+export async function reviseInstitutionQa(qa: InstitutionQaItem[], audio: ArrayBuffer) {
+  const form = new FormData();
+  form.append('qa', JSON.stringify(qa));
+  form.append('file', new Blob([audio], { type: 'audio/pcm' }), 'revision.pcm');
+  const { data } = await api.post('/institution-onboarding/revise', form, { timeout: 3 * 60 * 1000 });
+  return data as { action: 'modify' | 'done'; qa: InstitutionQaItem[]; rationale: string };
+}
+
+export async function completeInstitutionOnboarding(qa: InstitutionQaItem[]) {
+  const { data } = await api.post('/institution-onboarding/complete', { qa });
+  return data as { completed: boolean; entries: number };
 }
 
 /** 提交考题答案；返回对错、得分、解析与正确答案（答题后展示用） */

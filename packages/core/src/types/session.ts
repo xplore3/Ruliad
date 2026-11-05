@@ -79,6 +79,13 @@ export interface TranscriptTurn {
   expressionIntent?: ExpressionIntent;
 }
 
+export interface ReceptionQuestion {
+  question: string;
+  referenceAnswer: string;
+  /** 《接待咨询回答问题标准详解》中该题的动机分析与评分标准 */
+  scoringGuide?: string;
+}
+
 export interface Session {
   id: string;
   tenantId: string;
@@ -89,6 +96,8 @@ export interface Session {
   transcript: TranscriptTurn[];
   emotionTrace: Array<{ seq: number; arousal: number; bandKey: string; at: string }>;
   hintsUsed: number;
+  /** 咨询接待本场固定抽取的10题及评分参考答案，创建后不再变化 */
+  receptionQuestions?: ReceptionQuestion[];
   /** 重练链：指向前次 session */
   prevSessionId?: string;
   examWindowId?: string;

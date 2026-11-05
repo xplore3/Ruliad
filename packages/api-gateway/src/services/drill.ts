@@ -1,4 +1,4 @@
-import type { DrillScript, LLMGateway, PersonaRuntimeBundle, Scenario } from '@grasp-mvp/core';
+import type { DrillScript, LLMGateway, PersonaRuntimeBundle, ProductKB, Scenario } from '@grasp-mvp/core';
 import type { Store } from '@grasp-mvp/infra';
 
 /**
@@ -34,6 +34,17 @@ export function drillScriptPrompt(script: DrillScript): string {
     '剧本中的行为约束（客户是否提问、何时提问、沉默与肢体反应、何时结束等）是必须严格遵守的硬性规则，优先级高于其他一切行为要求；',
     '剧本未要求客户提问时，客户不得主动提问；但也不能总是沉默不语——要像真人一样，在听销售说话时随时给出简短的口头反应（如"嗯""哦？""是吗""这样啊""嗯嗯，你接着说"），表示在听、随口附和或初步兴趣，可同时用旁白配合描述动作神态（如"（客户接过邀请函看了看，点了点头）"）；不要用提问来维持对话；',
     '对话推进到剧情终点（或学员明显达成/无法达成本场目标）时，按剧情方式自然收口结束对话。',
+  ].join('\n');
+}
+
+/** 机构定制资料：所有剧本场景都必须阅读，不能因剧本覆盖人设知识而丢失 */
+export function institutionKnowledgePrompt(kb?: ProductKB): string {
+  if (!kb || kb.entries.length === 0) return '';
+  const lines = kb.entries.map((entry) => `- ${entry.title}：${entry.content}`).join('\n');
+  return [
+    `【${kb.name || '培训机构定制资料库'}】`,
+    '以下机构资料适用于所有场景，生成客户回复、理解用户表达和分析销售话术时都必须参考；不得与资料中的机构事实、课程信息和业务规则冲突。',
+    lines,
   ].join('\n');
 }
 
