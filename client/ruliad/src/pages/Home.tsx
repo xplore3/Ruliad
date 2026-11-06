@@ -322,8 +322,8 @@ export default function Home() {
           <div className="card train-card" style={{ marginBottom: 28 }} onClick={() => navigate('/humor-test')}>
             <div className="train-left">
               <div className="train-icon"><IconConsult className="h-6 w-6" /></div>
-              <h3>幽默与虚假承诺测试</h3>
-              <p className="desc">家长先说“孩子不喜欢”，用夸张语调回答，查看是否扣 30 分</p>
+              <h3>幽默、虚假承诺与语调测试</h3>
+              <p className="desc">测试夸张表达、虚假承诺，以及磕磕绊绊和“嗯、啊、这个”等填充词是否扣 40 分</p>
               <div className="train-meta"><span className="train-go">开始测试 →</span></div>
             </div>
           </div>

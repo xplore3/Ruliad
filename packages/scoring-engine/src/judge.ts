@@ -10,6 +10,9 @@ import type {
   Session,
 } from '@grasp-mvp/core';
 import { judgeReceptionAnswers } from './reception.js';
+import { analyzeReceptionFluency } from './fluency.js';
+import { analyzeReceptionRepetition } from './repetition.js';
+import { analyzeReceptionTrialInvitation } from './trial-invitation.js';
 
 /** 定量 metric 的中文名与单位（用于评语与计分明细） */
 const METRIC_LABELS: Record<string, { label: string; unit: string }> = {
@@ -369,19 +372,44 @@ export async function judgeItem(
     const p = primary.score ?? 0;
     const s = secondary.score ?? 0;
     const agree = Math.abs(p - s) <= 10;
+    const baseScore = agree ? Math.round((p + s) / 2) : p;
+    const baseRationale = agree
+      ? primary.rationale
+      : `${primary.rationale}（双 judge 不一致：次 judge 判 ${s} 分，取主 judge 结果）`;
+    const isReceptionTaboo = def.name === '咨询接待忌讳事项' && scenario?.category === '咨询接待';
+    const fluency = isReceptionTaboo ? analyzeReceptionFluency(session) : undefined;
+    const repetition = isReceptionTaboo ? analyzeReceptionRepetition(session) : undefined;
+    const trialInvitation = isReceptionTaboo ? analyzeReceptionTrialInvitation(session) : undefined;
+    const quoteTurnSeq = fluency?.triggered
+      ? fluency.quoteTurnSeq
+      : repetition?.triggered
+        ? repetition.quoteTurnSeq
+        : trialInvitation?.triggered
+          ? trialInvitation.quoteTurnSeq
+          : primary.quoteTurnSeq;
     return {
       itemId: def.id,
       itemName: def.name,
       skillPointId: def.skillPointId,
       levelKey: 'score',
       levelLabel: '得分',
-      score: agree ? Math.round((p + s) / 2) : p,
-      quote: primary.quote,
-      quoteTurnSeq: primary.quoteTurnSeq,
-      rationale: agree
-        ? primary.rationale
-        : `${primary.rationale}（双 judge 不一致：次 judge 判 ${s} 分，取主 judge 结果）`,
-      betterScript: primary.betterScript || undefined,
+      score: Math.min(100, baseScore + (fluency?.deduction ?? 0) + (repetition?.deduction ?? 0) + (trialInvitation?.deduction ?? 0)),
+      quote: fluency?.triggered || repetition?.triggered || trialInvitation?.triggered
+        ? session.transcript.find((turn) => turn.seq === quoteTurnSeq)?.text ?? primary.quote
+        : primary.quote,
+      quoteTurnSeq,
+      rationale: [
+        baseRationale,
+        fluency ? `语声语调：${fluency.rationale}` : '',
+        repetition ? `简洁沟通：${repetition.rationale}` : '',
+        trialInvitation ? `试听邀约：${trialInvitation.rationale}` : '',
+      ].filter(Boolean).join('\n'),
+      betterScript: [
+        primary.betterScript,
+        fluency?.triggered ? '放慢语速，先组织好语言再完整表达，减少嗯、啊和重复断句。' : '',
+        repetition?.triggered ? '直接回应客户当前的问题，同一意思表达一次即可，把新信息讲简洁、讲全面。' : '',
+        trialInvitation?.triggered ? '您什么时候方便试听？我给您安排。' : '',
+      ].filter(Boolean).join('；') || undefined,
       confidence: agree ? 0.95 : 0.5,
       judgeAgree: agree,
       isReference: !agree,

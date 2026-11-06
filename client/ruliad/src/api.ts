@@ -202,6 +202,48 @@ export async function scoreHumorTest(sessionId: string) {
   return data as { deduction: number; rationale: string; betterScript?: string; userText: string; prosody?: unknown };
 }
 
+export async function startFluencyTest(sessionId: string) {
+  const { data } = await api.post(`/sessions/${sessionId}/fluency-test/start`);
+  return data as { questions: Array<{ question: string }>; total: number };
+}
+
+export async function answerFluencyTest(sessionId: string, audio: ArrayBuffer) {
+  const { data } = await api.post(`/sessions/${sessionId}/fluency-test-answer`, audio, {
+    headers: { 'Content-Type': 'audio/pcm' },
+  });
+  return data as { userText: string; answeredCount: number; total: number };
+}
+
+export interface FluencyTurnAnalysis {
+  seq: number;
+  fillerCount: number;
+  repetitionCount: number;
+  disruptedPauseCount: number;
+  pauseRatio: number;
+  averageVoicedSegmentMs: number;
+  severe: boolean;
+  reasons: string[];
+}
+
+export interface FluencyTestResult {
+  triggered: boolean;
+  deduction: number;
+  rationale: string;
+  evidence: string[];
+  fillerCount: number;
+  repetitionCount: number;
+  disruptedPauseCount: number;
+  affectedTurns: number;
+  userText: string;
+  turns: FluencyTurnAnalysis[];
+  answers: Array<{ question: string; text: string; analysis: FluencyTurnAnalysis }>;
+}
+
+export async function scoreFluencyTest(sessionId: string) {
+  const { data } = await api.post(`/sessions/${sessionId}/fluency-test-score`);
+  return data as FluencyTestResult;
+}
+
 export interface InstitutionQaItem {
   question: string;
   answer: string;

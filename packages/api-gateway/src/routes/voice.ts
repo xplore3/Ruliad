@@ -207,6 +207,45 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
     };
   });
 
+  // 六题语调测试的单题回答：只做 ASR 与声学分析并保存学员轮，不调用客户 LLM
+  app.post<{ Params: { id: string } }>('/sessions/:id/fluency-test-answer', async (request, reply) => {
+    const session = await store.getSession(request.params.id);
+    if (!session || session.userId !== request.userId) return reply.code(404).send({ error: '会话不存在' });
+    if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
+    const answeredCount = session.transcript.filter((turn) => turn.speaker === 'trainee').length;
+    if (answeredCount >= 6) return reply.code(409).send({ error: '六题已全部回答，请提交评分' });
+
+    let audio: Buffer | undefined;
+    let format = 'pcm';
+    if (request.isMultipart()) {
+      const file = await request.file();
+      if (!file) return reply.code(400).send({ error: 'multipart 请求缺少音频文件字段' });
+      audio = await file.toBuffer();
+      format = formatFromMime(file.mimetype);
+    } else if (Buffer.isBuffer(request.body) && request.body.length > 0) {
+      audio = request.body;
+      format = formatFromMime(request.headers['content-type']);
+    }
+    if (!audio || audio.length === 0) {
+      return reply.code(400).send({ error: '缺少音频：用 multipart/form-data 上传文件，或以 Content-Type: audio/* 直传' });
+    }
+
+    const userText = (await speech.asr.transcribe(audio, format)).trim();
+    if (!userText) return reply.code(422).send({ error: '未识别到有效语音' });
+    const pcm = wavToPcm(audio);
+    if (pcm) saveTurnRecording(session.id, pcm);
+    const voiceFeatures = pcm ? analyzePcm16(pcm) ?? undefined : undefined;
+    const traineeTurn = {
+      seq: session.transcript.length + 1,
+      speaker: 'trainee' as const,
+      text: userText,
+      at: new Date().toISOString(),
+      ...(voiceFeatures ? { voiceFeatures } : {}),
+    };
+    await store.updateSession(session.id, { transcript: [...session.transcript, traineeTurn] });
+    return { userText, answeredCount: answeredCount + 1, total: 6 };
+  });
+
   /** TTS 说话角色：persona=按人设音色（默认，兼容现状）；coach/sales/narrator/child=指引模式固定音色 */
   type VoiceRole = 'persona' | 'coach' | 'sales' | 'narrator' | 'child';
   // 指引模式各角色的固定音色（与 persona 常用默认 longxiaochun_v2 区分开）；
