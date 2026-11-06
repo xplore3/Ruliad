@@ -163,6 +163,42 @@ describe('judgeItem 定量计分（quantitativeRule）', () => {
     expect(result.score).toBe(8);
     expect(result.rationale).toContain('表达流畅度8/10');
   });
+
+  it('语速在适中区间或客户语速匹配区间任一中即取较高分', async () => {
+    const rateDef: ScoreItemDef = {
+      ...def,
+      id: 'item-customer-rate',
+      scoringMode: 'score',
+      quantitativeRule: {
+        blocks: [{
+          label: '语速从容',
+          maxScore: 40,
+          metrics: [{
+            metric: 'speechRateCpm',
+            points: [
+              { value: 100, score: 25 },
+              { value: 150, score: 60 },
+              { value: 180, score: 100 },
+              { value: 260, score: 100 },
+              { value: 300, score: 60 },
+              { value: 360, score: 30 },
+            ],
+          }],
+        }],
+      },
+    };
+    const gateway = gatewayWith(JSON.stringify({ rationale: '语速适中', betterScript: '' }));
+    const statsAt = (speechRateCpm: number) => ({
+      ...voiceStats,
+      voice: { ...voiceStats.voice, speechRateCpm },
+    });
+    const moderate = await judgeItem(rateDef, session, gateway, undefined, undefined, statsAt(300));
+    expect(moderate.score).toBe(24);
+    const customerMatch = await judgeItem(rateDef, session, gateway, undefined, undefined, statsAt(300), undefined, 1.2);
+    expect(customerMatch.score).toBe(40);
+    const slowerCustomerMatch = await judgeItem(rateDef, session, gateway, undefined, undefined, statsAt(150), undefined, 0.8);
+    expect(slowerCustomerMatch.score).toBe(40);
+  });
 });
 
 describe('judgeItem betterScript', () => {

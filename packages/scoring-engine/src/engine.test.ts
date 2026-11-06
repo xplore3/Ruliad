@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { LLMGateway, Scenario, ScoreItemDef, Session } from '@grasp-mvp/core';
+import { RECEPTION_QUESTION_POOL, type LLMGateway, type Scenario, type ScoreItemDef, type Session } from '@grasp-mvp/core';
 import { MockLLMProvider } from '@grasp-mvp/llm-gateway';
 import { scoreSession } from './engine.js';
 
@@ -106,6 +106,8 @@ describe('scoreSession', () => {
     expect(report.summary).toContain('本次练习总分 30 分');
     expect(report.summary).toContain('未通过');
     expect(report.summary).toContain('最需要改进');
+    expect(report.improvementGoal?.title).toBe('避免合规红线话术');
+    expect(report.improvementGoal?.suggestion).toContain('删除任何保证提分');
 
     // 双 judge 字段（mock 含负面词"保证提分" -> 最低档 poor，双 judge 一致）
     expect(report.items).toHaveLength(1);
@@ -218,7 +220,7 @@ describe('scoreSession', () => {
     expect(report.quizScore!.total).toBe(20);
   });
 
-  it('独立扣分项直接从最终总分扣减，不进入加权平均或技能点得分', async () => {
+  it('忌讳项换算为信心指数，不进入基础分加权平均或技能点得分', async () => {
     const deductionGateway: LLMGateway = {
       forTask: () => new MockLLMProvider((messages) => String(messages[0]?.content).includes('评分标准：销售忌讳')
         ? JSON.stringify({ score: 20, rationale: '两次忌讳', betterScript: '' })
@@ -231,9 +233,56 @@ describe('scoreSession', () => {
     const taboo = report.items.find((item) => item.itemId === 'sales-taboo');
     expect(taboo?.score).toBe(20);
     expect(taboo?.isDeduction).toBe(true);
-    expect(report.totalScore).toBe(10);
+    expect(report.baseScore).toBe(30);
+    expect(report.confidenceIndex).toBe(0.8);
+    expect(report.totalScore).toBe(24);
     expect(report.skillScores).toEqual([
       { skillPointId: 'sp-objection', skillPointName: 'sp-objection', score: 30, maxScore: 100 },
     ]);
+  });
+
+  it('拒听场不评主动性确定试听时间', async () => {
+    const direct = RECEPTION_QUESTION_POOL.find((item) => item.question === '不用试听，我们到时候看一下直接报名吧。')!;
+    const declinedSession: Session = {
+      ...session,
+      receptionQuestions: [{ ...direct }, ...RECEPTION_QUESTION_POOL.slice(0, 9)].map((item) => ({ ...item })),
+      receptionTrialDisposition: 'decline',
+    };
+    const receptionDefs: ScoreItemDef[] = [
+      { ...defs[0], category: '咨询接待' },
+      { ...defs[0], id: 'item-trial-initiative', name: '主动性确定试听时间', category: '咨询接待' },
+    ];
+    const report = await scoreSession(
+      declinedSession,
+      { ...scenario, category: '咨询接待' },
+      receptionDefs,
+      gateway
+    );
+    expect(report.items.map((item) => item.itemId)).toEqual(['item-obj-1']);
+  });
+
+  it('独立评分标准最多3项并行，避免逐项串行等待', async () => {
+    let active = 0;
+    let maxActive = 0;
+    const delayedGateway: LLMGateway = {
+      forTask: () => ({
+        name: 'delayed-mock',
+        chat: async () => {
+          active += 1;
+          maxActive = Math.max(maxActive, active);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          active -= 1;
+          return {
+            model: 'delayed-mock',
+            content: JSON.stringify({ levelKey: 'good', quote: '课时费', quoteTurnSeq: 5, rationale: '回答完整', betterScript: '' }),
+          };
+        },
+      }),
+    };
+    const parallelDefs = Array.from({ length: 4 }, (_, index) => ({ ...defs[0], id: `item-parallel-${index}` }));
+    const report = await scoreSession(session, scenario, parallelDefs, delayedGateway);
+    expect(report.items).toHaveLength(4);
+    expect(maxActive).toBeGreaterThan(2);
+    expect(maxActive).toBeLessThanOrEqual(6);
   });
 });

@@ -282,6 +282,10 @@ export default function Practice() {
         if (lastEmotion?.bandKey) setBandKey(lastEmotion.bandKey);
         setLoaded(true);
 
+        if (session.status === 'completed') {
+          navigate(`/review/${sessionId}`, { replace: true });
+          return;
+        }
         if (session.status !== 'active') {
           setPhaseBoth('live');
           setStatusBoth('ended');
@@ -523,6 +527,11 @@ export default function Practice() {
   };
 
   /** 进 live 入口：有指引配置旁白时先播第4步开场旁白，播完（或失败）再正式进场 */
+  const skipGuidance = () => {
+    stopGuidanceMedia();
+    enterLive();
+  };
+
   const startLive = () => {
     stopGuidanceMedia();
     const narration = isVoice ? guidanceRef.current?.liveIntro?.narration : undefined;
@@ -1389,9 +1398,8 @@ export default function Practice() {
   };
 
   // ===== 结束并评分 =====
-  const handleStop = async () => {
+  const finishSession = async () => {
     if (!sessionId || statusRef.current === 'evaluating') return;
-    if (!confirm('确定结束本场练习并生成评分吗？')) return;
     if (isRecording) {
       isRecordingRef.current = false;
       liveSpokeRef.current = false;
@@ -1402,14 +1410,19 @@ export default function Practice() {
     playerRef.current?.stopAll();
     stopGuidanceMedia();
     setStatusBoth('evaluating');
-    try {
-      await endSession(sessionId);
-      navigate(`/review/${sessionId}`);
-    } catch (err) {
-      setErrorMsg(apiError(err, '评分生成失败，请重试'));
-      setStatusBoth('ended');
-    }
+    // 先进入评分页；即使结束请求失败，复盘接口也会自动启动评分，不把用户留在练习页。
+    void endSession(sessionId).catch(() => undefined);
+    navigate(`/review/${sessionId}`);
   };
+
+  const handleStop = async () => {
+    if (!confirm('确定结束本场练习并生成评分吗？')) return;
+    await finishSession();
+  };
+
+  useEffect(() => {
+    if (status === 'time_up') void finishSession();
+  }, [status]);
 
   const handleBack = () => {
     if (status !== 'ended' && status !== 'failed' && status !== 'evaluating') {
@@ -1648,7 +1661,7 @@ export default function Practice() {
                     {qualifyHint && <div className="text-[13px] font-semibold text-coral">{qualifyHint}</div>}
                     <button
                       className="text-[12.5px] font-medium opacity-60 underline underline-offset-2 hover:opacity-90"
-                      onClick={startLive}
+                      onClick={skipGuidance}
                     >
                       已有经验？跳过指引直接开始
                     </button>
@@ -1663,7 +1676,7 @@ export default function Practice() {
                         <button
                           className="btn btn-sm"
                           style={{ background: 'rgba(255,255,255,.14)', color: '#fff' }}
-                          onClick={startLive}
+                          onClick={skipGuidance}
                         >
                           ⏭ 跳过示范，直接开始
                         </button>
@@ -1703,7 +1716,7 @@ export default function Practice() {
                         <button
                           className="btn btn-sm"
                           style={{ background: 'rgba(255,255,255,.14)', color: '#fff' }}
-                          onClick={startLive}
+                          onClick={skipGuidance}
                         >
                           ⏭ 跳过示范，直接开始
                         </button>
@@ -1730,7 +1743,7 @@ export default function Practice() {
                         <button
                           className="btn btn-sm"
                           style={{ background: 'rgba(255,255,255,.14)', color: '#fff' }}
-                          onClick={startLive}
+                          onClick={skipGuidance}
                         >
                           ⏭ 跳过，直接开始
                         </button>

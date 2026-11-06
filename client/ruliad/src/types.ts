@@ -143,6 +143,8 @@ export interface ScoreReport {
   userId?: string;
   scenarioId?: string;
   totalScore: number;
+  baseScore?: number;
+  confidenceIndex?: number;
   passed: boolean;
   fatalViolation?: boolean;
   skillScores: { skillPointId: string; skillPointName?: string; score: number; maxScore?: number }[];
@@ -159,6 +161,13 @@ export interface ScoreReport {
   };
   betterScripts?: Record<string, string>;
   summary?: string;
+  improvementGoal?: {
+    title: string;
+    impact: number;
+    rationale: string;
+    suggestion: string;
+    quoteTurnSeq?: number;
+  };
 }
 
 export interface ScoreItem {
@@ -236,7 +245,7 @@ export interface ScoreItemDef {
   category?: ScoreCategory;
   /** 打分模式：levels=按档位判定（默认）；score=直接打分 0-100（维度与分值写在行为锚定里） */
   scoringMode?: 'levels' | 'score';
-  /** 独立扣分项：score 表示从最终总分扣减的分数，不参与加权平均 */
+  /** 信心指数调整项：score 为扣减参数，用于换算全局信心指数，不参与基础分加权平均 */
   deductionOnly?: boolean;
 }
 
@@ -352,6 +361,8 @@ export interface TaskView {
 export interface ReviewData {
   session: Session;
   report: ScoreReport | null;
+  scoring?: boolean;
+  scoringError?: string | null;
   skipped?: boolean;
   scenario: { id: string; name: string; passScore: number } | null;
   persona: { name: string; age?: number; occupation?: string; background: string } | null;

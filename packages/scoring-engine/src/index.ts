@@ -1,10 +1,14 @@
 export { runRuleChecks } from './rules.js';
+export { buildImprovementGoal } from './improvement.js';
+export { applyConfidenceIndex, confidenceIndexOf, deductionPoints } from './confidence.js';
 export { analyzeReceptionFluency, RECEPTION_FLUENCY_DEDUCTION } from './fluency.js';
 export type { FluencyTurnAnalysis, ReceptionFluencyAnalysis } from './fluency.js';
 export { analyzeReceptionRepetition, RECEPTION_REPETITION_DEDUCTION } from './repetition.js';
 export type { RepeatedIdea, ReceptionRepetitionAnalysis } from './repetition.js';
 export { analyzeReceptionTrialInvitation, RECEPTION_TRIAL_INVITATION_DEDUCTION } from './trial-invitation.js';
 export type { ReceptionTrialInvitationAnalysis } from './trial-invitation.js';
+export { analyzeReceptionKnowledgeHonesty, RECEPTION_KNOWLEDGE_HONESTY_DEDUCTION } from './knowledge-honesty.js';
+export type { KnowledgeContradiction, ReceptionKnowledgeHonestyAnalysis } from './knowledge-honesty.js';
 export { judgeItem } from './judge.js';
 export { judgeVideo } from './video-judge.js';
 export { scoreSession } from './engine.js';

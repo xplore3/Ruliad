@@ -13,6 +13,8 @@ import { judgeReceptionAnswers } from './reception.js';
 import { analyzeReceptionFluency } from './fluency.js';
 import { analyzeReceptionRepetition } from './repetition.js';
 import { analyzeReceptionTrialInvitation } from './trial-invitation.js';
+import { judgeReceptionTrialInitiative } from './trial-initiative.js';
+import { analyzeReceptionKnowledgeHonesty } from './knowledge-honesty.js';
 
 /** 定量 metric 的中文名与单位（用于评语与计分明细） */
 const METRIC_LABELS: Record<string, { label: string; unit: string }> = {
@@ -63,14 +65,24 @@ function scoreMetric(
 function computeQuantScore(
   rule: QuantitativeRule,
   voice?: ScoreReport['ruleStats']['voice'],
-  fluencyScore?: number
+  fluencyScore?: number,
+  customerRateMultiplier = 1
 ): { total: number; blockLines: string[]; userBlockLines: string[]; hasMissingData: boolean } {
   let total = 0;
   let hasMissingData = false;
   const blockLines: string[] = [];
   const userBlockLines: string[] = [];
   for (const block of rule.blocks) {
-    const parts = block.metrics.map((m) => scoreMetric(m, voice, fluencyScore));
+    const parts = block.metrics.map((m) => {
+      const moderate = scoreMetric(m, voice, fluencyScore);
+      if (m.metric !== 'speechRateCpm' || customerRateMultiplier === 1 || !m.points?.length) return moderate;
+      const customerRule = {
+        ...m,
+        points: m.points.map((point) => ({ ...point, value: point.value * customerRateMultiplier })),
+      };
+      const customerMatch = scoreMetric(customerRule, voice, fluencyScore);
+      return customerMatch.score > moderate.score ? customerMatch : moderate;
+    });
     const totalWeight = block.metrics.reduce((s, m) => s + (m.weight ?? 1), 0);
     const avg = parts.reduce((s, p, i) => s + p.score * (block.metrics[i].weight ?? 1), 0) / totalWeight;
     const blockScore = Math.round((avg / 100) * block.maxScore);
@@ -310,10 +322,14 @@ export async function judgeItem(
   scenario?: Scenario,
   scoringFocus?: string[],
   stats?: ScoreReport['ruleStats'],
-  institutionKB?: ProductKB
+  institutionKB?: ProductKB,
+  customerRateMultiplier?: number
 ): Promise<ScoreItemResult> {
   if (def.name === '对答得当' && scenario?.category === '咨询接待' && session.receptionQuestions?.length === 10) {
     return judgeReceptionAnswers(def, session, gateway, institutionKB);
+  }
+  if (def.name === '主动性确定试听时间' && scenario?.category === '咨询接待' && session.receptionQuestions?.length === 10) {
+    return judgeReceptionTrialInitiative(def, session);
   }
   // 确定性定量计分：配置了 quantitativeRule 的标准跳过 LLM 打分，按语音量化数据查表，
   // LLM 只写评语——分数永不动摇（缺声学数据时按中间分计并在明细中注明）
@@ -341,7 +357,7 @@ export async function judgeItem(
     }
     // voiceChannel='child' 的标准（与孩子说话的语气）只统计对孩子说的轮次
     const voice = def.voiceChannel === 'child' ? stats?.voiceChild : stats?.voice;
-    const det = computeQuantScore(def.quantitativeRule, voice, stats?.fluencyScore);
+    const det = computeQuantScore(def.quantitativeRule, voice, stats?.fluencyScore, customerRateMultiplier);
     const narrative = await narrateQuantScore(def, session, gateway, scenario, det);
     return {
       itemId: def.id,
@@ -381,22 +397,27 @@ export async function judgeItem(
     const isReceptionTaboo = def.name === '咨询接待忌讳事项' && scenario?.category === '咨询接待';
     const fluency = isReceptionTaboo ? analyzeReceptionFluency(session) : undefined;
     const repetition = isReceptionTaboo ? analyzeReceptionRepetition(session) : undefined;
-    const trialInvitation = isReceptionTaboo ? analyzeReceptionTrialInvitation(session) : undefined;
+    const trialInvitation = isReceptionTaboo ? await analyzeReceptionTrialInvitation(session, gateway) : undefined;
+    const knowledgeHonesty = isReceptionTaboo
+      ? await analyzeReceptionKnowledgeHonesty(session, gateway, institutionKB)
+      : undefined;
     const quoteTurnSeq = fluency?.triggered
       ? fluency.quoteTurnSeq
       : repetition?.triggered
         ? repetition.quoteTurnSeq
         : trialInvitation?.triggered
           ? trialInvitation.quoteTurnSeq
-          : primary.quoteTurnSeq;
+          : knowledgeHonesty?.triggered
+            ? knowledgeHonesty.quoteTurnSeq
+            : primary.quoteTurnSeq;
     return {
       itemId: def.id,
       itemName: def.name,
       skillPointId: def.skillPointId,
       levelKey: 'score',
       levelLabel: '得分',
-      score: Math.min(100, baseScore + (fluency?.deduction ?? 0) + (repetition?.deduction ?? 0) + (trialInvitation?.deduction ?? 0)),
-      quote: fluency?.triggered || repetition?.triggered || trialInvitation?.triggered
+      score: Math.min(100, baseScore + (fluency?.deduction ?? 0) + (repetition?.deduction ?? 0) + (trialInvitation?.deduction ?? 0) + (knowledgeHonesty?.deduction ?? 0)),
+      quote: fluency?.triggered || repetition?.triggered || trialInvitation?.triggered || knowledgeHonesty?.triggered
         ? session.transcript.find((turn) => turn.seq === quoteTurnSeq)?.text ?? primary.quote
         : primary.quote,
       quoteTurnSeq,
@@ -405,12 +426,14 @@ export async function judgeItem(
         fluency ? `语声语调：${fluency.rationale}` : '',
         repetition ? `简洁沟通：${repetition.rationale}` : '',
         trialInvitation ? `试听邀约：${trialInvitation.rationale}` : '',
+        knowledgeHonesty ? `资料真实性：${knowledgeHonesty.rationale}` : '',
       ].filter(Boolean).join('\n'),
       betterScript: [
         primary.betterScript,
         fluency?.triggered ? '放慢语速，先组织好语言再完整表达，减少嗯、啊和重复断句。' : '',
         repetition?.triggered ? '直接回应客户当前的问题，同一意思表达一次即可，把新信息讲简洁、讲全面。' : '',
         trialInvitation?.triggered ? '您什么时候方便试听？我给您安排。' : '',
+        knowledgeHonesty?.triggered ? '我是新来的，对您问的问题确实不清楚，我马上了解清楚再回复您。' : '',
       ].filter(Boolean).join('；') || undefined,
       confidence: agree ? 0.95 : 0.5,
       judgeAgree: agree,
@@ -418,6 +441,43 @@ export async function judgeItem(
       isObservation: def.isObservation,
       isDeduction: def.deductionOnly,
       layer: def.layer,
+      improvementCandidates: [
+        ...(baseScore > 0 ? [{
+          title: def.name,
+          impact: baseScore,
+          rationale: baseRationale,
+          suggestion: primary.betterScript || `避免再次触发「${def.name}」中的同类问题。`,
+          quoteTurnSeq: primary.quoteTurnSeq,
+        }] : []),
+        ...(fluency?.triggered ? [{
+          title: '避免磕磕绊绊和填充词',
+          impact: fluency.deduction,
+          rationale: fluency.rationale,
+          suggestion: '放慢语速，先组织好语言再完整表达，减少嗯、啊和重复断句。',
+          quoteTurnSeq: fluency.quoteTurnSeq,
+        }] : []),
+        ...(repetition?.triggered ? [{
+          title: '同一意思只表达一次',
+          impact: repetition.deduction,
+          rationale: repetition.rationale,
+          suggestion: '直接回应客户当前的问题，同一意思表达一次即可，把新信息讲简洁、讲全面。',
+          quoteTurnSeq: repetition.quoteTurnSeq,
+        }] : []),
+        ...(trialInvitation?.triggered ? [{
+          title: '用开放式问题推进试听',
+          impact: trialInvitation.deduction,
+          rationale: trialInvitation.rationale,
+          suggestion: '您什么时候方便试听？我给您安排。',
+          quoteTurnSeq: trialInvitation.quoteTurnSeq,
+        }] : []),
+        ...(knowledgeHonesty?.triggered ? [{
+          title: '不确定时先核实，不信口胡说',
+          impact: knowledgeHonesty.deduction,
+          rationale: knowledgeHonesty.rationale,
+          suggestion: '我是新来的，对您问的问题确实不清楚，我马上了解清楚再回复您。',
+          quoteTurnSeq: knowledgeHonesty.quoteTurnSeq,
+        }] : []),
+      ],
     };
   }
 

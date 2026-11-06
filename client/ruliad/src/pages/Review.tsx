@@ -13,6 +13,10 @@ function scoreColor(score: number) {
   return score >= 80 ? '#2FAE7B' : score >= 60 ? '#F5A623' : '#FF6B5B';
 }
 
+function confidenceIndexLabel(score: number) {
+  return `${Math.round(Math.max(0.2, 1 - score / 100) * 100)}%`;
+}
+
 function fmtDateTime(iso: string) {
   const d = new Date(iso);
   const p = (n: number) => String(n).padStart(2, '0');
@@ -47,10 +51,26 @@ export default function Review() {
 
   useEffect(() => {
     if (!sessionId) return;
-    fetchReview(sessionId)
-      .then(setData)
-      .catch((e) => setError(apiError(e, '报告加载失败')))
-      .finally(() => setLoading(false));
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = async () => {
+      try {
+        const result = await fetchReview(sessionId);
+        if (!active) return;
+        setData(result);
+        setError(result.scoringError ?? null);
+        if (result.scoring && !result.report) timer = setTimeout(load, 1500);
+      } catch (e) {
+        if (active) setError(apiError(e, '报告加载失败'));
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+    };
   }, [sessionId]);
 
   const ringCircumference = 2 * Math.PI * 54;
@@ -99,6 +119,26 @@ export default function Review() {
 
   const { session, report, scenario, persona, prevScore } = data;
 
+  if (data.scoring && !report) {
+    return (
+      <div className="md:!pb-0">
+        <div className="topbar">
+          <button className="back-btn" onClick={() => navigate('/home')} aria-label="返回">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+          </button>
+          <span className="topbar-title">练习报告</span>
+        </div>
+        <main className="page-review">
+          <div className="card" style={{ padding: '48px 24px', textAlign: 'center' }}>
+            <div className="w-8 h-8 mx-auto mb-4 border-3 border-coral/30 border-t-coral rounded-full animate-spin" />
+            <h3 style={{ marginBottom: '8px' }}>评分生成中</h3>
+            <p className="small muted">正在汇总本场演练的评分结果，完成后会自动显示，无需手动操作。</p>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   // 内容不足 / 未生成报告
   if (data.skipped || !report) {
     return (
@@ -132,6 +172,9 @@ export default function Review() {
 
   const score = report.totalScore;
   const scoreDiff = prevScore != null ? score - prevScore : null;
+  const deductionPoints = report.items.filter((item) => item.isDeduction).reduce((sum, item) => sum + Math.max(0, item.score), 0);
+  const baseScore = report.baseScore ?? Math.min(100, score + deductionPoints);
+  const confidenceIndex = report.confidenceIndex ?? Math.max(0.2, 1 - deductionPoints / 100);
   const fillerTotal = Object.values(report.ruleStats.fillerCounts ?? {}).reduce((a, b) => a + b, 0);
   const talkRatio = report.ruleStats.talkRatio ?? 0;
   const listenRatio = talkRatio > 0 ? Math.round((1 - talkRatio) * 100) : 0;
@@ -180,11 +223,6 @@ export default function Review() {
         )
       )
     : null;
-  const scoredItems = report.items.filter((item) => !item.isDeduction);
-  const weakest = scoredItems.length > 0
-    ? [...scoredItems].sort((a, b) => a.score - b.score)[0]
-    : null;
-
   const metaParts = [
     persona?.name,
     scenario?.name,
@@ -256,6 +294,11 @@ export default function Review() {
               {report.passed ? '本次练习已通过' : '本次练习未通过'}
               {scenario ? `（及格线 ${scenario.passScore} 分）` : ''}。
             </p>
+            {deductionPoints > 0 && (
+              <div className="small" style={{ color: '#2FAE7B', marginBottom: '6px' }}>
+                基础分 {baseScore} × 信心指数 {Math.round(confidenceIndex * 100)}%
+              </div>
+            )}
             <div className="small muted">{metaParts}</div>
           </div>
           {scenario && (
@@ -306,7 +349,7 @@ export default function Review() {
               <div className="dim-list">
                 {report.items.map((d) => (
                   <div key={d.itemId} className="dim">
-                    <b style={d.isDeduction || d.score < 60 ? { color: '#FF6B5B' } : undefined}>{d.isDeduction ? `-${d.score}` : d.score}</b>
+                    <b style={d.isDeduction ? { color: '#2FAE7B' } : d.score < 60 ? { color: '#FF6B5B' } : undefined}>{d.isDeduction ? `指数 ${confidenceIndexLabel(d.score)}` : d.score}</b>
                     <span>{d.itemName}</span>
                     <span className="act">{d.rationale ?? ''}</span>
                   </div>
@@ -326,15 +369,23 @@ export default function Review() {
           </>
         )}
 
+        {/* ===== 改进目标和建议 ===== */}
+        {report.improvementGoal && (
+          <>
+            <div className="sec-t"><span>🎯</span> 改进目标和建议</div>
+            <div className="card sec" style={{ padding: '20px 24px', borderLeft: '4px solid #FF6B5B' }}>
+              <h3 style={{ fontSize: '18px', marginBottom: '10px' }}>{report.improvementGoal.title}</h3>
+              <p style={{ fontSize: '14px', lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>{report.improvementGoal.rationale}</p>
+              <p style={{ fontSize: '14px', lineHeight: 1.8, marginTop: '12px' }}>
+                <b>具体建议：</b>{report.improvementGoal.suggestion}
+              </p>
+            </div>
+          </>
+        )}
+
         {/* ===== 下一步 ===== */}
         <div className="sec-t"><span>🚀</span> 下一步</div>
         <div className="card" style={{ padding: '20px 24px' }}>
-          {weakest && weakest.score < 60 && (
-            <p style={{ fontSize: '14px', marginBottom: '4px' }}>
-              薄弱维度 <b style={{ color: '#FF6B5B' }}>{weakest.itemName} {weakest.score} 分</b>
-              {weakest.betterScript ? '，可参照上方建议话术针对性练习。' : '，建议针对性训练。'}
-            </p>
-          )}
           <div className="next-actions">
             <button className="btn btn-ghost btn-sm" onClick={() => setShowTranscript((v) => !v)}>
               {showTranscript ? '收起回放' : '查看完整回放'}
@@ -404,7 +455,7 @@ function StageRow({ item, expanded, onToggle }: { item: ScoreItem; expanded: boo
     <div className="stage-row">
       <b className="stage-title">{item.itemName}</b>
       <div className="bar"><i className={barClass(item.score)} style={{ width: item.isDeduction ? 0 : `${item.score}%` }} /></div>
-      <b style={{ color: item.isDeduction ? '#FF6B5B' : scoreColor(item.score), fontSize: '13px', fontWeight: 700 }}>{item.isDeduction ? `-${item.score}` : item.score}</b>
+      <b style={{ color: item.isDeduction ? '#2FAE7B' : scoreColor(item.score), fontSize: '13px', fontWeight: 700 }}>{item.isDeduction ? `指数 ${confidenceIndexLabel(item.score)}` : item.score}</b>
       <div className="stage-note">
         {item.rationale ? renderNumbered(item.rationale) : ''}
         {hasEvidence && (

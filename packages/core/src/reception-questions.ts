@@ -1,5 +1,8 @@
 import type { ReceptionQuestion } from './types/session.js';
 
+export const RECEPTION_DIRECT_ENROLL_QUESTION = '不用试听，我们到时候看一下直接报名吧。';
+export const RECEPTION_TRIAL_SCHEDULE_QUESTION = '什么时候可以试听呀？';
+
 export const RECEPTION_QUESTION_POOL: readonly ReceptionQuestion[] = [
   {
     question: '孩子学的太多了，应该怎么回答？',
@@ -35,11 +38,6 @@ export const RECEPTION_QUESTION_POOL: readonly ReceptionQuestion[] = [
     question: '报名以后上课时间是任选还是怎么样？',
     referenceAnswer: '说明家长提供可上课时间后，机构按实际排班流程和确定开班时间的期限安排，不能盲目承诺时间任选。',
     scoringGuide: '排班方式、开班时间与机构定制资料库一致占50分；不虚假承诺“时间任选”占50分。虚假承诺还应触发咨询忌讳项全局扣20分。',
-  },
-  {
-    question: '什么时候可以试听呀？',
-    referenceAnswer: '询问家长方便的时间，提供当前可选时段并马上确定试听，尽量配合家长。',
-    scoringGuide: '趁热打铁，能够正常确定具体试听时间即可得满分，不要拖延。',
   },
   {
     question: '你们一节课2个小时，孩子能坐得住吗？',
