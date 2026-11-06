@@ -42,7 +42,7 @@ async function requestEvaluations(provider: LLMProvider, requestPrompt: string):
       role: 'user',
       content: [
         requestPrompt,
-        '上一次输出未能解析为完整的10项 evaluations，可能被截断。请重新评分，每项 rationale 和 improvement 各不超过80个汉字，禁止输出推理过程、Markdown或任何额外文字，只输出完整JSON。',
+        '上一次输出未能解析为完整的10项 evaluations，可能被截断。请重新评分，每项 rationale 和 improvement 各不超过80个汉字。rationale 中不同语义点请用换行符分隔。禁止输出推理过程、Markdown或任何额外文字，只输出完整JSON。',
       ].join('\n'),
     }],
     options
@@ -76,7 +76,7 @@ function prompt(def: ScoreItemDef, session: Session, institutionKB?: ProductKB):
     '3. rationale 必须说明该题回答符合或不符合详解评分标准的具体证据；improvement 必须针对失分点给出具体、可执行的改进建议，并参考详解回答要领指出应补充或纠正的内容，不能写空泛的“注意沟通技巧”。',
     '4. 双评审只负责逐题评价，最终总分由系统按10题算术平均计算，不要自行给总分。',
     '5. 每项 rationale 和 improvement 各不超过120个汉字，禁止输出推理过程、Markdown或任何额外文字。',
-    '只输出JSON：{"evaluations":[{"score":0到100的整数,"rationale":"第1题评语","improvement":"第1题具体改进建议"}]}。evaluations必须严格按题目顺序包含10项。',
+    '只输出JSON：{"evaluations":[{"score":0到100的整数,"rationale":"第1题评语（不同语义点用\\n换行分隔）","improvement":"第1题具体改进建议"}]}。evaluations必须严格按题目顺序包含10项。',
   ].join('\n');
 }
 

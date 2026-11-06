@@ -1,9 +1,9 @@
-# Grasp MVP
+# Graspit
 
-AI 销售陪练与认证系统 MVP。轻量级前后端工程，技术栈与 `Grasp/Grasp` 保持一致。
-产品设计依据 `docs/frontend-design.md`，当前已完成 **Phase 1–3**：
+AI销售带练与认证系统。
 
-- 学员端（grasp-web）：任务流 / 对练页 / 复盘页 / 成长档案 / 考核中心（文字对练，语音入口预留）
+
+- App（ruliad）：任务流 / 对练页 / 复盘页 / 成长档案 / 考核中心（文字对练，语音入口预留）
 - 管理端（admin-web）：申诉复核、场景配置、主管视图、高管视图、数据中心（汇报包导出）、
   考核管理、内容工坊（流水线/评分规则/回归测试/观察项）、多租户切换、企业微信 SSO 占位
 - 后端：角色引擎（情绪动力学 + 行为档位）、评分引擎（确定性规则层 + LLM 双 judge）、
@@ -26,8 +26,8 @@ Grasp/mvp
 │   ├── scoring-engine        # 规则层 + LLM 双 judge 评分 (@grasp-mvp/scoring-engine)
 │   └── api-gateway           # Fastify API 网关 (@grasp-mvp/api-gateway)
 └── client
-    ├── grasp-web             # 学员端：React 19 + Vite + Tailwind（移动优先）
-    └── admin-web             # 管理端：React 18 + Vite + Tailwind
+    ├── landing               # Home Page：React 19 + Vite + Tailwind（移动优先）
+    └── ruliad                # App：React 18 + Vite + Tailwind
 ```
 
 ## 前置条件

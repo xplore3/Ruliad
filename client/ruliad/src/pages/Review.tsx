@@ -379,10 +379,10 @@ export default function Review() {
   );
 }
 
-/** 将多段文本按句号/分号/换行切分，渲染为编号列表 */
+/** 将文本按换行切分，渲染为编号列表（仅在有明确分段时启用编号） */
 function renderNumbered(text: string): React.ReactNode {
   const parts = text
-    .split(/(?<=。|；|\n)/g)
+    .split(/\n+/g)
     .map((s) => s.trim())
     .filter(Boolean);
   if (parts.length <= 1) return text;

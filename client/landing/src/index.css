@@ -1,34 +1,32 @@
 @import "tailwindcss";
 
 @theme {
-  /* ── 主色：深蓝/深灰（专业感）── */
-  --color-ink-950: #0B0F1A;
-  --color-ink-900: #0F1420;
-  --color-ink-850: #141B2D;
-  --color-ink-800: #1A2236;
-  --color-ink-700: #232E48;
-  --color-ink-600: #2E3A56;
+  /* ===== Graspit · 浅色珊瑚红主题 ===== */
+  /* 主色：珊瑚红 */
+  --color-coral: #FF6B5B;
+  --color-coral-dark: #E85A4A;
+  --color-coral-soft: #FFF0EE;
 
-  /* ── 强调色：珊瑚红（数据高亮 / CTA）── */
-  --color-accent-400: #F07380;
-  --color-accent-500: #E85C62;
-  --color-accent-600: #D04A52;
+  /* 浅色背景体系 */
+  --color-light-bg: #F7F7F8;
+  --color-card: #FFFFFF;
+  --color-warm-bg: #F1F2F4;
 
-  /* ── 强调色：绿（信任 / 成功指标）── */
-  --color-mint-400: #4ADE94;
-  --color-mint-500: #34D399;
+  /* 文字色 */
+  --color-text-primary: #1F2329;
+  --color-text-secondary: #6B7280;
+  --color-text-tertiary: #9CA1AB;
 
-  /* ── 文本 ── */
-  --color-text-main: #F2F4F8;
-  --color-text-sub: #9BA3B5;
-  --color-text-dim: #6B7384;
+  /* 边框 & 分割线 */
+  --color-line: #EBEBEF;
 
-  /* ── 语义别名 ── */
-  --color-coral: #E85C62;
-  --color-coral-light: #F07380;
-  --color-charcoal: #0F1420;
-  --color-panel: #141B2D;
-  --color-success: #34D399;
+  /* 功能色 */
+  --color-green: #2FAE7B;
+  --color-green-soft: #E7F6F0;
+  --color-amber: #F5A623;
+  --color-amber-soft: #FDF3E1;
+  --color-blue: #4B7BEC;
+  --color-blue-soft: #EBF1FE;
 }
 
 @layer base {
@@ -37,10 +35,9 @@
   }
   body {
     margin: 0;
-    background-color: #0F1420;
-    color: #F2F4F8;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'PingFang SC',
-      'Microsoft YaHei', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    background-color: #F7F7F8;
+    color: #1F2329;
+    font-family: 'PingFang SC', 'Source Han Sans CN', 'Microsoft YaHei', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }

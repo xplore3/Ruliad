@@ -1,1145 +1,828 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 
-/* ── 色板常量 ── */
+/* ════════════════════════════════════════════════════ */
+
 const C = {
-  ink950: '#0B0F1A',
-  ink900: '#0F1420',
-  ink850: '#141B2D',
-  ink800: '#1A2236',
-  ink700: '#232E48',
-  ink600: '#2E3A56',
-  accent: '#E85C62',
-  accentLight: '#F07380',
-  accentDark: '#D04A52',
-  mint: '#34D399',
-  mintLight: '#4ADE94',
-  textMain: '#F2F4F8',
-  textSub: '#9BA3B5',
-  textDim: '#6B7384',
+  bg: '#F7F7F8',
+  card: '#FFFFFF',
+  warm: '#F1F2F4',
+  line: '#EBEBEF',
+  coral: '#FF6B5B',
+  coralDark: '#E85A4A',
+  coralSoft: '#FFF0EE',
+  green: '#2FAE7B',
+  text: '#1F2329',
+  textSub: '#6B7280',
+  textDim: '#9CA1AB',
 };
 
-/* ──────────────────────────────────────────────
- * 导航栏配置
- * ────────────────────────────────────────────── */
-type NavItem = { label: string; href: string; children?: { label: string; href: string }[] };
-
-const NAV_ITEMS: NavItem[] = [
-  {
-    label: '产品',
-    href: '#products',
-    children: [
-      { label: 'AI陪练', href: '#product-practice' },
-      { label: '辅导与能力画像', href: '#product-coaching' },
-      { label: '推演沙盘', href: '#product-sandbox' },
-    ],
-  },
-  {
-    label: '解决方案',
-    href: '#solutions',
-    children: [
-      { label: '企业', href: '#sol-enterprise' },
-      { label: '线下门店', href: '#sol-store' },
-      { label: '机构单位', href: '#sol-gov' },
-    ],
-  },
-  {
-    label: '技术',
-    href: '#tech',
-    children: [
-      { label: '认知工程', href: '#tech-cognitive' },
-      { label: '主体性计算', href: '#tech-agency' },
-    ],
-  },
-  {
-    label: '资源',
-    href: '#evidence',
-    children: [{ label: '社媒', href: '#about' }],
-  },
-  { label: '关于我们', href: '#about' },
-];
-
-/* ──────────────────────────────────────────────
- * 第二屏数据
- * ────────────────────────────────────────────── */
-const PROBLEM_COLS = [
-  {
-    tag: '正在发生的事',
-    items: [
-      '81%的销售团队已使用AI，但仅12%用于辅导与能力发展。',
-      '79%的培训不围绕真实客户对话构建。',
-      '50%的销售人员希望获得更多培训或指导。',
-    ],
-    color: C.accent,
-  },
-  {
-    tag: '留下的缺口',
-    items: [
-      '基础话术培训的需求在下降——话术正在被AI商品化。',
-      '企业用Agentic AI替代标准化流程，剩下的核心瓶颈是人（Humanware）。',
-    ],
-    color: C.mint,
-  },
-  {
-    tag: '我们的判断',
-    items: [
-      '未来员工必须拥有两项不可外包的能力：复杂人际博弈，以及驾驭AI协同作战。',
-      '这两项能力无法通过听课获得，只能在模拟对抗中练出来。',
-    ],
-    color: C.textMain,
-  },
-];
-
-const SPECTRUM = [
-  { label: '邮件SDR', replaceable: true },
-  { label: '基础话术', replaceable: true },
-  { label: '产品问答', replaceable: true },
-  { label: '复杂谈判', replaceable: false },
-  { label: '多筹码博弈', replaceable: false },
-  { label: '人机协同作战', replaceable: false },
-];
-
-/* ──────────────────────────────────────────────
- * 第三屏：三层训练系统
- * ────────────────────────────────────────────── */
-const TRAINING_LAYERS = [
-  {
-    id: 'product-sandbox',
-    name: '推演沙盘',
-    oneLiner: '把大客户攻坚和年度规划搬进沙盘',
-    features: '多回合博弈 · 多筹码管理 · AI竞对 + AI客户',
-    ability: '复杂人际博弈',
-    image: '/images/layer-sandbox.svg',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6">
-        <path d="M3 3v18h18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M7 14l3-3 3 3 5-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
-  {
-    id: 'product-coaching',
-    name: '辅导',
-    oneLiner: '让能力变化看得见、说得清',
-    features: '多维能力画像 · 经理干预建议 · 效果归因',
-    ability: '校准与反馈',
-    image: '/images/layer-coaching.svg',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6">
-        <path d="M9 17v-6m4 6V8m4 9v-4M5 21h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
-  {
-    id: 'product-practice',
-    name: '陪练',
-    oneLiner: '在能施压的AI客户面前，磨练几次',
-    features: '对抗性对话 · 语音/文字 · 长记忆 · 角色一致性',
-    ability: '基础对抗与AI协同',
-    image: '/images/layer-practice.svg',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6">
-        <path d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.7 9.7 0 0 1-4-.85L3 20l1.35-3.5A7.6 7.6 0 0 1 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
-];
-
-/* ──────────────────────────────────────────────
- * 第五屏：数据卡
- * ────────────────────────────────────────────── */
-const DATA_CARDS = [
-  { num: '3.7×', desc: '与AI有效配合的销售，达成配额的可能性', source: '（n=1,026）', isThirdParty: true },
-  { num: '+57%', desc: '积极使用AI辅导的组织，高配额达成率优势', source: '（n=312）', isThirdParty: true },
-  { num: '62.1%', desc: '一线人员期待"技能可视化/评分化"', source: '（n=300）', isThirdParty: true },
-];
-
-/* ──────────────────────────────────────────────
- * 第六屏：解决方案
- * ────────────────────────────────────────────── */
-const SOLUTIONS = [
-  {
-    id: 'sol-enterprise',
-    tag: '企业',
-    title: '销售组织的能力标准化',
-    points: ['销冠能力复制', '新人上手周期缩短', '大客户攻坚推演'],
-    cta: '了解企业方案 →',
-    ctaHref: 'mailto:support@grasp.chat?subject=咨询企业方案',
-    color: C.accent,
-    image: '/images/sol-enterprise.svg',
-  },
-  {
-    id: 'sol-store',
-    tag: '线下门店',
-    title: '店员当天能用的销售训练',
-    points: ['5分钟一局', '游戏化', '手机即练'],
-    cta: '了解门店方案 →',
-    ctaHref: 'mailto:support@grasp.chat?subject=咨询门店方案',
-    color: C.mint,
-    image: '/images/sol-store.svg',
-  },
-  {
-    id: 'sol-gov',
-    tag: '机构单位',
-    title: '合规可控的政务与党建实训',
-    points: ['窗口沟通陪练', '党建流程推演', '私有化部署'],
-    cta: '了解政务方案 →',
-    ctaHref: 'mailto:support@grasp.chat?subject=咨询政务方案',
-    color: C.textMain,
-    image: '/images/sol-gov.svg',
-  },
-];
-
-/* ──────────────────────────────────────────────
- * 第七屏：落地场景与案例
- * ────────────────────────────────────────────── */
-const SCENES = [
-  {
-    title: '艺术培训机构',
-    desc: '学员模拟面对家长咨询、课程试听谈判、续费沟通等场景，AI扮演不同性格的家长角色，训练顾问的表达说服力和异议处理能力。',
-    highlights: ['课程咨询模拟', '续费谈判训练', '家长异议应对'],
-    image: '/weiqi.png',
-    color: C.accent,
-  },
-  {
-    title: '健身和体能训练机构',
-    desc: '销售人员面对潜在会员进行课程推荐、价格谈判和体验课转化，AI模拟不同健身需求的客户，提升私教顾问的成单能力。',
-    highlights: ['会员需求挖掘', '价格谈判模拟', '体验课转化'],
-    image: '/sports.png',
-    color: C.mint,
-  },
-  {
-    title: '反诈宣传',
-    desc: '警务人员与社区工作者在模拟对话中识别诈骗话术套路，AI扮演各类诈骗分子，训练工作人员的快速识别、劝阻和沟通能力。',
-    highlights: ['诈骗话术识别', '劝阻沟通训练', '应急反应模拟'],
-    image: '/anti-fraud.png',
-    color: C.textMain,
-  },
-];
-
-/* ════════════════════════════════════════════════════
- * 组件
- * ════════════════════════════════════════════════════ */
-
-/* ── 导航栏下拉菜单 ── */
-function NavDropdown({ item }: { item: NavItem }) {
-  const [open, setOpen] = useState(false);
+function IconSearch() {
   return (
-    <div
-      className="relative"
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-    >
-      <button
-        type="button"
-        aria-haspopup="true"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1 text-sm transition"
-        style={{ color: open ? C.textMain : C.textSub }}
-      >
-        {item.label}
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          className="h-3.5 w-3.5 transition-transform"
-          style={{ transform: open ? 'rotate(180deg)' : 'none' }}
-        >
-          <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </button>
-      {open && item.children && (
-        <div
-          className="absolute left-0 top-full z-50 mt-2 min-w-[180px] rounded-xl border border-white/10 py-2 shadow-2xl"
-          style={{ backgroundColor: C.ink800 }}
-        >
-          {item.children.map((child) => (
-            <a
-              key={child.label}
-              href={child.href}
-              className="block px-4 py-2 text-sm transition hover:bg-white/5"
-              style={{ color: C.textSub }}
-              onClick={() => setOpen(false)}
-              onMouseEnter={(e) => { e.currentTarget.style.color = C.accent; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = C.textSub; }}
-            >
-              {child.label}
-            </a>
-          ))}
-        </div>
-      )}
-    </div>
+    <svg viewBox="0 0 24 24" fill="none" className="h-7 w-7">
+      <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
+      <path d="M16 16l4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path d="M8 11h6M11 8v6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
   );
 }
 
-/* ── 移动端导航分组（可点击展开子项） ── */
-function MobileNavGroup({ item, onNavigate }: { item: NavItem; onNavigate: () => void }) {
-  const [open, setOpen] = useState(false);
-  if (!item.children) {
-    return (
-      <a
-        href={item.href}
-        className="block py-2 text-sm"
-        style={{ color: C.textSub }}
-        onClick={onNavigate}
-      >
-        {item.label}
-      </a>
-    );
-  }
+function IconBolt() {
   return (
-    <div>
-      <div className="flex items-center justify-between">
-        <a
-          href={item.href}
-          className="block py-2 text-sm"
-          style={{ color: C.textSub }}
-          onClick={onNavigate}
-        >
-          {item.label}
+    <svg viewBox="0 0 24 24" fill="none" className="h-7 w-7">
+      <path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" fill="currentColor" fillOpacity="0.15" />
+    </svg>
+  );
+}
+
+function IconTool() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="h-7 w-7">
+      <path d="M14 7l3-3 3 3-3 3-3-3z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M14 10L3 21" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M10 14l-3 3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconAward() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="h-7 w-7">
+      <circle cx="12" cy="9" r="6" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M9 14l-1.5 7L12 19l4.5 2L15 14" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M8 6l-1.5-3M16 6l1.5-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconChart() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="h-7 w-7">
+      <path d="M4 20V4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M4 20h16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <rect x="7" y="11" width="3" height="6" rx="0.5" fill="currentColor" fillOpacity="0.4" />
+      <rect x="12" y="7" width="3" height="10" rx="0.5" fill="currentColor" fillOpacity="0.4" />
+      <rect x="17" y="13" width="3" height="4" rx="0.5" fill="currentColor" fillOpacity="0.4" />
+    </svg>
+  );
+}
+
+function IconScene() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="h-8 w-8">
+      <rect x="3" y="3" width="18" height="14" rx="3" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M8 21h8M12 17v4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <circle cx="8.5" cy="10" r="1.5" fill="currentColor" fillOpacity="0.4" />
+      <circle cx="15.5" cy="10" r="1.5" fill="currentColor" fillOpacity="0.4" />
+    </svg>
+  );
+}
+
+function IconExpert() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="h-8 w-8">
+      <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M5 21c0-3.87 3.13-7 7-7s7 3.13 7 7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M15 5l3-1M18 4v3M18 4l1.5 1.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconMetric() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="h-8 w-8">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M12 3v9l6 3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+    </svg>
+  );
+}
+
+function IconCheck() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="h-8 w-8">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M7 12l3.5 3.5L17 9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconDoc({ color = 'currentColor' }: { color?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="h-8 w-8">
+      <path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8l-5-5z" stroke={color} strokeWidth="1.8" />
+      <path d="M14 3v5h5" stroke={color} strokeWidth="1.8" />
+      <path d="M9 13h6M9 17h6" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconArrows() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="h-8 w-8">
+      <path d="M3 8h14l-3-3M21 16h-14l3 3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M3 12h18" stroke="currentColor" strokeWidth="1.5" strokeOpacity="0.4" />
+    </svg>
+  );
+}
+
+function IconCompass({ color = 'currentColor' }: { color?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="h-8 w-8">
+      <circle cx="12" cy="12" r="9" stroke={color} strokeWidth="1.8" />
+      <path d="M16 8l-2 6-6 2 2-6 6-2z" stroke={color} strokeWidth="1.5" fill={color} fillOpacity="0.2" />
+    </svg>
+  );
+}
+
+function Navbar() {
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [dropdownOpen, setDropdownOpen] = useState<string | null>(null);
+
+  const navItems: { label: string; href?: string; items?: { label: string; href: string; desc?: string }[] }[] = [
+    {
+      label: '产品',
+      items: [
+        { label: '带练', href: '#loop', desc: '实景训练闭环，从练过到练成' },
+        { label: '模拟推演', href: '#tech', desc: '场景化模拟交互与指标复盘' },
+      ],
+    },
+    {
+      label: '解决方案',
+      items: [
+        { label: '线下门店', href: '#pillars', desc: '门店销售团队能力建设' },
+        { label: '企业单位', href: '#deliverables', desc: '企业级销售训练闭环交付' },
+      ],
+    },
+    {
+      label: '技术',
+      items: [
+        { label: '认知计算', href: '#tech', desc: '理解判断依据与决策过程' },
+        { label: '情感计算', href: '#tech', desc: '识别互动中的情绪状态变化' },
+        { label: '主体性计算', href: '#tech', desc: '让模拟对象自主反应' },
+        { label: '场景模拟', href: '#tech', desc: '真实业务场景的可扩展建模' },
+      ],
+    },
+    {
+      label: '资源',
+      items: [
+        { label: '产品白皮书', href: '#deliverables', desc: '了解训练体系与效果承诺' },
+        { label: '技术文档', href: '#tech', desc: '认知计算与模拟技术底座' },
+        { label: '社媒', href: '#about', desc: '关注我们获取最新动态' },
+      ],
+    },
+    { label: '关于我们', href: '#about' },
+  ];
+
+  return (
+    <nav className="sticky top-0 z-50 border-b border-white/60 backdrop-blur-xl" style={{ backgroundColor: 'rgba(255,255,255,0.92)' }}>
+      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+        <a href="#hero" className="flex items-center gap-2.5">
+          <img src="/logo.png" alt="Graspit" className="h-9 w-9 rounded-xl" />
+          <span className="text-lg font-bold tracking-tight" style={{ color: C.coral }}>Graspit</span>
         </a>
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-label={`展开${item.label}子菜单`}
-          onClick={() => setOpen((v) => !v)}
-          className="p-2"
-          style={{ color: C.textDim }}
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            className="h-4 w-4 transition-transform"
-            style={{ transform: open ? 'rotate(180deg)' : 'none' }}
-          >
-            <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-      </div>
-      {open &&
-        item.children.map((child) => (
-          <a
-            key={child.label}
-            href={child.href}
-            className="block py-2 pl-4 text-sm"
-            style={{ color: C.textDim }}
-            onClick={onNavigate}
-          >
-            {child.label}
-          </a>
-        ))}
-    </div>
-  );
-}
-
-/* ── 首屏动态对话示意 ── */
-function HeroDemo() {
-  const [phase, setPhase] = useState(0);
-  useEffect(() => {
-    const timers = [
-      setTimeout(() => setPhase(1), 800),
-      setTimeout(() => setPhase(2), 1600),
-      setTimeout(() => setPhase(3), 2400),
-    ];
-    return () => timers.forEach(clearTimeout);
-  }, []);
-
-  return (
-    <div className="relative">
-      {/* AI 客户对话卡 */}
-      <div
-        className="animate-bubble-in rounded-2xl border border-white/10 p-5 shadow-2xl"
-        style={{ backgroundColor: C.ink800, maxWidth: 340 }}
-      >
-        <div className="mb-3 flex items-center gap-2">
-          <div className="h-8 w-8 rounded-full" style={{ backgroundColor: C.accent }} />
-          <div>
-            <div className="text-sm font-semibold" style={{ color: C.textMain }}>AI 客户 · 王总</div>
-            <div className="text-xs" style={{ color: C.textDim }}>采购总监 · 制造业</div>
-          </div>
-        </div>
-
-        {phase >= 1 && (
-          <div className="animate-bubble-in mb-3 rounded-xl rounded-tl-none px-4 py-3" style={{ backgroundColor: C.ink700 }}>
-            <p className="text-sm leading-relaxed" style={{ color: C.textMain }}>
-              这个价格我们接受不了，你们再降15%否则免谈。
-            </p>
-          </div>
-        )}
-
-        {phase >= 2 && (
-          <div className="animate-bubble-in mb-3 flex justify-end">
-            <div className="rounded-xl rounded-tr-none px-4 py-3" style={{ backgroundColor: 'rgba(232,92,98,0.15)' }}>
-              <p className="text-sm leading-relaxed" style={{ color: C.textMain }}>
-                王总，价格不是唯一筹码。如果我们把交付周期缩短30天…
-              </p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* 浮出能力评分卡 */}
-      {phase >= 3 && (
-        <div
-          className="animate-score-roll absolute -right-4 top-1/2 -translate-y-1/2 rounded-xl border border-white/10 p-4 shadow-2xl"
-          style={{ backgroundColor: C.ink850, minWidth: 160 }}
-        >
-          <div className="text-xs" style={{ color: C.textSub }}>能力评分</div>
-          <div className="mt-1 flex items-baseline gap-1">
-            <span className="text-3xl font-black" style={{ color: C.accent }}>72</span>
-            <span className="text-sm" style={{ color: C.textSub }}>分</span>
-          </div>
-          <div className="mt-1 text-xs" style={{ color: C.textDim }}>异议处理</div>
-          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full" style={{ backgroundColor: C.ink600 }}>
-            <div className="h-full rounded-full" style={{ width: '72%', backgroundColor: C.accent }} />
-          </div>
-        </div>
-      )}
-
-      {/* 远处沙盘看板 */}
-      <div
-        className="absolute -bottom-6 -left-6 rounded-lg border border-white/5 p-3 opacity-40 shadow-lg"
-        style={{ backgroundColor: C.ink850, minWidth: 120 }}
-      >
-        <div className="text-xs font-semibold" style={{ color: C.textSub }}>沙盘看板</div>
-        <div className="mt-1 flex gap-1">
-          {[40, 65, 30].map((h, i) => (
-            <div key={i} className="w-2 rounded-t" style={{ height: h, backgroundColor: C.mint }} />
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ── 替代光谱条 ── */
-function ReplaceSpectrum() {
-  return (
-    <div className="mt-10">
-      <div className="mb-3 flex items-center justify-between text-xs" style={{ color: C.textDim }}>
-        <span>高可替代</span>
-        <span className="flex items-center gap-1">
-          <svg viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5">
-            <path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          需求结构迁移
-        </span>
-        <span>不可替代</span>
-      </div>
-      <div className="flex items-center gap-0 overflow-hidden rounded-xl border border-white/10" style={{ backgroundColor: C.ink800 }}>
-        {SPECTRUM.map((s, i) => (
-          <div
-            key={s.label}
-            className="flex-1 px-3 py-3 text-center text-xs transition"
-            style={{
-              backgroundColor: s.replaceable ? 'rgba(155,163,181,0.08)' : 'rgba(232,92,98,0.12)',
-              color: s.replaceable ? C.textDim : C.textMain,
-              borderRight: i < SPECTRUM.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none',
-            }}
-          >
-            {s.label}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/* ════════════════════════════════════════════════════
- * 主 App
- * ════════════════════════════════════════════════════ */
-export default function App() {
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-
-  return (
-    <div className="min-h-screen" style={{ backgroundColor: C.ink900, color: C.textMain }}>
-      {/* ════════ 顶部固定导航栏 ════════ */}
-      <nav
-        className="sticky top-0 z-50 border-b border-white/5 backdrop-blur-xl"
-        style={{ backgroundColor: 'rgba(15,20,32,0.88)' }}
-      >
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          {/* Logo */}
-          <a href="#hero" className="flex items-center gap-2.5">
-            <img src="/logo.png" alt="Graspit" className="h-9 w-9 rounded-xl" />
-            <span className="text-lg font-bold tracking-tight" style={{ color: C.accent }}>Graspit</span>
-          </a>
-
-          {/* 桌面端导航 */}
-          <div className="hidden items-center gap-6 lg:flex" style={{ color: C.textSub }}>
-            {NAV_ITEMS.map((item) =>
-              item.children ? (
-                <NavDropdown key={item.label} item={item} />
+        <div className="hidden items-center gap-7 lg:flex">
+          {navItems.map((item) => (
+            <div key={item.label} className="relative"
+              onMouseEnter={() => item.items ? setDropdownOpen(item.label) : setDropdownOpen(null)}
+              onMouseLeave={() => setDropdownOpen(null)}>
+              {item.items ? (
+                <button className="flex items-center gap-1 text-sm font-medium transition cursor-pointer"
+                  style={{ color: dropdownOpen === item.label ? C.coral : C.textSub }}>
+                  {item.label}
+                  <svg viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5 transition-transform" style={{ transform: dropdownOpen === item.label ? 'rotate(180deg)' : 'none' }}>
+                    <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
               ) : (
-                <a
-                  key={item.label}
-                  href={item.href}
-                  className="text-sm transition"
-                  onMouseEnter={(e) => (e.currentTarget.style.color = C.textMain)}
-                  onMouseLeave={(e) => (e.currentTarget.style.color = C.textSub)}
-                >
+                <a href={item.href} className="text-sm font-medium transition" style={{ color: C.textSub }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = C.text)}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = C.textSub)}>
                   {item.label}
                 </a>
-              )
-            )}
-          </div>
-
-          {/* 右侧 CTA */}
-          <div className="flex items-center gap-3">
-            <a
-              href="https://train.grasp.chat"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hidden rounded-full border border-white/15 px-5 py-2 text-sm font-semibold transition hover:border-white/30 sm:inline-flex"
-              style={{ backgroundColor: 'rgba(255,255,255,0.05)', color: C.textMain }}
-            >
-              免费试用
-            </a>
-            <a
-              href="#cta"
-              className="rounded-full px-5 py-2 text-sm font-bold transition"
-              style={{ backgroundColor: C.accent, color: C.textMain }}
-              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = C.accentLight)}
-              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = C.accent)}
-            >
-              预约演示
-            </a>
-            {/* 移动端菜单按钮 */}
-            <button
-              className="lg:hidden"
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              style={{ color: C.textSub }}
-            >
-              <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6">
-                <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-              </svg>
-            </button>
-          </div>
-        </div>
-
-        {/* 移动端展开菜单 */}
-        {mobileMenuOpen && (
-          <div className="border-t border-white/5 px-6 py-4 lg:hidden" style={{ backgroundColor: C.ink850 }}>
-            {NAV_ITEMS.map((item) => (
-              <MobileNavGroup
-                key={item.label}
-                item={item}
-                onNavigate={() => setMobileMenuOpen(false)}
-              />
-            ))}
-          </div>
-        )}
-      </nav>
-
-      {/* ════════ 第一屏：Hero ════════ */}
-      <section id="hero" className="relative overflow-hidden px-6 pt-20 pb-20 md:pt-28 md:pb-28">
-        <div className="pointer-events-none absolute inset-0">
-          <img
-            src="/images/hero-bg.svg"
-            alt=""
-            className="absolute inset-0 h-full w-full object-cover"
-          />
-          <div
-            className="absolute left-1/2 top-0 h-[400px] w-[600px] -translate-x-1/2 rounded-full blur-[120px]"
-            style={{ backgroundColor: 'rgba(232,92,98,0.10)' }}
-          />
-          <div
-            className="absolute right-0 top-1/3 h-[300px] w-[400px] rounded-full blur-[100px]"
-            style={{ backgroundColor: 'rgba(52,211,153,0.06)' }}
-          />
-        </div>
-
-        <div className="relative mx-auto grid max-w-6xl items-center gap-12 lg:grid-cols-2">
-          {/* 左侧文案 */}
-          <div>
-            <div
-              className="inline-flex items-center gap-2 rounded-full border border-white/10 px-4 py-1.5 text-xs backdrop-blur-sm"
-              style={{ backgroundColor: 'rgba(255,255,255,0.04)', color: C.textSub }}
-            >
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ backgroundColor: C.mint }} />
-              陪练 · 指导 · 模拟 · 预测
+              )}
+              {item.items && dropdownOpen === item.label && (
+                <div className="absolute left-1/2 top-full -translate-x-1/2 pt-3">
+                  <div className="rounded-2xl border border-[var(--color-line)] p-2 shadow-lg min-w-[220px]"
+                    style={{ backgroundColor: C.card }}>
+                    {item.items.map((sub) => (
+                      <a key={sub.label} href={sub.href}
+                        className="flex flex-col gap-0.5 rounded-xl px-4 py-2.5 transition hover:bg-[var(--color-coral-soft)]"
+                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = C.coralSoft; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}>
+                        <span className="text-sm font-medium" style={{ color: C.text }}>{sub.label}</span>
+                        {sub.desc && <span className="text-xs leading-snug" style={{ color: C.textDim }}>{sub.desc}</span>}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
+          ))}
+        </div>
+        <div className="flex items-center gap-3">
+          <a href="https://train.grasp.chat" target="_blank" rel="noopener noreferrer"
+            className="hidden sm:inline-flex rounded-full border border-white/60 px-5 py-2 text-sm font-semibold transition hover:border-[var(--color-coral)] hover:text-[var(--color-coral)]"
+            style={{ backgroundColor: '#fff', color: C.text }}>
+            免费试用
+          </a>
+          <a href="mailto:bd@grasp.chat?subject=预约演示"
+            className="rounded-full px-5 py-2 text-sm font-bold transition"
+            style={{ backgroundColor: C.coral, color: '#fff' }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = C.coralDark)}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = C.coral)}>
+            预约演示
+          </a>
+          <button className="lg:hidden" onClick={() => setMobileOpen(!mobileOpen)} style={{ color: C.textSub }}>
+            <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6">
+              {mobileOpen ? (
+                <path d="M6 6l12 12M6 18L18 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              ) : (
+                <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              )}
+            </svg>
+          </button>
+        </div>
+      </div>
+      {mobileOpen && (
+        <div className="border-t border-white/60 px-6 py-4 lg:hidden" style={{ backgroundColor: C.card }}>
+          {navItems.map((item) => (
+            <div key={item.label} className="border-b border-[var(--color-line)] last:border-b-0">
+              {item.items ? (
+                <div className="py-2">
+                  <div className="text-sm font-semibold mb-1" style={{ color: C.text }}>{item.label}</div>
+                  <div className="pl-3 space-y-1">
+                    {item.items.map((sub) => (
+                      <a key={sub.label} href={sub.href} className="block py-1.5 text-xs" style={{ color: C.textSub }} onClick={() => setMobileOpen(false)}>
+                        {sub.label}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <a href={item.href} className="block py-2 text-sm" style={{ color: C.textSub }} onClick={() => setMobileOpen(false)}>
+                  {item.label}
+                </a>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </nav>
+  );
+}
 
-            <h1 className="mt-8 text-4xl font-black leading-tight tracking-tight md:text-6xl">
-              训练AI无法替代的人
+function RadarChart() {
+  const dimensions = [
+    { label: '场景应对', value: 0.78 },
+    { label: '异议处理', value: 0.65 },
+    { label: '需求挖掘', value: 0.82 },
+    { label: '节奏把控', value: 0.70 },
+    { label: '信任建立', value: 0.75 },
+    { label: '筹码管理', value: 0.60 },
+  ];
+  const cx = 120, cy = 120, r = 80;
+  const n = dimensions.length;
+  const getPoint = (index: number, value: number) => {
+    const angle = (Math.PI * 2 * index) / n - Math.PI / 2;
+    return { x: cx + r * value * Math.cos(angle), y: cy + r * value * Math.sin(angle) };
+  };
+  const pathData = dimensions.map((d, i) => {
+    const p = getPoint(i, d.value);
+    return `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`;
+  }).join(' ') + ' Z';
+  return (
+    <svg viewBox="0 0 240 240" className="w-full max-w-[240px]">
+      {[0.25, 0.5, 0.75, 1].map((level) => (
+        <polygon key={level}
+          points={dimensions.map((_, i) => { const p = getPoint(i, level); return `${p.x},${p.y}`; }).join(' ')}
+          fill="none" stroke="#EBEBEF" strokeWidth="1" />
+      ))}
+      {dimensions.map((_, i) => { const p = getPoint(i, 1); return <line key={i} x1={cx} y1={cy} x2={p.x} y2={p.y} stroke="#EBEBEF" strokeWidth="1" />; })}
+      <path d={pathData} fill="rgba(255,107,91,0.12)" stroke={C.coral} strokeWidth="2" />
+      {dimensions.map((d, i) => { const p = getPoint(i, d.value); return <circle key={i} cx={p.x} cy={p.y} r="4" fill={C.coral} stroke="#fff" strokeWidth="2" />; })}
+      {dimensions.map((d, i) => { const p = getPoint(i, 1.22); return <text key={i} x={p.x} y={p.y} textAnchor="middle" dominantBaseline="middle" fill={C.textSub} fontSize="9">{d.label}</text>; })}
+    </svg>
+  );
+}
+
+function ComparisonChart() {
+  return (
+    <svg viewBox="0 0 280 120" className="w-full max-w-[280px]">
+      <path d="M10,95 L50,85 L90,90 L130,80 L170,82 L210,75 L250,78 L270,72" fill="none" stroke="#D8DAE0" strokeWidth="2" strokeDasharray="4 3" />
+      <path d="M10,78 L50,55 L90,50 L130,42 L170,38 L210,32 L250,28 L270,22" fill="none" stroke={C.coral} strokeWidth="2.5" />
+      {[[10,78],[50,55],[90,50],[130,42],[170,38],[210,32],[250,28],[270,22]].map(([x,y], i) => (<circle key={i} cx={Number(x)} cy={Number(y)} r="3" fill={C.coral} />))}
+      <text x="10" y="14" fill={C.textDim} fontSize="8">训练前</text>
+      <circle cx="50" cy="11" r="3" fill="#D8DAE0" />
+      <text x="160" y="14" fill={C.coral} fontSize="8">训练后</text>
+      <circle cx="200" cy="11" r="3" fill={C.coral} />
+    </svg>
+  );
+}
+
+function SectionTitle({ title, subtitle, id }: { title: string; subtitle?: string; id?: string }) {
+  return (
+    <div className="text-center" id={id}>
+      <h2 className="text-3xl font-bold leading-tight md:text-4xl" style={{ color: C.text }}>{title}</h2>
+      {subtitle && <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed md:text-lg" style={{ color: C.textSub }}>{subtitle}</p>}
+    </div>
+  );
+}
+
+export default function App() {
+  const location = useLocation();
+
+  // 主页各 section 对应的 ID 列表
+  const ANCHOR_IDS = ['hero', 'loop', 'tech', 'pillars', 'deliverables', 'about'];
+
+  useEffect(() => {
+    if (location.pathname === '/') {
+      // 在根路由下，通过 hash 定位，如 #loop → 滚动到 id="loop"
+      const id = location.hash.replace('#', '');
+      if (id && ANCHOR_IDS.includes(id)) {
+        const el = document.getElementById(id);
+        if (el) el.scrollIntoView({ behavior: 'smooth' });
+      }
+    } else if (ANCHOR_IDS.includes(location.pathname)) {
+      // HashRouter 将 #loop 解析为 pathname=loop，通过 * 兜底回到此页后需手动滚动
+      requestAnimationFrame(() => {
+        const el = document.getElementById(location.pathname);
+        if (el) el.scrollIntoView({ behavior: 'smooth' });
+      });
+    }
+  }, [location]);
+
+  return (
+    <div className="min-h-screen" style={{ backgroundColor: C.bg, color: C.text }}>
+      <Navbar />
+
+      {/* ════════ 一、首屏 Hero ════════ */}
+      <section id="hero" className="relative overflow-hidden px-6 pt-16 pb-20 md:pt-24 md:pb-28">
+        <div className="pointer-events-none absolute inset-0">
+          <div className="absolute left-1/4 top-0 h-[400px] w-[500px] -translate-x-1/2 rounded-full blur-[140px]" style={{ backgroundColor: 'rgba(255,107,91,0.06)' }} />
+          <div className="absolute right-0 top-1/3 h-[300px] w-[400px] rounded-full blur-[120px]" style={{ backgroundColor: 'rgba(47,174,123,0.04)' }} />
+        </div>
+        <div className="relative mx-auto grid max-w-6xl items-center gap-16 lg:grid-cols-2">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-[var(--color-line)] px-4 py-1.5 text-xs backdrop-blur-sm"
+              style={{ backgroundColor: '#fff', color: C.textSub }}>
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ backgroundColor: C.green }} />
+              指导 · 示范 · 陪练 · 模拟 · 预测
+            </div>
+            <h1 className="mt-8 text-3xl font-black leading-tight tracking-tight md:text-5xl lg:text-[3.4rem]">
+              实景训练，指标复盘，<br />改善可证，专家辅助。
             </h1>
-
-            <p className="mt-6 max-w-xl text-lg leading-relaxed md:text-xl" style={{ color: C.textMain }}>
-              能力训练平台——基于认知建模，在AI客户面前练判断、练筹码、练情绪管理，覆盖销售、汇报、谈判、客服、事件应对等多种场景。
+            <p className="mt-6 max-w-xl text-base leading-relaxed md:text-lg" style={{ color: C.text }}>
+              基于真实业务场景、可解释指标与专家辅助，构建销售能力可度量、可追溯、可持续改善的训练闭环。
             </p>
-
+            <p className="mt-4 max-w-xl text-sm leading-relaxed italic" style={{ color: C.textDim }}>
+              不止于陪练的销售能力训练。从"练过"走向"练成"，从经验判断走向数据验证。
+            </p>
             <div className="mt-10 flex flex-wrap items-center gap-4">
-              <a
-                href="https://train.grasp.chat"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="group inline-flex items-center gap-2 rounded-full px-7 py-3.5 text-base font-bold shadow-lg transition hover:scale-105"
-                style={{ backgroundColor: C.accent, color: C.textMain, boxShadow: '0 10px 30px rgba(232,92,98,0.2)' }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = C.accentLight;
-                  e.currentTarget.style.boxShadow = '0 10px 40px rgba(232,92,98,0.3)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = C.accent;
-                  e.currentTarget.style.boxShadow = '0 10px 30px rgba(232,92,98,0.2)';
-                }}
-              >
-                立即试用
+              <a href="mailto:bd@grasp.chat?subject=预约演示"
+                className="group inline-flex items-center gap-2 rounded-full px-8 py-4 text-base font-bold shadow-lg transition hover:scale-105"
+                style={{ backgroundColor: C.coral, color: '#fff', boxShadow: '0 8px 22px -8px rgba(255,107,91,.45)' }}
+                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = C.coralDark; e.currentTarget.style.boxShadow = '0 10px 28px -8px rgba(255,107,91,.55)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = C.coral; e.currentTarget.style.boxShadow = '0 8px 22px -8px rgba(255,107,91,.45)'; }}>
+                预约演示
                 <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5 transition group-hover:translate-x-0.5">
                   <path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </a>
-              <a
-                href="#cta"
-                className="inline-flex items-center gap-2 rounded-full border border-white/15 px-7 py-3.5 text-base font-semibold backdrop-blur-sm transition hover:border-white/30"
-                style={{ backgroundColor: 'rgba(255,255,255,0.05)', color: C.textMain }}
-              >
-                预约场景演示
+              <a href="https://train.grasp.chat" target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 rounded-full border border-[var(--color-line)] px-7 py-3.5 text-base font-semibold transition hover:border-[var(--color-coral)] hover:text-[var(--color-coral)]"
+                style={{ backgroundColor: '#fff', color: C.text }}>
+                免费试用
               </a>
             </div>
-
-            {/* 信任条 */}
-            <div className="mt-12 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs" style={{ color: C.textDim }}>
-              {['销售谈判', '客户攻坚', '跟进与报价', '门店成交', '窗口沟通与汇报'].map((t, i) => (
-                <span key={t} className="flex items-center gap-2">
-                  {i > 0 && <span style={{ color: C.textDim }}>·</span>}
-                  {t}
-                </span>
-              ))}
-            </div>
           </div>
-
-          {/* 右侧动态示意 */}
           <div className="hidden justify-center lg:flex">
-            <HeroDemo />
-          </div>
-        </div>
-      </section>
-
-      {/* ════════ 第二屏：Humanware 时代的断层 ════════ */}
-      <section className="relative overflow-hidden px-6 py-24" style={{ backgroundColor: C.ink950 }}>
-        <img
-          src="/images/gap-bg.svg"
-          alt=""
-          className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-50"
-        />
-        <div className="relative mx-auto max-w-6xl">
-          <div className="text-center">
-            <h2 className="text-3xl font-bold md:text-4xl">话术已经被AI学会，难的是 "怎么应对人"</h2>
-            <p className="mt-3" style={{ color: C.textSub }}>
-              基础话术正在被AI商品化，业务的核心瓶颈已迁移到不可外包的能力上
-            </p>
-          </div>
-
-          {/* 三栏并置 */}
-          <div className="mt-14 grid gap-6 md:grid-cols-3">
-            {PROBLEM_COLS.map((col) => (
-              <div
-                key={col.tag}
-                className="rounded-2xl border border-white/8 p-6"
-                style={{ backgroundColor: C.ink850 }}
-              >
-                <div className="mb-4 inline-flex rounded-full px-3 py-1 text-xs font-semibold" style={{ backgroundColor: `${col.color}20`, color: col.color }}>
-                  {col.tag}
+            <div className="relative w-full max-w-[520px]">
+              <div className="rounded-2xl border border-[var(--color-line)] p-6 shadow-[var(--shadow-card)]" style={{ backgroundColor: C.card }}>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: C.coral }} />
+                    <span className="text-sm font-semibold" style={{ color: C.text }}>能力指标雷达图</span>
+                  </div>
+                  <span className="text-xs" style={{ color: C.textDim }}>前后对比曲线</span>
                 </div>
-                <ul className="space-y-3">
-                  {col.items.map((item, i) => (
-                    <li key={i} className="flex gap-2 text-sm leading-relaxed" style={{ color: C.textMain }}>
-                      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: col.color }} />
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-
-          {/* 替代光谱 */}
-          <ReplaceSpectrum />
-        </div>
-      </section>
-
-      {/* ════════ 第三屏：三层训练系统 ════════ */}
-      <section id="products" className="px-6 py-24">
-        <div className="mx-auto max-w-5xl">
-          <div className="text-center">
-            <h2 className="text-3xl font-bold md:text-4xl">
-              陪练针对日常，辅导应对实战，沙盘用以事前
-            </h2>
-            <p className="mt-3" style={{ color: C.textSub }}>
-              多级AI系统，从基础对抗到复杂博弈
-            </p>
-          </div>
-
-          {/* 三层堆叠卡片（从下到上） */}
-          <div className="mt-14 space-y-4">
-            {[...TRAINING_LAYERS].reverse().map((layer) => (
-              <div
-                key={layer.name}
-                id={layer.id}
-                className="group relative scroll-mt-24 overflow-hidden rounded-2xl border border-white/8 p-6 transition md:p-8"
-                style={{ backgroundColor: C.ink850 }}
-                onMouseEnter={(e) => { e.currentTarget.style.borderColor = `${C.accent}40`; }}
-                onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; }}
-              >
-                <img
-                  src={layer.image}
-                  alt=""
-                  className="pointer-events-none absolute inset-y-0 right-0 hidden h-full w-64 object-cover opacity-25 md:block lg:w-80"
-                  style={{
-                    WebkitMaskImage: 'linear-gradient(to left, rgba(0,0,0,0.9), transparent)',
-                    maskImage: 'linear-gradient(to left, rgba(0,0,0,0.9), transparent)',
-                  }}
-                />
-                <div className="relative flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                  <div className="flex items-start gap-4">
-                    <div
-                      className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl"
-                      style={{ backgroundColor: `${C.accent}15`, color: C.accent }}
-                    >
-                      {layer.icon}
-                    </div>
-                    <div>
-                      <h3 className="text-xl font-bold" style={{ color: C.textMain }}>{layer.name}</h3>
-                      <p className="mt-1 text-sm" style={{ color: C.textSub }}>{layer.oneLiner}</p>
-                    </div>
-                  </div>
-                  <div className="md:text-right">
-                    <p className="text-sm" style={{ color: C.textMain }}>{layer.features}</p>
-                    <p className="mt-1 text-xs" style={{ color: C.textDim }}>
-                      对应能力：<span style={{ color: C.mint }}>{layer.ability}</span>
-                    </p>
-                  </div>
+                <div className="grid grid-cols-2 gap-4 items-center">
+                  <RadarChart />
+                  <ComparisonChart />
                 </div>
-              </div>
-            ))}
-          </div>
-
-          {/* 底部一行 */}
-          <div className="mt-8 text-center">
-            <p className="text-sm" style={{ color: C.textSub }}>
-              客户画像｜实时通话｜认知可视化｜实时指导｜专家校准｜推演沙盘｜主体性博弈
-            </p>
-            <a
-              href="https://train.grasp.chat"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-4 inline-flex items-center gap-1 text-sm font-semibold transition"
-              style={{ color: C.accent }}
-              onMouseEnter={(e) => (e.currentTarget.style.color = C.accentLight)}
-              onMouseLeave={(e) => (e.currentTarget.style.color = C.accent)}
-            >
-              查看产品详情 →
-            </a>
-          </div>
-        </div>
-      </section>
-
-      {/* ════════ 第四屏：认知工程与主体性计算 ════════ */}
-      <section id="tech" className="px-6 py-24" style={{ backgroundColor: C.ink950 }}>
-        <div className="mx-auto max-w-6xl">
-          <div className="text-center">
-            <h2 className="text-3xl font-bold leading-tight md:text-4xl">
-              不是"更会说话的AI"，是"会判断、会权衡、会记忆的博弈主体"
-            </h2>
-          </div>
-
-          <div className="mt-14 grid gap-6 lg:grid-cols-2">
-            {/* 认知工程 */}
-            <div
-              id="tech-cognitive"
-              className="relative scroll-mt-24 overflow-hidden rounded-2xl border border-white/8 p-8"
-              style={{ backgroundColor: C.ink850 }}
-            >
-              <img
-                src="/images/tech-cognitive.svg"
-                alt=""
-                className="pointer-events-none absolute -right-8 -top-8 w-48 opacity-20 lg:w-60"
-                style={{
-                  WebkitMaskImage: 'radial-gradient(circle at 60% 40%, black 30%, transparent 70%)',
-                  maskImage: 'radial-gradient(circle at 60% 40%, black 30%, transparent 70%)',
-                }}
-              />
-              <div className="relative">
-              <div
-                className="mb-4 inline-flex rounded-full px-3 py-1 text-xs font-semibold"
-                style={{ backgroundColor: `${C.accent}20`, color: C.accent }}
-              >
-                方法论
-              </div>
-              <h3 className="text-2xl font-bold">认知工程</h3>
-              <p className="mt-4 text-sm leading-relaxed" style={{ color: C.textSub }}>
-                认知工程不训练"话术熟练度"，而是训练判断力、策略选择和情绪管理，是基于Humanware(人件)的工程。每一次训练都是一次完整的认知任务：
-              </p>
-              {/* 四阶段 */}
-              <div className="mt-6 flex flex-wrap items-center gap-2">
-                {['感知', '判断', '决策', '反馈'].map((stage, i) => (
-                  <div key={stage} className="flex items-center gap-2">
-                    <span
-                      className="rounded-lg px-3 py-1.5 text-sm font-medium"
-                      style={{ backgroundColor: C.ink700, color: C.textMain }}
-                    >
-                      {stage}
-                    </span>
-                    {i < 3 && (
-                      <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" style={{ color: C.textDim }}>
-                        <path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    )}
-                  </div>
-                ))}
-              </div>
-              <p className="mt-4 text-xs" style={{ color: C.textDim }}>
-                客户信号 → 意图与筹码 → 策略选择 → 结果归因。训练数据沉淀的是认知轨迹，而非对话文本。
-              </p>
-              </div>
-            </div>
-
-            {/* 主体性计算 */}
-            <div
-              id="tech-agency"
-              className="relative scroll-mt-24 overflow-hidden rounded-2xl border border-white/8 p-8"
-              style={{ backgroundColor: C.ink850 }}
-            >
-              <img
-                src="/images/tech-agency.svg"
-                alt=""
-                className="pointer-events-none absolute -bottom-10 -right-10 w-52 opacity-20 lg:w-64"
-                style={{
-                  WebkitMaskImage: 'radial-gradient(circle at 40% 60%, black 30%, transparent 72%)',
-                  maskImage: 'radial-gradient(circle at 40% 60%, black 30%, transparent 72%)',
-                }}
-              />
-              <div className="relative">
-              <div
-                className="mb-4 inline-flex rounded-full px-3 py-1 text-xs font-semibold"
-                style={{ backgroundColor: `${C.mint}20`, color: C.mint }}
-              >
-                技术内核
-              </div>
-              <h3 className="text-2xl font-bold">主体性计算</h3>
-              <p className="mt-4 text-sm leading-relaxed" style={{ color: C.textSub }}>
-                主体性计算建模的是"客户如何判断、如何权衡、如何记忆"，而非"客户如何说话"。
-              </p>
-              <div className="mt-6 space-y-2">
-                {[
-                  { label: '信念', desc: '客户对市场和产品的固有认知' },
-                  { label: '意图', desc: '真实诉求与表面诉求的偏差' },
-                  { label: '筹码权重', desc: '价格、交付、服务在决策中的权重' },
-                  { label: '记忆', desc: '跨会话记住上次报价和异议' },
-                  { label: '策略倾向', desc: '在对抗中选择的博弈策略' },
-                ].map((item) => (
-                  <div key={item.label} className="flex items-baseline gap-2 text-sm">
-                    <span className="font-semibold" style={{ color: C.mint }}>{item.label}</span>
-                    <span style={{ color: C.textSub }}>—— {item.desc}</span>
-                  </div>
-                ))}
-              </div>
-              <p className="mt-4 text-xs" style={{ color: C.textDim }}>
-                博弈主体建模引擎使 AI 客户和 AI 对手在跨会话中保持行为一致性。
-              </p>
               </div>
             </div>
           </div>
-
-          {/* 底部一行 */}
-          <div className="mt-8 text-center">
-            <p className="text-sm" style={{ color: C.textSub }}>
-              认知工程是方法，主体性计算是底座，Humanware是框架
-            </p>
-            <a
-              href="mailto:support@grasp.chat?subject=获取技术白皮书"
-              className="mt-4 inline-flex items-center gap-1 text-sm font-semibold transition"
-              style={{ color: C.accent }}
-              onMouseEnter={(e) => (e.currentTarget.style.color = C.accentLight)}
-              onMouseLeave={(e) => (e.currentTarget.style.color = C.accent)}
-            >
-              联系获取技术白皮书 →
-            </a>
-          </div>
         </div>
       </section>
 
-      {/* ════════ 第五屏：效果归因 ════════ */}
-      <section id="evidence" className="px-6 py-24">
-        <div className="mx-auto max-w-5xl">
-          <div className="text-center">
-            <h2 className="text-3xl font-bold md:text-4xl">
-              训练效果不靠感觉，靠归因链路
-            </h2>
-          </div>
-
-          <div className="mt-14 grid gap-6 md:grid-cols-3">
-            {DATA_CARDS.map((card) => (
-              <div
-                key={card.num}
-                className="rounded-2xl border border-white/8 p-8 text-center"
-                style={{ backgroundColor: C.ink850 }}
-              >
-                <div className="text-5xl font-black md:text-6xl" style={{ color: C.accent }}>
-                  {card.num}
-                </div>
-                <p className="mt-4 text-sm leading-relaxed" style={{ color: C.textMain }}>
-                  {card.desc}
-                </p>
-                <div className="mt-4 flex items-center justify-center gap-2">
-                  <span
-                    className="h-1.5 w-1.5 rounded-full"
-                    style={{ backgroundColor: card.isThirdParty ? C.mint : C.accent }}
-                  />
-                  <span className="text-xs" style={{ color: C.textDim }}>
-                    {card.source}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-8 text-center">
-            <a
-              href="#tech"
-              className="inline-flex items-center gap-1 text-sm font-semibold transition"
-              style={{ color: C.accent }}
-              onMouseEnter={(e) => (e.currentTarget.style.color = C.accentLight)}
-              onMouseLeave={(e) => (e.currentTarget.style.color = C.accent)}
-            >
-              了解效果归因方法论 →
-            </a>
-          </div>
-        </div>
-      </section>
-
-      {/* ════════ 第六屏：解决方案 ════════ */}
-      <section id="solutions" className="px-6 py-24" style={{ backgroundColor: C.ink950 }}>
+      {/* ════════ 二、AI时代的机会陈述 ════════ */}
+      <section className="px-6 py-24" style={{ backgroundColor: '#fff' }}>
         <div className="mx-auto max-w-6xl">
-          <div className="text-center">
-            <h2 className="text-3xl font-bold md:text-4xl">
-              不同的场景，同一套底座，不同的训练重点
-            </h2>
-          </div>
-
-          <div className="mt-14 grid gap-6 md:grid-cols-3">
-            {SOLUTIONS.map((sol) => (
-              <div
-                key={sol.tag}
-                id={sol.id}
-                className="group scroll-mt-24 overflow-hidden rounded-2xl border border-white/8 transition"
-                style={{ backgroundColor: C.ink850 }}
-                onMouseEnter={(e) => { e.currentTarget.style.borderColor = `${sol.color}30`; e.currentTarget.style.transform = 'translateY(-4px)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; e.currentTarget.style.transform = 'translateY(0)'; }}
-              >
-                <div className="relative h-36 overflow-hidden">
-                  <img
-                    src={sol.image}
-                    alt={sol.title}
-                    className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
-                  />
-                  <div
-                    className="absolute inset-0"
-                    style={{ background: 'linear-gradient(to bottom, rgba(20,27,45,0) 45%, #141B2D 100%)' }}
-                  />
+          <SectionTitle
+            title="AI时代，销售能力建设需要新的训练机制"
+            subtitle="AI没有替代销售，而是让组织和个人的销售能力有更大提升空间、更快提升速度、更好用的提升工具。"
+            id="ai-opportunity"
+          />
+          <div className="mt-14 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {[
+              { icon: <IconSearch />, title: '提升空间更大', desc: 'AI可以拆解复杂销售能力，识别个人与团队的能力短板，让训练从通用内容转向针对性提升。', color: C.coral },
+              { icon: <IconBolt />, title: '提升速度更快', desc: '通过高频实景训练、即时反馈与指标复盘，缩短从"知道"到"做到"的周期。', color: C.green },
+              { icon: <IconTool />, title: '提升工具更好用', desc: '场景、内容、目标均可定制，训练工具更贴近真实业务，更容易嵌入日常销售管理。', color: C.coral },
+              { icon: <IconAward />, title: '销冠经验更好传递', desc: '将销冠的判断、话术、应对策略转化为可训练场景与可解释指标，让个人经验成为组织能力。', color: C.green },
+              { icon: <IconChart />, title: '能力提升可视化、数据化', desc: '训练进度、能力维度、前后对比、改善计划均可记录、可分析、可汇报。', color: C.coral },
+            ].map((item, i) => (
+              <div key={i}
+                className="rounded-2xl border border-[var(--color-line)] p-7 transition hover:-translate-y-1 hover:shadow-[var(--shadow-card)]"
+                style={{ backgroundColor: C.card }}
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = item.color === C.coral ? '#FFD9D2' : '#C8E8D8'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--color-line)'; }}>
+                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl" style={{ color: item.color }}>
+                  {item.icon}
                 </div>
-                <div className="p-8">
-                <div
-                  className="mb-4 inline-flex rounded-full px-3 py-1 text-xs font-semibold"
-                  style={{ backgroundColor: `${sol.color}20`, color: sol.color }}
-                >
-                  {sol.tag}
-                </div>
-                <h3 className="text-xl font-bold" style={{ color: C.textMain }}>{sol.title}</h3>
-                <ul className="mt-4 space-y-2">
-                  {sol.points.map((p) => (
-                    <li key={p} className="flex items-center gap-2 text-sm" style={{ color: C.textSub }}>
-                      <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 shrink-0" style={{ color: sol.color }}>
-                        <path d="M5 12l5 5L20 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                      {p}
-                    </li>
-                  ))}
-                </ul>
-                <a
-                  href={sol.ctaHref}
-                  className="mt-6 inline-flex text-sm font-semibold transition"
-                  style={{ color: sol.color }}
-                >
-                  {sol.cta}
-                </a>
-                </div>
+                <h3 className="text-lg font-bold" style={{ color: C.text }}>{item.title}</h3>
+                <p className="mt-3 text-sm leading-relaxed" style={{ color: C.textSub }}>{item.desc}</p>
               </div>
             ))}
           </div>
+          <p className="mt-12 text-center text-base italic" style={{ color: C.textDim }}>
+            企业需要的并非更多课程，而是一套能够承载AI能力、又能落到真实业务中的训练机制。
+          </p>
         </div>
       </section>
 
-      {/* ════════ 第七屏：落地场景与案例 ════════ */}
-      <section id="scenes" className="relative overflow-hidden px-6 py-24">
-        <img
-          src="/images/trust-bg.svg"
-          alt=""
-          className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-60"
-        />
-        <div className="relative mx-auto max-w-6xl">
-          <div className="text-center">
-            <h2 className="text-3xl font-bold md:text-4xl">落地场景与案例</h2>
-            <p className="mt-3" style={{ color: C.textSub }}>
-              无论是在门店、机构还是公共服务场景，AI陪练都能快速适配真实业务对话
-            </p>
-          </div>
-
-          <div className="mt-14 grid gap-6 md:grid-cols-3">
-            {SCENES.map((scene) => (
-              <div
-                key={scene.title}
-                className="group overflow-hidden rounded-2xl border border-white/8 transition hover:-translate-y-1"
-                style={{ backgroundColor: C.ink850 }}
-                onMouseEnter={(e) => { e.currentTarget.style.borderColor = `${scene.color}40`; }}
-                onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; }}
-              >
-                <div className="relative h-44 overflow-hidden">
-                  <img
-                    src={scene.image}
-                    alt={scene.title}
-                    className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
-                  />
-                  <div
-                    className="absolute inset-0"
-                    style={{ background: 'linear-gradient(to bottom, rgba(20,27,45,0) 40%, #141B2D 100%)' }}
-                  />
-                </div>
-                <div className="p-6">
-                  <h3 className="text-lg font-bold" style={{ color: scene.color }}>{scene.title}</h3>
-                  <p className="mt-2 text-sm leading-relaxed" style={{ color: C.textSub }}>{scene.desc}</p>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {scene.highlights.map((h) => (
-                      <span
-                        key={h}
-                        className="rounded-full px-2.5 py-1 text-xs"
-                        style={{ backgroundColor: `${scene.color}15`, color: scene.color }}
-                      >
-                        {h}
-                      </span>
-                    ))}
+      {/* ════════ 三、主张与训练闭环 ════════ */}
+      <section className="px-6 py-24" id="loop">
+        <div className="mx-auto max-w-5xl">
+          <SectionTitle
+            title="可度量、可追溯、可改善的训练闭环"
+            subtitle="基于真实业务场景开展训练，以可解释指标作为复盘依据，结合专家反馈形成改善方案，构建销售能力可度量、可追溯、可持续改善的训练闭环。"
+          />
+          {/* 五步闭环 */}
+          <div className="mt-14 flex flex-col items-center gap-4 lg:flex-row lg:items-stretch lg:gap-0">
+            {[
+              { step: '01', title: '场景设定', desc: '明确训练场景、任务目标与能力要求', icon: <IconScene /> },
+              { step: '02', title: '内容讲授', desc: '专家拆解能力维度与关键方法', icon: <IconDoc /> },
+              { step: '03', title: '实景演练', desc: '在真实案例与真实业务场景中反复训练', icon: <IconExpert /> },
+              { step: '04', title: '指标复盘', desc: '依据可解释指标定位问题、分析原因', icon: <IconMetric /> },
+              { step: '05', title: '改善计划', desc: '基于复盘结果明确下一阶段训练重点', icon: <IconCheck /> },
+            ].map((item, i) => (
+              <div key={i} className="flex flex-1 flex-col items-center">
+                <div className="relative w-full lg:h-full">
+                  <div className="mx-auto max-w-[180px] rounded-2xl border border-[var(--color-line)] p-5 text-center shadow-[var(--shadow-card)] lg:h-full"
+                    style={{ backgroundColor: C.card }}>
+                    <div className="mb-3 text-xs font-bold tracking-widest" style={{ color: C.coral }}>{item.step}</div>
+                    <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-xl" style={{ backgroundColor: C.coralSoft, color: C.coral }}>
+                      {item.icon}
+                    </div>
+                    <h4 className="text-base font-bold" style={{ color: C.text }}>{item.title}</h4>
+                    <p className="mt-2 text-xs leading-relaxed" style={{ color: C.textDim }}>{item.desc}</p>
                   </div>
                 </div>
+                {i < 4 && (
+                  <div className="my-3 lg:hidden" style={{ color: C.textDim }}>
+                    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5">
+                      <path d="M12 5v14m-6-6 6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </div>
+                )}
+                {i < 4 && (
+                  <div className="absolute right-0 top-1/2 hidden -translate-y-1/2 translate-x-1/2 lg:block" style={{ color: C.textDim }}>
+                    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5">
+                      <path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </div>
+                )}
               </div>
             ))}
           </div>
+          <p className="mt-10 text-center text-sm" style={{ color: C.textSub }}>
+            场景明确，能力可量化，反馈有依据，改善可对比，进阶有计划。
+          </p>
         </div>
       </section>
 
-      {/* ════════ 第八屏：行动号召 ════════ */}
-      <section id="cta" className="relative overflow-hidden px-6 py-24" style={{ backgroundColor: C.ink950 }}>
-        <img
-          src="/images/cta-bg.svg"
-          alt=""
-          className="pointer-events-none absolute inset-0 h-full w-full object-cover"
-        />
-        <div className="relative mx-auto max-w-3xl text-center">
-          <h2 className="text-3xl font-bold md:text-4xl">
-            从一个场景开始，验证AI的效果
-          </h2>
-          <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
-            <a
-              href="mailto:support@grasp.chat?subject=预约产品演示"
-              className="group inline-flex items-center gap-2 rounded-full px-8 py-4 text-base font-bold shadow-lg transition hover:scale-105"
-              style={{ backgroundColor: C.accent, color: C.textMain, boxShadow: '0 10px 30px rgba(232,92,98,0.2)' }}
-              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = C.accentLight; }}
-              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = C.accent; }}
-            >
-              预约30分钟场景演示
-              <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5 transition group-hover:translate-x-0.5">
+      {/* ════════ 四、四个支撑 ════════ */}
+
+      {/* ════════ 五、技术底座 ════════ */}
+      <section className="px-6 py-24" id="tech">
+        <div className="mx-auto max-w-6xl">
+          <SectionTitle
+            title="技术底座"
+            subtitle="以认知计算与模拟技术为底座，使训练场景可构建、训练对象可模拟、训练过程可解释、训练结果可验证。"
+          />
+          <div className="mt-14 flex flex-wrap justify-center gap-4">
+            {[
+              { name: '认知计算', nameEn: 'Cognitive Computing' },
+              { name: '情感计算', nameEn: 'Affective Computing' },
+              { name: '认知—情绪—行为建模', nameEn: 'Cognition–Emotion–Behavior Modeling' },
+              { name: '主体性计算', nameEn: 'Subjecthood Computing' },
+              { name: '模拟技术', nameEn: 'Scenario Modeling & Agent Simulation' },
+            ].map((item, i) => (
+              <div key={i}
+                className="group flex items-center gap-3 rounded-2xl border border-[var(--color-line)] px-6 py-4 transition hover:-translate-y-0.5 hover:shadow-[var(--shadow-card)]"
+                style={{ backgroundColor: C.card }}>
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white" style={{ backgroundColor: i % 2 === 0 ? C.coral : C.green }}>
+                  {i + 1}
+                </div>
+                <div>
+                  <div className="text-sm font-bold" style={{ color: C.text }}>{item.name}</div>
+                  <div className="text-[11px] tracking-wide" style={{ color: C.textDim }}>{item.nameEn}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-10 text-center">
+            <a href="#/tech" className="inline-flex items-center gap-2 text-sm font-semibold transition hover:opacity-80" style={{ color: C.coral }}>
+              了解技术详情
+              <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4">
                 <path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </a>
-            <a
-              href="mailto:support@grasp.chat?subject=获取行业场景清单"
-              className="inline-flex items-center gap-2 rounded-full border border-white/15 px-8 py-4 text-base font-semibold transition hover:border-white/30"
-              style={{ backgroundColor: 'rgba(255,255,255,0.05)', color: C.textMain }}
-            >
-              联系获取行业场景清单
+          </div>
+        </div>
+      </section>
+
+      {/* ════════ 六、交付与证据 ════════ */}
+      <section className="px-6 py-24" style={{ backgroundColor: '#fff' }} id="deliverables">
+        <div className="mx-auto max-w-5xl">
+          <SectionTitle
+            title="面向结果的交付物"
+          />
+          <div className="mt-14 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {[
+              { title: '场景任务书', desc: '场景清晰', icon: <IconDoc color={C.coral} /> },
+              { title: '能力指标表', desc: '能力可量化', icon: <IconChart /> },
+              { title: '专家复盘记录', desc: '反馈有依据', icon: <IconExpert /> },
+              { title: '前后对比报告', desc: '改善可对比', icon: <IconArrows /> },
+              { title: '改善计划', desc: '进阶有计划', icon: <IconCheck /> },
+            ].map((item, i) => (
+              <div key={i}
+                className="flex items-start gap-4 rounded-2xl border border-[var(--color-line)] p-6 transition hover:-translate-y-1 hover:shadow-[var(--shadow-card)]"
+                style={{ backgroundColor: C.card }}
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#FFD9D2'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--color-line)'; }}>
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl" style={{ color: C.coral }}>
+                  {item.icon}
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold" style={{ color: C.text }}>{item.title}</h3>
+                  <p className="mt-1 text-sm" style={{ color: C.textSub }}>{item.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="mt-10 text-center text-base font-medium" style={{ color: C.coral }}>
+            无场景不训练，无指标不复盘，无对比不结案，无计划不续训。
+          </p>
+        </div>
+      </section>
+
+      {/* ════════ 七、适用对象 ════════ */}
+      <section className="px-6 py-24">
+        <div className="mx-auto max-w-5xl">
+          <SectionTitle
+            title="不同的用户，同样的价值"
+          />
+          <div className="mt-14 grid gap-8 lg:grid-cols-2">
+            {/* 面向机构 */}
+            <div className="rounded-2xl border border-[var(--color-line)] p-8 shadow-[var(--shadow-card)]" style={{ backgroundColor: C.card }}>
+              <div className="mb-4 inline-flex rounded-full px-4 py-1.5 text-xs font-semibold" style={{ backgroundColor: C.coralSoft, color: C.coral }}>
+                面向机构
+              </div>
+              <h3 className="text-xl font-bold" style={{ color: C.text }}>让销售能力建设从经验驱动走向有据可循、有径可改、有效可证。</h3>
+              <p className="mt-3 text-sm leading-relaxed" style={{ color: C.textSub }}>
+                适合培训负责人、销售负责人与决策层：团队能力可度量、培训投入可交代、改善路径可复制。
+              </p>
+              <a href="https://train.grasp.chat" target="_blank" rel="noopener noreferrer"
+                className="mt-6 inline-flex items-center gap-2 rounded-full px-6 py-3 text-sm font-bold transition hover:scale-105"
+                style={{ backgroundColor: C.coral, color: '#fff' }}>
+                免费试用
+                <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4">
+                  <path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </a>
+            </div>
+            {/* 开始训练 */}
+            <div className="rounded-2xl border border-[var(--color-line)] p-8 shadow-[var(--shadow-card)]" style={{ backgroundColor: C.card }}>
+              <div className="mb-4 inline-flex rounded-full px-4 py-1.5 text-xs font-semibold" style={{ backgroundColor: 'rgba(47,174,123,0.12)', color: C.green }}>
+                开始训练
+              </div>
+              <h3 className="text-xl font-bold" style={{ color: C.text }}>在真实业务场景中训练，以清晰指标验证每一次进阶。</h3>
+              <p className="mt-3 text-sm leading-relaxed" style={{ color: C.textSub }}>
+                适合销售从业者、转岗者与进阶者：在低风险环境中训练真实场景，以可解释反馈获得成长证据。
+              </p>
+              <a href="https://train.grasp.chat"
+                className="mt-6 inline-flex items-center gap-2 rounded-full px-6 py-3 text-sm font-bold transition hover:scale-105"
+                style={{ backgroundColor: C.green, color: '#fff' }}>
+                开始训练
+                <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4">
+                  <path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ════════ 八、落地场景与案例 ════════ */}
+      <section className="px-6 py-24" style={{ backgroundColor: '#fff' }}>
+        <div className="mx-auto max-w-6xl">
+          <SectionTitle
+            title="落地场景与案例"
+            subtitle="越早建立能力基线，越早形成可复制改善路径，越早实现AI赋能销售"
+          />
+          {/* 场景卡片 */}
+          <div className="mt-14 grid gap-8 md:grid-cols-3">
+            {/* 教育培训机构 */}
+            <div className="group rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-card)] overflow-hidden transition hover:-translate-y-1"
+              style={{ backgroundColor: C.card }}>
+              <div className="relative h-44 overflow-hidden">
+                <img src="/weiqi.png" alt="教育培训机构" className="h-full w-full object-cover transition group-hover:scale-105" />
+              </div>
+              <div className="p-6">
+                <h3 className="text-lg font-bold" style={{ color: C.text }}>教育培训机构</h3>
+                <p className="mt-2 text-sm leading-relaxed" style={{ color: C.textSub }}>
+                  学员模拟面对家长咨询、课程试听谈判、续费沟通等场景，AI扮演不同性格的家长角色，训练顾问的表达说服力和异议处理能力。
+                </p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {['课程咨询模拟', '续费谈判训练', '家长异议应对'].map((tag) => (
+                    <span key={tag} className="rounded-full px-3 py-1 text-xs" style={{ backgroundColor: C.coralSoft, color: C.coral }}>{tag}</span>
+                  ))}
+                </div>
+              </div>
+            </div>
+            {/* 健身和体能训练机构 */}
+            <div className="group rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-card)] overflow-hidden transition hover:-translate-y-1"
+              style={{ backgroundColor: C.card }}>
+              <div className="relative h-44 overflow-hidden">
+                <img src="/sports.png" alt="健身和体能训练机构" className="h-full w-full object-cover transition group-hover:scale-105" />
+              </div>
+              <div className="p-6">
+                <h3 className="text-lg font-bold" style={{ color: C.text }}>健身和体能训练机构</h3>
+                <p className="mt-2 text-sm leading-relaxed" style={{ color: C.textSub }}>
+                  销售人员面对潜在会员进行课程推荐、价格谈判和体验课转化，AI模拟不同健身需求的客户，提升私教顾问的成单能力。
+                </p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {['会员需求挖掘', '价格谈判模拟', '体验课转化'].map((tag) => (
+                    <span key={tag} className="rounded-full px-3 py-1 text-xs" style={{ backgroundColor: 'rgba(47,174,123,0.12)', color: C.green }}>{tag}</span>
+                  ))}
+                </div>
+              </div>
+            </div>
+            {/* 反诈宣传 */}
+            <div className="group rounded-2xl border border-[var(--color-line)] shadow-[var(--shadow-card)] overflow-hidden transition hover:-translate-y-1"
+              style={{ backgroundColor: C.card }}>
+              <div className="relative h-44 overflow-hidden">
+                <img src="/anti-fraud.png" alt="反诈宣传" className="h-full w-full object-cover transition group-hover:scale-105" />
+              </div>
+              <div className="p-6">
+                <h3 className="text-lg font-bold" style={{ color: C.text }}>反诈宣传</h3>
+                <p className="mt-2 text-sm leading-relaxed" style={{ color: C.textSub }}>
+                  警务人员与社区工作者在模拟对话中识别诈骗话术套路，AI扮演各类诈骗分子，训练工作人员的快速识别、劝阻和沟通能力。
+                </p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {['诈骗话术识别', '劝阻沟通训练', '应急反应模拟'].map((tag) => (
+                    <span key={tag} className="rounded-full px-3 py-1 text-xs" style={{ backgroundColor: C.coralSoft, color: C.coral }}>{tag}</span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+          {/* 客户证言 */}
+          <div className="mt-16 grid gap-6 lg:grid-cols-2">
+            <div className="rounded-2xl border border-[var(--color-line)] p-7 shadow-[var(--shadow-card)]" style={{ backgroundColor: C.card }}>
+              <svg viewBox="0 0 24 24" fill="none" className="mb-4 h-8 w-8" style={{ color: C.coral, opacity: 0.4 }}>
+                <path d="M4.583 17.321C3.553 16.227 3 15 3 13.011c0-3.5 2.457-6.637 6.03-8.188l.893 1.378c-3.335 1.804-3.987 4.145-4.247 5.621.537-.278 1.24-.375 1.929-.311 1.804.167 3.226 1.648 3.226 3.489a3.5 3.5 0 01-3.5 3.5c-1.073 0-2.099-.49-2.748-1.179zm10 0C13.553 16.227 13 15 13 13.011c0-3.5 2.457-6.637 6.03-8.188l.893 1.378c-3.335 1.804-3.987 4.145-4.247 5.621.537-.278 1.24-.375 1.929-.311 1.804.167 3.226 1.648 3.226 3.489a3.5 3.5 0 01-3.5 3.5c-1.073 0-2.099-.49-2.748-1.179z" fill="currentColor" />
+              </svg>
+              <p className="text-sm leading-relaxed" style={{ color: C.text }}>
+                "过去培训效果靠感觉，现在每个阶段都有指标和对比，下一步的规划和安排就更清楚。"
+              </p>
+              <p className="mt-4 text-xs" style={{ color: C.textDim }}>—— 某机构销售负责人</p>
+            </div>
+            <div className="rounded-2xl border border-[var(--color-line)] p-7 shadow-[var(--shadow-card)]" style={{ backgroundColor: C.card }}>
+              <svg viewBox="0 0 24 24" fill="none" className="mb-4 h-8 w-8" style={{ color: C.green, opacity: 0.4 }}>
+                <path d="M4.583 17.321C3.553 16.227 3 15 3 13.011c0-3.5 2.457-6.637 6.03-8.188l.893 1.378c-3.335 1.804-3.987 4.145-4.247 5.621.537-.278 1.24-.375 1.929-.311 1.804.167 3.226 1.648 3.226 3.489a3.5 3.5 0 01-3.5 3.5c-1.073 0-2.099-.49-2.748-1.179zm10 0C13.553 16.227 13 15 13 13.011c0-3.5 2.457-6.637 6.03-8.188l.893 1.378c-3.335 1.804-3.987 4.145-4.247 5.621.537-.278 1.24-.375 1.929-.311 1.804.167 3.226 1.648 3.226 3.489a3.5 3.5 0 01-3.5 3.5c-1.073 0-2.099-.49-2.748-1.179z" fill="currentColor" />
+              </svg>
+              <p className="text-sm leading-relaxed" style={{ color: C.text }}>
+                "知道了自己差在哪个维度、为什么差、下一步练什么。"
+              </p>
+              <p className="mt-4 text-xs" style={{ color: C.textDim }}>—— 个人学员</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ════════ 九、最终 CTA ════════ */}
+      <section className="px-6 py-24">
+        <div className="mx-auto max-w-3xl text-center">
+          <h2 className="text-3xl font-black leading-tight md:text-4xl" style={{ color: C.text }}>
+            从"练过"，到"练成"。
+          </h2>
+          <p className="mx-auto mt-4 max-w-xl text-base leading-relaxed" style={{ color: C.textSub }}>
+            预约一次演示，看看你的销售能力如何被度量、被解释、被改善。
+          </p>
+          <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
+            <a href="mailto:bd@grasp.chat?subject=预约演示"
+              className="rounded-full px-8 py-4 text-base font-bold shadow-lg transition hover:scale-105"
+              style={{ backgroundColor: C.coral, color: '#fff' }}>
+              预约演示
+            </a>
+            <a href="https://train.grasp.chat" target="_blank" rel="noopener noreferrer"
+              className="rounded-full border px-7 py-3.5 text-base font-semibold transition"
+              style={{ borderColor: C.line, backgroundColor: '#fff', color: C.text }}>
+              免费试用
             </a>
           </div>
         </div>
       </section>
 
-      {/* ════════ Footer ════════ */}
-      <footer id="about" className="border-t border-white/5 px-6 py-12">
+      {/* ════════ 十、页脚 ════════ */}
+      <footer id="about" className="border-t px-6 py-16" style={{ borderColor: C.line, backgroundColor: '#fff' }}>
         <div className="mx-auto max-w-6xl">
-          <div className="grid gap-8 md:grid-cols-4">
-            {/* 公司信息 */}
-            <div className="md:col-span-2">
+          <div className="grid gap-10 md:grid-cols-2 lg:grid-cols-5">
+            {/* 品牌 */}
+            <div className="lg:col-span-1">
               <div className="flex items-center gap-2.5">
-                <img src="/logo.png" alt="Graspit" className="h-8 w-8 rounded-lg" />
-                <span className="font-bold" style={{ color: C.accent }}>Graspit</span>
+                <img src="/logo.png" alt="Graspit" className="h-8 w-8 rounded-xl" />
+                <span className="text-lg font-bold tracking-tight" style={{ color: C.coral }}>Graspit</span>
               </div>
-              <p className="mt-4 max-w-xs text-sm leading-relaxed" style={{ color: C.textSub }}>
-                训练AI无法替代的人。 <br />以认知工程为方法，以主体性计算为内核。
+              <p className="mt-4 text-sm leading-relaxed" style={{ color: C.textSub }}>
+                实景训练，指标复盘，改善可证，专家辅助。
               </p>
             </div>
-
-            {/* 联系方式 */}
+            {/* 产品 */}
             <div>
-              <h4 className="text-sm font-semibold" style={{ color: C.textMain }}>联系方式</h4>
-              <ul className="mt-3 space-y-2 text-xs" style={{ color: C.textSub }}>
-                <li>咨询：bd@grasp.chat</li>
-                <li>
-                  免费试用：
-                  <a
-                    href="https://train.grasp.chat"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="transition hover:text-white"
-                    style={{ color: C.accent }}
-                  >
-                    train.grasp.chat
-                  </a>
-                </li>
+              <h4 className="text-sm font-semibold" style={{ color: C.text }}>产品</h4>
+              <ul className="mt-4 space-y-2.5 text-sm" style={{ color: C.textSub }}>
+                <li><a href="#loop" className="transition hover:text-[var(--color-coral)]">带练</a></li>
+                <li><a href="#tech" className="transition hover:text-[var(--color-coral)]">模拟推演</a></li>
               </ul>
             </div>
-
-            {/* 社交链接 */}
+            {/* 解决方案 */}
             <div>
-              <h4 className="text-sm font-semibold" style={{ color: C.textMain }}>关注我们</h4>
-              <div className="mt-3 flex gap-3">
-                {[
-                  { label: '公众号', img: '/qrcode_grasp.jpg' },
-                  { label: '小红书', img: '/xiaohongshu_qrcode.jpg' },
-                  { label: '抖音', img: '/douyin_qrcode.jpg' },
-                ].map((s) => (
-                  <div key={s.label}>
-                    <img src={s.img} alt={s.label} className="h-16 w-16 rounded-lg" />
-                    <span className="mt-1 block text-center text-xs" style={{ color: C.textDim }}>{s.label}</span>
+              <h4 className="text-sm font-semibold" style={{ color: C.text }}>解决方案</h4>
+              <ul className="mt-4 space-y-2.5 text-sm" style={{ color: C.textSub }}>
+                <li><a href="#pillars" className="transition hover:text-[var(--color-coral)]">线下门店</a></li>
+                <li><a href="#deliverables" className="transition hover:text-[var(--color-coral)]">企业单位</a></li>
+              </ul>
+            </div>
+            {/* 技术 */}
+            <div>
+              <h4 className="text-sm font-semibold" style={{ color: C.text }}>技术</h4>
+              <ul className="mt-4 space-y-2.5 text-sm" style={{ color: C.textSub }}>
+                <li><a href="#tech" className="transition hover:text-[var(--color-coral)]">认知计算</a></li>
+                <li><a href="#tech" className="transition hover:text-[var(--color-coral)]">情感计算</a></li>
+                <li><a href="#tech" className="transition hover:text-[var(--color-coral)]">主体性计算</a></li>
+                <li><a href="#tech" className="transition hover:text-[var(--color-coral)]">场景模拟</a></li>
+              </ul>
+            </div>
+            {/* 资源 + 关于我们 */}
+            <div>
+              <h4 className="text-sm font-semibold" style={{ color: C.text }}>资源</h4>
+              <ul className="mt-4 space-y-2.5 text-sm" style={{ color: C.textSub }}>
+                <li><a href="#deliverables" className="transition hover:text-[var(--color-coral)]">产品白皮书</a></li>
+                <li><a href="#tech" className="transition hover:text-[var(--color-coral)]">技术文档</a></li>
+                <li><a href="#about" className="transition hover:text-[var(--color-coral)]">社媒</a></li>
+              </ul>
+              <h4 className="mt-6 text-sm font-semibold" style={{ color: C.text }}>关于我们</h4>
+              <ul className="mt-4 space-y-2.5 text-sm" style={{ color: C.textSub }}>
+                <li><a href="mailto:bd@grasp.chat" className="transition hover:text-[var(--color-coral)]">联系我们</a></li>
+              </ul>
+            </div>
+          </div>
+          {/* 联系方式 */}
+          <div className="mt-12 border-t pt-8" style={{ borderColor: C.line }}>
+            <div className="flex flex-col items-center gap-6 md:flex-row md:items-center md:justify-between">
+              <div className="flex flex-col items-center gap-4 md:items-start">
+                <span className="text-sm font-medium" style={{ color: C.text }}>关注我们</span>
+                <div className="flex gap-5">
+                  <div className="flex flex-col items-center gap-1.5">
+                    <img src="/qrcode_grasp.jpg" alt="公众号" className="h-20 w-20 rounded-lg border border-[var(--color-line)]" />
+                    <span className="text-xs" style={{ color: C.textDim }}>公众号</span>
                   </div>
-                ))}
+                  <div className="flex flex-col items-center gap-1.5">
+                    <img src="/douyin_qrcode.jpg" alt="抖音" className="h-20 w-20 rounded-lg border border-[var(--color-line)]" />
+                    <span className="text-xs" style={{ color: C.textDim }}>抖音</span>
+                  </div>
+                  <div className="flex flex-col items-center gap-1.5">
+                    <img src="/xiaohongshu_qrcode.jpg" alt="小红书" className="h-20 w-20 rounded-lg border border-[var(--color-line)]" />
+                    <span className="text-xs" style={{ color: C.textDim }}>小红书</span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-col items-center gap-1 text-sm md:items-end">
+                <span style={{ color: C.textSub }}>联系我们：bd@grasp.chat</span>
               </div>
             </div>
           </div>
-
-          <div className="mt-10 flex flex-col items-center justify-between gap-4 border-t border-white/5 pt-6 text-xs md:flex-row" style={{ color: C.textDim }}>
-            <span>©2026 Graspit · AI驱动的能力训练平台</span>
-            <div className="flex gap-4">
-              <a href="https://train.grasp.chat/privacy" target="_blank" rel="noopener noreferrer" className="transition hover:text-white">隐私政策</a>
-              <a href="https://train.grasp.chat/agreement" target="_blank" rel="noopener noreferrer" className="transition hover:text-white">服务条款</a>
-              <span>京ICP备2025130300号-6</span>
-            </div>
+          {/* 底栏 */}
+          <div className="mt-8 border-t pt-6 flex flex-col items-center justify-between gap-3 text-xs sm:flex-row" style={{ borderColor: C.line, color: C.textDim }}>
+            <span>&copy; 2026 Graspit. All rights reserved.</span>
+            <span>京ICP备2025130300号-6</span>
           </div>
         </div>
       </footer>
-
-      {/* ════════ 移动端底部固定 CTA ════════ */}
-      <div
-        className="fixed bottom-0 left-0 right-0 z-40 border-t border-white/10 px-6 py-3 lg:hidden"
-        style={{ backgroundColor: 'rgba(15,20,32,0.95)' }}
-      >
-        <a
-          href="https://train.grasp.chat"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="block w-full rounded-full py-3 text-center text-base font-bold"
-          style={{ backgroundColor: C.accent, color: C.ink950 }}
-        >
-          立即试用
-        </a>
-      </div>
     </div>
   );
 }
