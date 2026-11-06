@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import { EventTypes, type CertRecord, type QuizResult, type Session, type TranscriptTurn, type VoiceBaseline } from '@grasp-mvp/core';
 import { bandFor, PersonaActor } from '@grasp-mvp/role-engine';
-import { judgeItem, runRuleChecks, scoreSession } from '@grasp-mvp/scoring-engine';
+import { analyzeReceptionFluency, judgeItem, runRuleChecks, scoreSession } from '@grasp-mvp/scoring-engine';
 import type { RouteContext } from '../ctx.js';
 import { mkEvent } from '../events.js';
 import { effectiveCountdownSeconds, loadRuntime, remainingSeconds, runTurn } from '../services/turn.js';
@@ -208,6 +208,7 @@ async function finalizeSession(session: Session, ctx: RouteContext, log?: Fastif
 
 export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): Promise<void> {
   const { store, gateway } = ctx;
+  const fluencyTestQuestions = new Map<string, ReturnType<typeof pickReceptionQuestions>>();
 
   // 创建对练会话（含 persona 开场白）
   app.post<{
@@ -699,6 +700,44 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
       betterScript: result.betterScript,
       userText: lastTrainee.text,
       prosody: lastTrainee.voiceFeatures?.prosody,
+    };
+  });
+
+  // 磕磕绊绊六题测试：从详解36题中不放回抽6题，问题只返回题干，不泄露参考答案
+  app.post<{ Params: { id: string } }>('/sessions/:id/fluency-test/start', async (request, reply) => {
+    const session = await store.getSession(request.params.id);
+    if (!session || session.userId !== request.userId) {
+      return reply.code(404).send({ error: '会话不存在' });
+    }
+    if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
+    if (session.transcript.some((turn) => turn.speaker === 'trainee')) {
+      return reply.code(409).send({ error: '请创建新的六题测试会话' });
+    }
+    const questions = pickReceptionQuestions(6);
+    fluencyTestQuestions.set(session.id, questions);
+    return { questions: questions.map((item) => ({ question: item.question })), total: questions.length };
+  });
+
+  // 六题结束后汇总全部回答的文本与录音特征，不调用 LLM，不生成完整复盘
+  app.post<{ Params: { id: string } }>('/sessions/:id/fluency-test-score', async (request, reply) => {
+    const session = await store.getSession(request.params.id);
+    if (!session || session.userId !== request.userId) {
+      return reply.code(404).send({ error: '会话不存在' });
+    }
+    const questions = fluencyTestQuestions.get(session.id);
+    if (!questions) return reply.code(400).send({ error: '请先开始六题测试' });
+    const answers = session.transcript.filter((turn) => turn.speaker === 'trainee').slice(0, 6);
+    if (answers.length < 6) return reply.code(400).send({ error: `还需完成 ${6 - answers.length} 题回答` });
+    const analysis = analyzeReceptionFluency({ ...session, transcript: answers });
+    fluencyTestQuestions.delete(session.id);
+    return {
+      ...analysis,
+      userText: answers[answers.length - 1].text,
+      answers: questions.map((item, index) => ({
+        question: item.question,
+        text: answers[index].text,
+        analysis: analysis.turns[index],
+      })),
     };
   });
 
