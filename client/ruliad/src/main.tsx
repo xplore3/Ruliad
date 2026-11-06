@@ -19,9 +19,13 @@ import Settings from './pages/Settings';
 import Agreement from './pages/Agreement';
 import Privacy from './pages/Privacy';
 import HumorTest from './pages/HumorTest';
+import InstitutionOnboarding from './pages/InstitutionOnboarding';
 
 function RequireAuth({ children }: { children: ReactNode }) {
-  if (!isTokenValid()) return <Navigate to="/login" replace />;
+  if (!isTokenValid()) {
+    const redirect = `${window.location.pathname}${window.location.search}`;
+    return <Navigate to={`/login?redirect=${encodeURIComponent(redirect)}`} replace />;
+  }
   return <>{children}</>;
 }
 
@@ -52,6 +56,14 @@ createRoot(document.getElementById('root')!).render(
         {/* 协议静态页：无需登录，登录页勾选框链接新窗口打开 */}
         <Route path="/agreement" element={<Agreement />} />
         <Route path="/privacy" element={<Privacy />} />
+        <Route
+          path="/institution-onboarding"
+          element={
+            <RequireAuth>
+              <InstitutionOnboarding />
+            </RequireAuth>
+          }
+        />
         <Route
           path="/humor-test"
           element={

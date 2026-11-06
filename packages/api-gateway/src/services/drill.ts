@@ -1,4 +1,4 @@
-import type { DrillScript, LLMGateway, PersonaRuntimeBundle, Scenario } from '@grasp-mvp/core';
+import type { DrillScript, LLMGateway, PersonaRuntimeBundle, ProductKB, Scenario } from '@grasp-mvp/core';
 import type { Store } from '@grasp-mvp/infra';
 
 /**
@@ -37,6 +37,17 @@ export function drillScriptPrompt(script: DrillScript): string {
   ].join('\n');
 }
 
+/** 机构定制资料：所有剧本场景都必须阅读，不能因剧本覆盖人设知识而丢失 */
+export function institutionKnowledgePrompt(kb?: ProductKB): string {
+  if (!kb || kb.entries.length === 0) return '';
+  const lines = kb.entries.map((entry) => `- ${entry.title}：${entry.content}`).join('\n');
+  return [
+    `【${kb.name || '培训机构定制资料库'}】`,
+    '以下机构资料适用于所有场景，生成客户回复、理解用户表达和分析销售话术时都必须参考；不得与资料中的机构事实、课程信息和业务规则冲突。',
+    lines,
+  ].join('\n');
+}
+
 /**
  * 双场制演练判定：剧本中声明了类似"10次应该有5次客户表现出不感兴趣"的概率原则时，
  * 不再随机——一场演练固定编排为两小场：第一场必定"不感兴趣"（最多 3 轮后旁白切场），
@@ -70,6 +81,7 @@ export function archetypePrompt(
       '【本场客户类型（必须严格遵守，优先级高于其他行为要求）】明确有兴趣、主动上门咨询的客户。',
       '客户对课程或服务有明确兴趣，愿意了解并配合咨询流程，不得使用地推第一小场的固定无兴趣反应。',
       '按咨询接待剧本自然提问、了解课程、预约或成交；不得无故离开或把潜在客户特有的地推拒绝流程带入本场景。',
+      '学员已在开场白中报出机构名称（例如“文杰围棋，有什么能帮您”）时，说明客户已经联系上文杰围棋，不得再询问“是文杰围棋吗”或重复确认机构、姓名；直接自然说明咨询需求，例如“您好，我想给孩子咨询一下围棋课程，他5岁能学吗？”。',
       '客户虽然有兴趣，但永远不会主动提出想试听课、主动约试听时间或要求安排试听；试听只能由销售主动提出并推动。客户可以回答销售提出的时间选择，但不能替销售发起邀约。',
     ].join('\n');
   }

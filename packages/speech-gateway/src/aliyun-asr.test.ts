@@ -10,6 +10,8 @@ vi.mock('ws', () => {
     readyState = 0;
     private handlers = new Map<string, (...args: any[]) => void>();
 
+    sent: any[] = [];
+
     constructor() {
       wsMock.instances.push(this);
     }
@@ -23,7 +25,9 @@ vi.mock('ws', () => {
       this.handlers.get(event)?.(...args);
     }
 
-    send() {}
+    send(data: unknown) {
+      this.sent.push(data);
+    }
 
     close() {
       this.readyState = 3;
@@ -65,5 +69,56 @@ describe('AliyunSpeechProvider ASR 收尾', () => {
     expect(partials).toEqual(['前半句。后半句']);
     expect(finals).toEqual(['前半句。', '前半句。后半句']);
     expect(finished).toBe(1);
+  });
+});
+
+describe('AliyunSpeechProvider 批量语音识别', () => {
+  it('长录音按100毫秒音频帧分块发送', async () => {
+    wsMock.instances.length = 0;
+    const provider = new AliyunSpeechProvider({ apiKey: 'test', asrModel: 'paraformer-realtime-v2', ttsModel: 'cosyvoice-v2', ttsVoice: 'longxiaochun_v2' });
+    const pending = provider.transcribe(Buffer.alloc(7000), 'pcm');
+    const socket = wsMock.instances[0];
+    socket.readyState = 1;
+    socket.emit('open');
+    message(socket, 'task-started');
+
+    const audioFrames = socket.sent.filter((data: unknown) => Buffer.isBuffer(data));
+    expect(audioFrames.map((frame: Buffer) => frame.length)).toEqual([3200, 3200, 600]);
+
+    message(socket, 'result-generated', { sentence: { text: '完整回答', end_time: 100 } });
+    message(socket, 'task-finished');
+    await expect(pending).resolves.toBe('完整回答');
+  });
+
+  it('识别结束事件一直不返回时超时退出', async () => {
+    vi.useFakeTimers();
+    try {
+      wsMock.instances.length = 0;
+      const provider = new AliyunSpeechProvider({ apiKey: 'test', asrModel: 'paraformer-realtime-v2', ttsModel: 'cosyvoice-v2', ttsVoice: 'longxiaochun_v2' });
+      const pending = provider.transcribe(Buffer.alloc(3200), 'pcm');
+      const socket = wsMock.instances[0];
+      socket.readyState = 1;
+      socket.emit('open');
+      message(socket, 'task-started');
+
+      const rejection = expect(pending).rejects.toThrow('ASR task-finished 超时');
+      await vi.advanceTimersByTimeAsync(120_000);
+      await rejection;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('任务完成前断连立即返回错误', async () => {
+    wsMock.instances.length = 0;
+    const provider = new AliyunSpeechProvider({ apiKey: 'test', asrModel: 'paraformer-realtime-v2', ttsModel: 'cosyvoice-v2', ttsVoice: 'longxiaochun_v2' });
+    const pending = provider.transcribe(Buffer.alloc(3200), 'pcm');
+    const socket = wsMock.instances[0];
+    socket.readyState = 1;
+    socket.emit('open');
+    message(socket, 'task-started');
+    socket.emit('close');
+
+    await expect(pending).rejects.toThrow('ASR 连接在任务完成前关闭');
   });
 });

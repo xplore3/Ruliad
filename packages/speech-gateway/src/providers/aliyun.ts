@@ -27,7 +27,9 @@ export interface AliyunSpeechConfig {
 }
 
 const DEFAULT_URL = 'wss://dashscope.aliyuncs.com/api-ws/v1/inference';
+const ASR_CHUNK_BYTES = 3200;
 const TASK_START_TIMEOUT_MS = 10_000;
+const ASR_FINISH_TIMEOUT_MS = 120_000;
 const TTS_TIMEOUT_MS = 30_000;
 
 /**
@@ -122,7 +124,9 @@ export class AliyunSpeechProvider implements ASRProvider, TTSProvider {
           }
         },
       });
-      stream.write(audio);
+      for (let offset = 0; offset < audio.length; offset += ASR_CHUNK_BYTES) {
+        stream.write(audio.subarray(offset, offset + ASR_CHUNK_BYTES));
+      }
       stream.finish();
     });
   }
@@ -141,23 +145,45 @@ export class AliyunSpeechProvider implements ASRProvider, TTSProvider {
     const ws = this.connect();
     let started = false;
     let closed = false;
+    let completed = false;
+    let failed = false;
     let finishRequested = false;
     let finalEmitted = false;
     let finalText = '';
     let latestText = '';
     let emittedFinalText = '';
+    let finishTimer: ReturnType<typeof setTimeout> | null = null;
     const pendingChunks: Buffer[] = [];
 
+    const clearFinishTimer = () => {
+      if (finishTimer) clearTimeout(finishTimer);
+      finishTimer = null;
+    };
+    const fail = (err: Error) => {
+      if (closed || completed || failed) return;
+      failed = true;
+      clearTimeout(startTimer);
+      clearFinishTimer();
+      handlers.onError(err);
+    };
     const sendCmd = (action: string, payload: Record<string, unknown>) => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ header: { action, task_id: taskId, streaming: 'duplex' }, payload }));
       }
     };
-    const sendFinish = () => sendCmd('finish-task', { input: {} });
+    const sendFinish = () => {
+      sendCmd('finish-task', { input: {} });
+      if (!finishTimer) {
+        finishTimer = setTimeout(() => {
+          fail(new Error('ASR task-finished 超时'));
+          ws.close();
+        }, ASR_FINISH_TIMEOUT_MS);
+      }
+    };
 
     const startTimer = setTimeout(() => {
       if (!started) {
-        handlers.onError(new Error('ASR task-started 超时'));
+        fail(new Error('ASR task-started 超时'));
         ws.close();
       }
     }, TASK_START_TIMEOUT_MS);
@@ -204,6 +230,10 @@ export class AliyunSpeechProvider implements ASRProvider, TTSProvider {
           handlers.onFinal(finalText);
         }
       } else if (event === 'task-finished') {
+        if (closed || completed || failed) return;
+        completed = true;
+        clearTimeout(startTimer);
+        clearFinishTimer();
         // 收尾时补上尚未落句的阶段文本，避免最后一个半句在已有完整句时被丢掉
         if (finishRequested && (!finalEmitted || latestText !== emittedFinalText)) {
           finalEmitted = true;
@@ -213,20 +243,19 @@ export class AliyunSpeechProvider implements ASRProvider, TTSProvider {
         handlers.onFinished?.();
         ws.close();
       } else if (event === 'task-failed') {
-        clearTimeout(startTimer);
-        handlers.onError(
-          new Error(`ASR task-failed: ${evt.header?.error_code ?? ''} ${evt.header?.error_message ?? ''}`)
-        );
+        fail(new Error(`ASR task-failed: ${evt.header?.error_code ?? ''} ${evt.header?.error_message ?? ''}`));
         ws.close();
       }
     });
 
-    ws.on('error', (err) => {
-      clearTimeout(startTimer);
-      if (!closed) handlers.onError(err);
-    });
+    ws.on('error', (err) => fail(err));
     ws.on('close', () => {
       clearTimeout(startTimer);
+      clearFinishTimer();
+      if (!closed && !completed && !failed) {
+        failed = true;
+        handlers.onError(new Error('ASR 连接在任务完成前关闭'));
+      }
       closed = true;
     });
 
@@ -245,6 +274,7 @@ export class AliyunSpeechProvider implements ASRProvider, TTSProvider {
         if (closed) return;
         closed = true;
         clearTimeout(startTimer);
+        clearFinishTimer();
         try {
           ws.close();
         } catch {

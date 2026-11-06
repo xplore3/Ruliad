@@ -752,7 +752,7 @@ export function buildSeedData(): SeedData {
         personaConfigId: 'persona-chen',
         skillPointIds: ['sp-need', 'sp-value'],
         successCriteria: { passScore: 70 },
-        durationMinutes: 10,
+        durationMinutes: 25,
         difficulty: 2,
         coverageTopics: ['来电咨询承接', '需求挖掘', '询价比价应对'],
         personaTitle: '主动来电询价，同时在对比别家',

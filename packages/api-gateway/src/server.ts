@@ -38,6 +38,7 @@ import { pathsRoutes } from './routes/paths.js';
 import { eventsRoutes } from './routes/events.js';
 import { sandboxRoutes } from './routes/sandbox.js';
 import { abilityDetailRoutes } from './routes/ability-detail.js';
+import { institutionOnboardingRoutes } from './routes/institution-onboarding.js';
 
 const port = Number(process.env.API_PORT ?? '3060');
 const host = process.env.API_HOST ?? '0.0.0.0';
@@ -225,6 +226,7 @@ async function main() {
   await app.register((a) => sessionsRoutes(a, ctx), { prefix: '/api/v1' });
   await app.register((a) => voiceRoutes(a, ctx), { prefix: '/api/v1' });
   await app.register((a) => guidanceRoutes(a, ctx), { prefix: '/api/v1' });
+  await app.register((a) => institutionOnboardingRoutes(a, ctx), { prefix: '/api/v1' });
   await app.register((a) => voiceTicketRoutes(a, ctx), { prefix: '/api/v1' });
   await app.register((a) => videoRoutes(a, ctx), { prefix: '/api/v1' });
   await app.register((a) => reportsRoutes(a, ctx), { prefix: '/api/v1' });

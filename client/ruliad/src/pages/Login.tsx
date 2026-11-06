@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { login, loginByCode, sendSmsCode, savePreferences, apiError } from '../api';
 
 const SCENES = [
@@ -11,6 +11,9 @@ const SCENES = [
 
 export default function Login() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const requestedRedirect = searchParams.get('redirect');
+  const redirectTo = requestedRedirect?.startsWith('/') && !requestedRedirect.startsWith('//') ? requestedRedirect : '/home';
   const [authMode, setAuthMode] = useState<'code' | 'pwd'>('code');
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
