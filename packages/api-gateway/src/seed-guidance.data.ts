@@ -394,7 +394,7 @@ export const SCENARIO_GUIDANCES: ScenarioGuidance[] = [
       },
     ],
     defaultDifficulty: 1,
-    duration: { targetMinutes: 4, minTurns: 6, maxTurns: 24, countdownSeconds: 240 },
+    duration: { targetMinutes: 25, minTurns: 6, maxTurns: 24, countdownSeconds: 1500 },
     scoringFocus: ['接待礼仪', '需求承接', '预约锁定', '联系方式获取'],
   },
   // ══ 3. 现场成交（无示范模式） ══
