@@ -1,15 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
-import { EventTypes, type CertRecord, type QuizResult, type Session, type TranscriptTurn, type VoiceBaseline } from '@grasp-mvp/core';
+import { EventTypes, type CertRecord, type QuizResult, type Session, type TranscriptTurn } from '@grasp-mvp/core';
 import { bandFor, PersonaActor } from '@grasp-mvp/role-engine';
-import { analyzeReceptionFluency, judgeItem, runRuleChecks, scoreSession } from '@grasp-mvp/scoring-engine';
+import { analyzeReceptionFluency, judgeItem, runRuleChecks } from '@grasp-mvp/scoring-engine';
 import type { RouteContext } from '../ctx.js';
 import { mkEvent } from '../events.js';
 import { effectiveCountdownSeconds, loadRuntime, remainingSeconds, runTurn } from '../services/turn.js';
 import { decideOpening, initialCustomerArchetype, resolveDrillScript } from '../services/drill.js';
-import { pickReceptionQuestions } from '../services/reception-questions.js';
+import { createReceptionPlan, pickReceptionQuestions } from '../services/reception-questions.js';
+import { clearScoringCache, scoreSessionWithCache } from '../services/scoring.js';
 import { personaVoice } from './voice.js';
-import { readFramesAsDataUrls } from '../services/video-store.js';
 
 const REVIEW_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -25,7 +25,7 @@ const MIN_DIALOGUE_TURNS = 4;
  * 完成 2 轮对话（4 句，学员+客户，不含教练提示）前，跳过评分报告，会话标记为 abandoned。
  */
 async function finalizeSession(session: Session, ctx: RouteContext, log?: FastifyBaseLogger) {
-  const { store, gateway } = ctx;
+  const { store } = ctx;
   const startedAt = Date.now();
   log?.info({ sessionId: session.id, scenarioId: session.scenarioId, mode: session.mode }, '结束会话：开始');
 
@@ -85,33 +85,10 @@ async function finalizeSession(session: Session, ctx: RouteContext, log?: Fastif
   const completed: Session = { ...session, status: 'completed', endedAt };
   await store.updateSession(session.id, { status: 'completed', endedAt });
 
-  let report: Awaited<ReturnType<typeof scoreSession>>;
+  let report: Awaited<ReturnType<typeof scoreSessionWithCache>>;
   try {
-    const defs = await store.listScoreItemDefs(session.tenantId);
-    const skillPoints = await store.listSkillPoints(session.tenantId);
-    const skillPointNames = Object.fromEntries(skillPoints.map((sp) => [sp.id, sp.name]));
-    // 新手指引流程配置的重点评分维度（第5步）：有值时 judge 对这些维度从严
-    const guidance = await store.getScenarioGuidance(session.scenarioId).catch(() => undefined);
-    // 有录像关键帧时附带视频表现评审（无视觉模型/评审失败时自动跳过，不影响文字评分）
-    const framesStart = Date.now();
-    const videoFrames = completed.videoFrames?.length
-      ? await readFramesAsDataUrls(completed.id, completed.videoFrames.length)
-      : undefined;
-    log?.info(
-      { sessionId: session.id, scoreItems: defs.length, videoFrames: videoFrames?.length ?? 0, ms: Date.now() - framesStart },
-      '结束会话：评分前准备完成（评分标准定义 + 视频关键帧）'
-    );
-
-    const scoringStart = Date.now();
-    // 学员个人语音基线（preferences.voiceBaseline）：用于激情"音高/响度抬升"量化评分
-    const trainee = await store.getUser(session.userId);
-    const voiceBaseline = trainee?.preferences?.voiceBaseline as VoiceBaseline | undefined;
-    const institutionKB = scenario.category === '咨询接待' ? await store.getProductKB(session.tenantId) : undefined;
-    report = await scoreSession(completed, scenario, defs, gateway, { videoFrames, log, skillPointNames, scoringFocus: guidance?.scoringFocus, voiceBaseline, institutionKB });
-    log?.info(
-      { sessionId: session.id, reportId: report.id, totalScore: report.totalScore, passed: report.passed, ms: Date.now() - scoringStart },
-      '结束会话：评分完成'
-    );
+    report = await scoreSessionWithCache(ctx, completed, scenario, log);
+    log?.info({ sessionId: session.id, reportId: report.id, totalScore: report.totalScore, passed: report.passed }, '结束会话：评分完成');
   } catch (err) {
     // 评分异常：回滚会话为 active，允许重新 end 重试；
     // 否则会话停在 completed 但无报告，复盘页永久 404 且无法补救
@@ -119,6 +96,7 @@ async function finalizeSession(session: Session, ctx: RouteContext, log?: Fastif
     throw err;
   }
   await store.saveScoreReport(report);
+  clearScoringCache(session.id);
   log?.info({ sessionId: session.id, reportId: report.id }, '结束会话：评分报告已落库');
 
   // 场景任务：最好成绩 / 通过状态 / 间隔复训
@@ -206,6 +184,33 @@ async function finalizeSession(session: Session, ctx: RouteContext, log?: Fastif
   return { sessionId: session.id, report, cert };
 }
 
+type FinalizationResult = Awaited<ReturnType<typeof finalizeSession>>;
+const finalizationJobs = new Map<string, Promise<FinalizationResult>>();
+const finalizationErrors = new Map<string, string>();
+
+export function getFinalizationError(sessionId: string): string | undefined {
+  return finalizationErrors.get(sessionId);
+}
+
+export function ensureSessionFinalization(
+  session: Session,
+  ctx: RouteContext,
+  log?: FastifyBaseLogger
+): Promise<FinalizationResult> {
+  const current = finalizationJobs.get(session.id);
+  if (current) return current;
+  finalizationErrors.delete(session.id);
+  const job = finalizeSession(session, ctx, log)
+    .catch((err) => {
+      finalizationErrors.set(session.id, err instanceof Error ? err.message : '评分生成失败');
+      throw err;
+    })
+    .finally(() => finalizationJobs.delete(session.id));
+  finalizationJobs.set(session.id, job);
+  void job.catch(() => undefined);
+  return job;
+}
+
 export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): Promise<void> {
   const { store, gateway } = ctx;
   const fluencyTestQuestions = new Map<string, ReturnType<typeof pickReceptionQuestions>>();
@@ -281,8 +286,10 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
           ? initialCustomerArchetype(drillScriptForRoll.content, scenario.category)
           : undefined;
 
-      const receptionQuestions = scenario.category === '咨询接待' ? pickReceptionQuestions() : undefined;
-      const runtime = await loadRuntime(ctx, scenario, undefined, customerArchetype, receptionQuestions);
+      const receptionPlan = scenario.category === '咨询接待' ? createReceptionPlan() : undefined;
+      const receptionQuestions = receptionPlan?.questions;
+      const receptionTrialDisposition = receptionPlan?.receptionTrialDisposition;
+      const runtime = await loadRuntime(ctx, scenario, undefined, customerArchetype, receptionQuestions, receptionTrialDisposition);
       if (!runtime) return reply.code(500).send({ error: '场景对应的 persona 配置缺失' });
       const { personaConfig, bundle, drillScript } = runtime;
 
@@ -328,6 +335,7 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
           : [],
         hintsUsed: 0,
         receptionQuestions,
+        receptionTrialDisposition,
         prevSessionId: prevCompleted?.id,
         examWindowId: mode === 'exam' ? examWindowId : undefined,
         coachIntensity,
@@ -455,7 +463,7 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
       if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
       const scenario = await store.getScenario(session.scenarioId);
       if (!scenario) return reply.code(404).send({ error: '场景已被删除' });
-      const runtime = await loadRuntime(ctx, scenario, session.difficulty, session.customerArchetype, session.receptionQuestions);
+      const runtime = await loadRuntime(ctx, scenario, session.difficulty, session.customerArchetype, session.receptionQuestions, session.receptionTrialDisposition);
       if (!runtime) return reply.code(500).send({ error: '场景对应的 persona 配置缺失' });
       const { personaConfig } = runtime;
 
@@ -672,8 +680,7 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
         : undefined;
       const maxTabSwitches = window?.proctoring?.maxTabSwitches;
       if (maxTabSwitches !== undefined && count >= maxTabSwitches) {
-        const result = await finalizeSession(session, ctx, request.log);
-        if (!result) return reply.code(500).send({ error: '场景缺失' });
+        await ensureSessionFinalization(session, ctx, request.log);
         return { ended: true, reason: 'tab_switch_limit' };
       }
       return { ended: false, count };
@@ -741,7 +748,7 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
     };
   });
 
-  // 结束会话并评分
+  // 结束会话后立即返回，评分在后台执行；复盘页轮询直至报告落库
   app.post<{ Params: { id: string } }>('/sessions/:id/end', async (request, reply) => {
     const session = await store.getSession(request.params.id);
     if (!session || session.userId !== request.userId) {
@@ -751,19 +758,9 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
 
     request.log.info(
       { sessionId: session.id, turns: session.transcript.length, traineeTurns: session.transcript.filter((t) => t.speaker === 'trainee').length },
-      'POST /sessions/:id/end：收到结束请求，开始评分（逐项 LLM 评分可能较慢）'
+      'POST /sessions/:id/end：收到结束请求，启动后台评分'
     );
-    try {
-      const result = await finalizeSession(session, ctx, request.log);
-      if (!result) return reply.code(500).send({ error: '场景缺失' });
-      return result;
-    } catch (err) {
-      // finalizeSession 内部已把会话回滚为 active，学员可重新 end 重试
-      request.log.error(
-        { sessionId: session.id, err },
-        'POST /sessions/:id/end：评分异常（会话已回滚为 active，可重试）'
-      );
-      return reply.code(500).send({ error: err instanceof Error ? err.message : '评分失败' });
-    }
+    ensureSessionFinalization(session, ctx, request.log);
+    return reply.code(202).send({ sessionId: session.id, scoring: true });
   });
 }

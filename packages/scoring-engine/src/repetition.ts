@@ -1,8 +1,11 @@
 import type { Session } from '@grasp-mvp/core';
 
 export const RECEPTION_REPETITION_DEDUCTION = 10;
-const REPEAT_THRESHOLD = 3;
+const REPEAT_THRESHOLD = 2;
+const REPEATED_GROUPS_THRESHOLD = 3;
+const MEANINGLESS_THRESHOLD = 12;
 const SIMILARITY_THRESHOLD = 0.78;
+const MEANINGLESS_CLAUSE_PATTERN = /^(?:嗯+|啊+|呃+|额+|这个|那个|就是|然后|其实)[\s，。！？；、]*$/;
 
 export interface RepeatedIdea {
   text: string;
@@ -18,6 +21,7 @@ export interface ReceptionRepetitionAnalysis {
   affectedTurns: number;
   quoteTurnSeq: number;
   groups: RepeatedIdea[];
+  meaninglessCount: number;
 }
 
 interface Clause {
@@ -73,7 +77,7 @@ function repeatedIdeas(clauses: Clause[]): RepeatedIdea[] {
     const root = find(index);
     groups.set(root, [...(groups.get(root) ?? []), clause]);
   });
-  return [...groups.values()]
+  const repeated = [...groups.values()]
     .filter((group) => group.length >= REPEAT_THRESHOLD)
     .map((group) => ({
       text: group[0].text,
@@ -81,32 +85,52 @@ function repeatedIdeas(clauses: Clause[]): RepeatedIdea[] {
       turnSeqs: [...new Set(group.map((clause) => clause.seq))].sort((a, b) => a - b),
     }))
     .sort((a, b) => b.count - a.count);
+  const byTurns = new Map<string, RepeatedIdea>();
+  for (const group of repeated) {
+    const key = group.turnSeqs.join(',');
+    const existing = byTurns.get(key);
+    if (!existing || group.text.length > existing.text.length) byTurns.set(key, group);
+  }
+  return [...byTurns.values()];
 }
 
 export function analyzeReceptionRepetition(session: Session): ReceptionRepetitionAnalysis {
-  const clauses = session.transcript
-    .filter((turn) => turn.speaker === 'trainee')
+  const traineeTurns = session.transcript.filter((turn) => turn.speaker === 'trainee');
+  const clauses = traineeTurns
     .flatMap((turn) => turn.text
       .split(/[。！？!?；;，,\n]+/)
       .map((text) => ({ text: text.trim(), normalized: normalize(text), seq: turn.seq }))
       .filter((clause) => clause.text && clause.normalized.length >= 6)
     );
-  const groups = repeatedIdeas(clauses);
-  const triggered = groups.length > 0;
-  const affectedTurns = new Set(groups.flatMap((group) => group.turnSeqs)).size;
-  const evidence = groups.map((group) =>
-    `第${group.turnSeqs.join('、')}轮反复表达“${group.text}”共${group.count}次`
+  const meaningless = traineeTurns.flatMap((turn) => turn.text
+    .split(/[。！？!?；;，,\n]+/)
+    .map((text) => text.trim())
+    .filter((text) => MEANINGLESS_CLAUSE_PATTERN.test(text))
+    .map(() => turn.seq)
   );
+  const groups = repeatedIdeas(clauses);
+  const repeatedTriggered = groups.length >= REPEATED_GROUPS_THRESHOLD;
+  const meaninglessTriggered = meaningless.length >= MEANINGLESS_THRESHOLD && new Set(meaningless).size >= 2;
+  const triggered = repeatedTriggered || meaninglessTriggered;
+  const affectedTurns = new Set([
+    ...(repeatedTriggered ? groups.flatMap((group) => group.turnSeqs) : []),
+    ...(meaninglessTriggered ? meaningless : []),
+  ]).size;
+  const evidence = repeatedTriggered
+    ? groups.map((group) => `第${group.turnSeqs.join('、')}轮反复表达“${group.text}”共${group.count}次`)
+    : [];
+  if (meaninglessTriggered) evidence.push(`多轮累计出现没有实际信息的语气或填充表达共${meaningless.length}次`);
   const rationale = triggered
-    ? `${evidence.join('；')}。同一句话或同一意思反复出现已超出偶尔重复，商务沟通不够简洁，容易让客户厌烦，全局扣10分。`
-    : '未发现同一句话或同一意思反复出现3次及以上，简洁沟通项不扣分。';
+    ? `${evidence.join('；')}。重复表达的情况出现3次及以上（例如A说两遍、B说两遍、C说两遍），或无实际意义表达过多，商务沟通不够简洁，全局扣10分。`
+    : '未发现3组及以上重复表达（例如A说两遍、B说两遍、C说两遍），或过多没有实际意义的表达，简洁沟通项不扣分。';
   return {
     triggered,
     deduction: triggered ? RECEPTION_REPETITION_DEDUCTION : 0,
     rationale,
     evidence,
     affectedTurns,
-    quoteTurnSeq: groups[0]?.turnSeqs[0] ?? 0,
+    quoteTurnSeq: repeatedTriggered ? groups[0]?.turnSeqs[0] ?? 0 : meaningless[0] ?? 0,
     groups,
+    meaninglessCount: meaningless.length,
   };
 }

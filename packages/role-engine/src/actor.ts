@@ -83,6 +83,8 @@ const CLOSE_CONTROL_INSTRUCTION = [
 const CLOSE_MARKER = /\[\[?CLOSE\]\]?|【CLOSE】/i;
 /** 向孩子提问标记：剧情中客户转头问孩子时输出，由系统另行生成孩子回答 */
 const CHILD_MARKER = /\[\[?CHILD\]\]?|【CHILD】/i;
+/** 咨询接待固定题号标记：只记录实际提出的固定题，不进入转写或播报 */
+const RECEPTION_QUESTION_MARKER = /\[\[?Q:(\d{1,2})\]\]?/i;
 
 /** 向孩子提问的控制指令：客户问孩子的问题由孩子本人回答（系统生成），不由销售作答 */
 const CHILD_CONTROL_INSTRUCTION = [
@@ -116,17 +118,21 @@ export class PersonaActor {
     band: BehaviorBand,
     transcript: TranscriptTurn[],
     coachIntensity?: 'low' | 'medium' | 'high'
-  ): Promise<{ text: string; shouldClose: boolean; asksChild: boolean }> {
+  ): Promise<{ text: string; shouldClose: boolean; asksChild: boolean; questionIndex?: number }> {
     const messages = buildActorMessages(bundle, band, transcript, coachIntensity);
     messages[0] = { role: 'system', content: `${messages[0].content}\n\n${CLOSE_CONTROL_INSTRUCTION}\n${CHILD_CONTROL_INSTRUCTION}` };
     const result = await this.llm.chat(messages);
     const shouldClose = CLOSE_MARKER.test(result.content);
     const asksChild = CHILD_MARKER.test(result.content);
+    const questionMatch = result.content.match(RECEPTION_QUESTION_MARKER);
+    const parsedIndex = Number(questionMatch?.[1]);
+    const questionIndex = parsedIndex >= 1 && parsedIndex <= 10 ? parsedIndex : undefined;
     const text = result.content
       .replace(new RegExp(CLOSE_MARKER.source, 'gi'), '')
       .replace(new RegExp(CHILD_MARKER.source, 'gi'), '')
+      .replace(new RegExp(RECEPTION_QUESTION_MARKER.source, 'gi'), '')
       .trim();
-    return { text: text || result.content.trim(), shouldClose, asksChild };
+    return { text: text || result.content.trim(), shouldClose, asksChild, questionIndex };
   }
 }
 

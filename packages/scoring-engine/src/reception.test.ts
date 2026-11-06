@@ -81,6 +81,9 @@ it('对答得当逐题百分制评分并返回10题算术平均分', async () =>
   expect(result.rationale).toContain('第10题');
   expect(result.rationale).toContain('具体改进建议');
   expect(result.betterScript).toContain('第10题具体改进建议');
+  expect(result.improvementCandidates).toHaveLength(10);
+  expect(result.improvementCandidates?.[0].title).toBe('对答得当：第1题');
+  expect(result.improvementCandidates?.[0].suggestion).toBe('第1题具体改进建议');
   expect(prompts).toHaveLength(2);
   expect(prompts[0]).toContain('未提及试听当天报名优惠也扣50分');
   expect(prompts[0]).toContain('每周一次，每次90分钟');
@@ -134,4 +137,30 @@ it('主评审持续解析失败时采用副评审有效结果而非50分兜底',
   expect(result.rationale).not.toContain('回退50分');
   expect(result.rationale).not.toContain('解析失败，本题');
   expect(result.betterScript).toContain('第10题具体改进建议');
+});
+
+it('拒听场免试听时间题且不因未传达试听当天优惠扣分', async () => {
+  const prompts: string[] = [];
+  const direct = RECEPTION_QUESTION_POOL.find((item) => item.question === '不用试听，我们到时候看一下直接报名吧。')!;
+  const questions = [{ ...direct }, ...session.receptionQuestions!.slice(1)];
+  questions[7] = { question: '什么时候可以试听呀？', referenceAnswer: '安排试听时间', scoringGuide: '确定时间' };
+  const declinedSession: Session = {
+    ...session,
+    receptionQuestions: questions,
+    receptionTrialDisposition: 'decline',
+  };
+  const gateway: LLMGateway = {
+    forTask: () => new MockLLMProvider((messages) => {
+      prompts.push(messages.map((message) => message.content).join('\n'));
+      return evaluationsContent(scores);
+    }),
+  };
+
+  const result = await judgeItem(def, declinedSession, gateway, scenario);
+  expect(result.score).toBeCloseTo((scores.reduce((sum, value) => sum + value, 0) - scores[7]) / 9);
+  expect(result.levelLabel).toBe('9题平均分');
+  expect(result.rationale).toContain('什么时候可以试听呀？》：不适用，不计分');
+  expect(result.improvementCandidates).toHaveLength(9);
+  expect(prompts[0]).toContain('未提及试听当天报名优惠不得扣分');
+  expect(prompts[0]).toContain('不得因学员未确定试听时间');
 });

@@ -86,6 +86,8 @@ export interface ReceptionQuestion {
   scoringGuide?: string;
 }
 
+export type ReceptionTrialDisposition = 'accept' | 'decline';
+
 export interface Session {
   id: string;
   tenantId: string;
@@ -98,6 +100,10 @@ export interface Session {
   hintsUsed: number;
   /** 咨询接待本场固定抽取的10题及评分参考答案，创建后不再变化 */
   receptionQuestions?: ReceptionQuestion[];
+  /** 已实际提出的固定题数量（1～10）；开场自由问答不计入 */
+  receptionQuestionIndex?: number;
+  /** 抽中“不用试听直接报名”题时，本场家长对试听建议的固定反应（80%接受、20%拒绝） */
+  receptionTrialDisposition?: ReceptionTrialDisposition;
   /** 重练链：指向前次 session */
   prevSessionId?: string;
   examWindowId?: string;

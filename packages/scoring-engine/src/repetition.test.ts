@@ -25,33 +25,40 @@ function makeSession(texts: string[]): Session {
   };
 }
 
-it('同一句话偶尔出现两次不扣分', () => {
+it('A说两遍或三遍都只是一组重复，不扣分', () => {
   const result = analyzeReceptionRepetition(makeSession([
     '我们会先了解孩子的情况。',
     '我们会先了解孩子的情况。',
+    '我们会先了解孩子的情况。',
   ]));
+  expect(result.groups).toHaveLength(1);
   expect(result.deduction).toBe(0);
 });
 
-it('同一句话出现三次触发全局扣10分', () => {
+it('A和B各说两遍只有两组重复，不扣分', () => {
   const result = analyzeReceptionRepetition(makeSession([
     '我们会先了解孩子的情况。',
     '我们会先了解孩子的情况。',
-    '我们会先了解孩子的情况。',
+    '试听课会让孩子熟悉围棋规则。',
+    '试听课会让孩子熟悉围棋规则。',
   ]));
-  expect(result.deduction).toBe(10);
-  expect(result.groups[0].count).toBe(3);
-  expect(result.affectedTurns).toBe(3);
+  expect(result.groups).toHaveLength(2);
+  expect(result.deduction).toBe(0);
 });
 
-it('近义改写后反复表达同一意思也触发扣分', () => {
+it('A、B、C各说两遍即三组重复，触发全局扣10分', () => {
   const result = analyzeReceptionRepetition(makeSession([
     '我们会先了解孩子的兴趣和基础，再安排合适的课程。',
     '先了解孩子的兴趣与基础，然后安排合适的课程。',
-    '我们会先了解孩子兴趣及基础，再安排合适课程。',
+    '试听课会让孩子熟悉围棋规则。',
+    '试听会让孩子熟悉围棋规则。',
+    '缺课后可以按照机构政策安排补课。',
+    '缺课后可以按照机构政策安排补课。',
   ]));
   expect(result.deduction).toBe(10);
-  expect(result.groups[0].turnSeqs).toEqual([1, 2, 3]);
+  expect(result.groups).toHaveLength(3);
+  expect(result.groups.map((group) => group.turnSeqs)).toEqual([[1, 2], [3, 4], [5, 6]]);
+  expect(result.affectedTurns).toBe(6);
 });
 
 it('不同问题和不同意思不会因为都谈课程而误扣', () => {
@@ -63,8 +70,38 @@ it('不同问题和不同意思不会因为都谈课程而误扣', () => {
   expect(result.deduction).toBe(0);
 });
 
+it('至少12次且分布在3轮的无意义表达才触发简洁沟通扣分', () => {
+  const result = analyzeReceptionRepetition(makeSession([
+    '嗯，啊，呃，这个，我们会先了解孩子情况。',
+    '那个，就是，然后，其实，课程安排是这样的。',
+    '嗯，啊，呃，这个，我们会安排试听。',
+  ]));
+  expect(result.meaninglessCount).toBe(12);
+  expect(result.deduction).toBe(10);
+});
+
+it('少量语气词和包含实际信息的这个课程不扣分', () => {
+  const result = analyzeReceptionRepetition(makeSession([
+    '嗯，我们会先了解孩子情况。',
+    '这个课程会培养孩子兴趣。',
+    '其实这个问题需要结合孩子基础来看。',
+    '呃，我们会安排试听。',
+    '啊，欢迎家长过来。',
+    '嗯，到时候见。',
+  ]));
+  expect(result.meaninglessCount).toBe(4);
+  expect(result.deduction).toBe(0);
+});
+
 it('简洁沟通扣10分与语声语调扣40分分别累加', async () => {
-  const session = makeSession(Array(3).fill('这个，那个，这个课程对孩子很有帮助'));
+  const session = makeSession([
+    '嗯，啊，呃，这个课程对孩子很有帮助',
+    '嗯，啊，呃，这个课程对孩子很有帮助',
+    '嗯，啊，呃，试听可以了解老师',
+    '嗯，啊，呃，试听可以了解老师',
+    '嗯，啊，呃，缺课可以安排补课',
+    '嗯，啊，呃，缺课可以安排补课',
+  ]);
   const scenario: Scenario = {
     id: 'scenario-reception',
     tenantId: 'tenant-demo',

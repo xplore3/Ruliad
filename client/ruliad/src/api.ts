@@ -288,7 +288,7 @@ export async function submitQuizAnswer(sessionId: string, quizId: string, answer
 
 export async function endSession(sessionId: string) {
   const { data } = await api.post(`/sessions/${sessionId}/end`);
-  return data as { sessionId: string; skippedReport?: boolean };
+  return data as { sessionId: string; scoring?: boolean; skippedReport?: boolean };
 }
 
 /** AI 教练开场白；voice=true 时附带教练与 persona 开场白的 TTS 音频（base64 wav） */
@@ -315,8 +315,7 @@ export async function markLiveStart(sessionId: string) {
 
 export async function fetchReview(sessionId: string) {
   const { data } = await api.get(`/sessions/${sessionId}/review`);
-  // 报告就绪即触发本地通知（受设置页「报告生成通知」开关控制）
-  localNotify('练习报告已生成', '本次评分与反馈已就绪');
+  if (data.report) localNotify('练习报告已生成', '本次评分与反馈已就绪');
   return data as ReviewData;
 }
 

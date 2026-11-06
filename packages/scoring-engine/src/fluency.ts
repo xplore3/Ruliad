@@ -26,7 +26,8 @@ export interface ReceptionFluencyAnalysis {
   turns: FluencyTurnAnalysis[];
 }
 
-const FILLER_PATTERN = /(?<![\p{Script=Han}A-Za-z0-9])[嗯啊呃额]+(?![\p{Script=Han}A-Za-z0-9])|就是说|这个|那个|就是|然后|其实/gu;
+const INTERJECTION_FILLER_PATTERN = /(?<![\p{Script=Han}A-Za-z0-9])[嗯啊呃额]+(?![\p{Script=Han}A-Za-z0-9])|就是说/gu;
+const DISCOURSE_FILLER_PATTERN = /(?:^|[\s，。！？；、])(这个|那个|就是|然后|其实)(?=[\s，。！？；、]|$)/gu;
 const SYLLABLE_REPETITION_PATTERN = /([我你他这那有在是和就都也很太不没会能要该把跟让])\1/g;
 const WORD_REPETITION_PATTERN = /(这个|那个|就是|然后|我们|你们|可以|可能)\s*\1/g;
 const DISRUPTED_PAUSE_MS = 600;
@@ -36,7 +37,7 @@ function countMatches(text: string, pattern: RegExp): number {
 }
 
 function analyzeTurn(turn: TranscriptTurn): FluencyTurnAnalysis {
-  const fillerCount = countMatches(turn.text, FILLER_PATTERN);
+  const fillerCount = countMatches(turn.text, INTERJECTION_FILLER_PATTERN) + countMatches(turn.text, DISCOURSE_FILLER_PATTERN);
   const repetitionCount =
     countMatches(turn.text, SYLLABLE_REPETITION_PATTERN) + countMatches(turn.text, WORD_REPETITION_PATTERN);
   const prosody = turn.voiceFeatures?.prosody;
@@ -57,10 +58,10 @@ function analyzeTurn(turn: TranscriptTurn): FluencyTurnAnalysis {
   const averageVoicedSegmentMs = prosody?.rhythm.averageVoicedSegmentMs ?? 0;
   const shortUtterance = turn.text.replace(/\s/g, '').length <= 24;
   const severe =
-    fillerCount >= 3 ||
-    (fillerCount >= 2 && shortUtterance) ||
+    fillerCount >= 4 ||
+    (fillerCount >= 3 && shortUtterance) ||
     repetitionCount >= 2 ||
-    (fillerCount >= 1 && (repetitionCount >= 1 || disruptedPauses.length >= 2)) ||
+    (fillerCount >= 2 && (repetitionCount >= 1 || disruptedPauses.length >= 2)) ||
     (disruptedPauses.length >= 3 && (pauseRatio >= 0.18 || averageVoicedSegmentMs < 1000)) ||
     (disruptedPauses.length >= 2 && pauseRatio >= 0.35);
   const reasons: string[] = [];
@@ -92,7 +93,7 @@ export function analyzeReceptionFluency(session: Session): ReceptionFluencyAnaly
   const severeTurns = turns.filter((turn) => turn.severe);
   const fillerTurns = turns.filter((turn) => turn.fillerCount > 0).length;
   const repetitionTurns = turns.filter((turn) => turn.repetitionCount > 0).length;
-  const sustainedFillers = fillerCount >= 6 && fillerTurns >= 2;
+  const sustainedFillers = fillerCount >= 10 && fillerTurns >= 3;
   const sustainedRepetitions = repetitionCount >= 4 && repetitionTurns >= 2;
   const triggered = severeTurns.length > 0 || sustainedFillers || sustainedRepetitions;
   const evidence = severeTurns.map((turn) => `第${turn.seq}轮${turn.reasons.join('、')}`);
@@ -108,8 +109,8 @@ export function analyzeReceptionFluency(session: Session): ReceptionFluencyAnaly
     ...(sustainedRepetitions ? turns.filter((turn) => turn.repetitionCount > 0).map((turn) => turn.seq) : []),
   ]).size;
   const rationale = triggered
-    ? `${evidence.join('；')}。这些表现形成磕磕绊绊或含糊不清的沟通，容易让客户产生强烈反感，全局扣40分。`
-    : '未发现成串填充词、持续重复断句或频繁句中停顿，磕磕绊绊项不扣分。单个填充词、正常换气和句尾停顿不会触发扣分。';
+    ? `${evidence.join('；')}。这些表现已经明显影响表达连贯性，全局扣40分。`
+    : '未发现成串填充词、持续重复断句或频繁句中停顿，磕磕绊绊项不扣分。正常语气词、衔接润色、换气和句尾停顿不会触发扣分。';
   return {
     triggered,
     deduction: triggered ? RECEPTION_FLUENCY_DEDUCTION : 0,

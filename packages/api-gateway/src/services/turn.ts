@@ -4,6 +4,8 @@ import type { RouteContext } from '../ctx.js';
 import { mkEvent } from '../events.js';
 import { drillScriptPrompt, institutionKnowledgePrompt, archetypePrompt, resolveDrillScript, initialCustomerArchetype, FIRST_SCENE_MAX_MS, GIVE_UP_PATTERN, SCENE_TRANSITION_NARRATION } from './drill.js';
 import { receptionQuestionPrompt } from './reception-questions.js';
+import { receptionTrialFollowup } from './reception-followup.js';
+import { preScoreSession } from './scoring.js';
 
 /** 一致性校验重试仍失败时的兜底角色化文案 */
 const CONSISTENCY_FALLBACK = '这个我不太清楚，你接着说。';
@@ -66,7 +68,8 @@ export async function loadRuntime(
   scenario: Scenario,
   difficulty?: number,
   archetype?: 'uninterested' | 'interested',
-  receptionQuestions?: ReceptionQuestion[]
+  receptionQuestions?: ReceptionQuestion[],
+  receptionTrialDisposition?: Session['receptionTrialDisposition']
 ) {
   const personaConfig =
     (await ctx.store.getPersonaConfig(scenario.personaConfigId)) ?? fallbackPersona(scenario);
@@ -125,7 +128,7 @@ export async function loadRuntime(
     bundle.systemPrompt = `${bundle.systemPrompt}\n\n${institutionKnowledgePrompt(institutionKB)}`;
   }
   if (scenario.category === '咨询接待') {
-    bundle.systemPrompt = `${bundle.systemPrompt}\n\n${receptionQuestionPrompt(receptionQuestions)}`;
+    bundle.systemPrompt = `${bundle.systemPrompt}\n\n${receptionQuestionPrompt(receptionQuestions, receptionTrialDisposition)}`;
   }
   // 注入本场客户类型：地推按双场制执行；咨询接待固定为有兴趣客户（包括旧会话）
   const effectiveArchetype = scenario.category === '咨询接待' ? 'interested' : archetype;
@@ -321,7 +324,7 @@ export async function runTurn(
 
   // 结束时机：AI 判断（replyWithSignal 的 shouldClose）+ 倒计时到点自动结束；
   // MAX_LIVE_TURNS 仅作防止对话无限进行的极端兜底
-  const runtime = await loadRuntime(ctx, scenario, session.difficulty, session.customerArchetype, session.receptionQuestions);
+  const runtime = await loadRuntime(ctx, scenario, session.difficulty, session.customerArchetype, session.receptionQuestions, session.receptionTrialDisposition);
   if (!runtime) {
     console.error('[runTurn] persona 运行时加载失败, scenarioId=', scenario.id, 'personaConfigId=', scenario.personaConfigId);
     return null;
@@ -351,19 +354,26 @@ export async function runTurn(
   let replyText: string;
   let shouldClose = false;
   let asksChild = false;
+  let receptionQuestionIndex = session.receptionQuestionIndex;
   let warmupAudio: Buffer | undefined;
   let warmupFormat: string | undefined;
   const lastSceneCoachIndex = session.transcript
     .map((t) => t.speaker === 'coach' && t.text === SCENE_TRANSITION_NARRATION)
     .lastIndexOf(true);
   const isOpening = !session.transcript.slice(lastSceneCoachIndex + 1).some((t) => t.speaker === 'trainee');
-  const offPoint = scenario.category === '地推' && !isSystemGreeting && await shouldCustomerLeave(
+  const receptionFollowup = !isSystemGreeting && scenario.category === '咨询接待'
+    ? receptionTrialFollowup({ ...session, transcript: transcriptSoFar })
+    : undefined;
+  const offPoint = !receptionFollowup && scenario.category === '地推' && !isSystemGreeting && await shouldCustomerLeave(
     gateway.forTask('actor'),
     transcriptSoFar,
     drillScript?.content ?? bundle.systemPrompt,
     isOpening
   ).catch(() => false);
-  if (offPoint) {
+  if (receptionFollowup) {
+    replyText = receptionFollowup.text;
+    shouldClose = receptionFollowup.shouldClose;
+  } else if (offPoint) {
     // 开场不合格、明显跑题或持续无目的闲聊：潜在客户不再配合，强制结束
     replyText = '（客户看了看时间，打断销售）抱歉，我们还有事，先走了。';
     shouldClose = true;
@@ -376,6 +386,7 @@ export async function runTurn(
     replyText = reply.text;
     shouldClose = reply.shouldClose;
     asksChild = reply.asksChild;
+    receptionQuestionIndex = reply.questionIndex ?? receptionQuestionIndex;
 
     // 一致性校验分两层：
     // ① 明显关键词违例（AI 自曝/考核泄露）同步拦截并重生成一次——快，不额外调 LLM；
@@ -388,6 +399,7 @@ export async function runTurn(
         replyText = retry.text;
         shouldClose = retry.shouldClose;
         asksChild = retry.asksChild;
+        receptionQuestionIndex = retry.questionIndex ?? receptionQuestionIndex;
       } else {
         replyText = CONSISTENCY_FALLBACK;
         shouldClose = false;
@@ -404,6 +416,7 @@ export async function runTurn(
         replyText = retry.text;
         shouldClose = retry.shouldClose;
         asksChild = retry.asksChild;
+        receptionQuestionIndex = retry.questionIndex ?? receptionQuestionIndex;
       } else {
         replyText = CONSISTENCY_FALLBACK;
         shouldClose = false;
@@ -482,12 +495,15 @@ export async function runTurn(
 
   // 系统开场白：不保存到 transcript（仅作为接通问候播放），避免seq不连续
   if (!isSystemGreeting) {
+    const transcript = [...transcriptSoFar, personaTurn, ...(childTurn ? [childTurn] : []), ...(narratorTurn ? [narratorTurn] : [])];
     await store.updateSession(session.id, {
-      transcript: [...transcriptSoFar, personaTurn, ...(childTurn ? [childTurn] : []), ...(narratorTurn ? [narratorTurn] : [])],
+      transcript,
       emotionTrace,
+      receptionQuestionIndex,
       // 家长问孩子 → 激活孩子模式，并从销售第一次说服孩子起计算两轮机会
       ...(childTurn ? { childMode: true, childAttemptCount: 0 } : {}),
     });
+    preScoreSession(ctx, { ...session, transcript, emotionTrace, receptionQuestionIndex }, scenario);
   }
 
   void store.appendEvent(

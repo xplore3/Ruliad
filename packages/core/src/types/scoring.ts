@@ -92,12 +92,21 @@ export interface ScoreItemDef {
    * 如"总分100=激情60+语速20+音量20"），judge 按锚定直接给出总分
    */
   scoringMode?: 'levels' | 'score';
-  /** 独立扣分项：score 表示从最终总分扣减的分数，不参与加权平均或技能点得分 */
+  /** 信心指数调整项：score 为扣减参数，用于换算全局信心指数，不参与基础分加权平均 */
   deductionOnly?: boolean;
   /** 确定性定量计分规则（仅 score 模式）：配置后跳过 LLM 打分，按语音量化数据查表计分 */
   quantitativeRule?: QuantitativeRule;
   /** 定量评分使用的语音统计通道：缺省=对家长/客户的学员轮次；'child'=只统计对孩子说的轮次（与孩子说话的语气类标准） */
   voiceChannel?: 'child';
+}
+
+export interface ImprovementCandidate {
+  title: string;
+  /** 对最终分数的预估影响，数值越大越应优先改进 */
+  impact: number;
+  rationale: string;
+  suggestion: string;
+  quoteTurnSeq?: number;
 }
 
 /** 单个评分标准判定结果 */
@@ -122,9 +131,11 @@ export interface ScoreItemResult {
   /** 不一致项：复盘中标注"参考" */
   isReference: boolean;
   isObservation: boolean;
-  /** true 时 score 为最终总分扣减金额，而非该项百分制得分 */
+  /** true 时 score 为信心指数扣减参数，而非该项百分制得分 */
   isDeduction?: boolean;
   layer: 'company' | 'team' | 'personal';
+  /** 本评分项内可单独改进的问题，供报告只选择最高影响的一项 */
+  improvementCandidates?: ImprovementCandidate[];
 }
 
 /** 确定性规则层结果 */
@@ -164,6 +175,10 @@ export interface ScoreReport {
   id: string;
   sessionId: string;
   totalScore: number;
+  /** 忌讳调整前的加权基础分 */
+  baseScore?: number;
+  /** 全局信心指数（0.2～1）：总分 = 基础分 × 信心指数 */
+  confidenceIndex?: number;
   passed: boolean;
   /** 一票否决触发 */
   fatalViolation: boolean;
@@ -219,6 +234,8 @@ export interface ScoreReport {
   };
   /** 教练总结（LLM 生成，失败时回退模板文案） */
   summary?: string;
+  /** 对最终分数影响最大的单一改进目标与具体建议 */
+  improvementGoal?: ImprovementCandidate;
   /** 视频表现评审（有录像且配置视觉模型时产出） */
   videoReview?: VideoReview;
   /** 考题得分汇总 */

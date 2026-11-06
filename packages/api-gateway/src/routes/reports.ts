@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify';
+import { buildImprovementGoal, confidenceIndexOf, deductionPoints } from '@grasp-mvp/scoring-engine';
 import type { RouteContext } from '../ctx.js';
+import { ensureSessionFinalization, getFinalizationError } from './sessions.js';
 
 export async function reportsRoutes(app: FastifyInstance, ctx: RouteContext): Promise<void> {
   const { store } = ctx;
@@ -30,14 +32,36 @@ export async function reportsRoutes(app: FastifyInstance, ctx: RouteContext): Pr
 
     const report = await store.getScoreReportBySession(session.id);
     if (!report) {
-      // status 仍为 active 说明 /end 尚未调完（评分进行中）；
-      // status 已 completed 说明评分抛异常、报告未落库（见 /end 的 error 日志）
-      request.log.warn(
-        { sessionId: session.id, status: session.status, ms: Date.now() - startedAt },
-        'GET /sessions/:id/review：评分报告不存在'
+      const scoringError = getFinalizationError(session.id);
+      if (!scoringError) ensureSessionFinalization(session, ctx, request.log);
+      request.log.info(
+        { sessionId: session.id, status: session.status, scoring: !scoringError, ms: Date.now() - startedAt },
+        'GET /sessions/:id/review：评分尚未完成'
       );
-      return reply.code(404).send({ error: '评分报告不存在' });
+      return {
+        session,
+        report: null,
+        scoring: !scoringError,
+        scoringError: scoringError ?? null,
+        skipped: false,
+        scenario: null,
+        persona: null,
+        prevScore: null,
+      };
     }
+
+    const deduction = deductionPoints(report.items);
+    const reportWithGoal = {
+      ...report,
+      baseScore: report.baseScore ?? Math.min(100, report.totalScore + deduction),
+      confidenceIndex: report.confidenceIndex ?? confidenceIndexOf(report.items),
+      improvementGoal: report.improvementGoal ?? buildImprovementGoal(
+        report.items,
+        await store.listScoreItemDefs(session.tenantId),
+        report.violations,
+        report.baseScore ?? Math.min(100, report.totalScore + deduction)
+      ),
+    };
 
     const scenario = await store.getScenario(session.scenarioId);
     const personaConfig = scenario
@@ -56,7 +80,7 @@ export async function reportsRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     );
     return {
       session,
-      report,
+      report: reportWithGoal,
       scenario: scenario
         ? { id: scenario.id, name: scenario.name, passScore: scenario.successCriteria.passScore }
         : null,

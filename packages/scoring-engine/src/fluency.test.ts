@@ -82,8 +82,8 @@ it('频繁句中停顿且停顿占比较高触发扣分', () => {
   expect(result.disruptedPauseCount).toBe(3);
 });
 
-it('多轮持续使用填充词即使单轮未达阈值也扣分', () => {
-  const turns = [1, 2, 3].map((seq) => ({
+it('多轮高频使用填充词即使单轮未达阈值也扣分', () => {
+  const turns = [1, 2, 3, 4, 5].map((seq) => ({
     seq,
     speaker: 'trainee' as const,
     text: '嗯，啊，我们会先了解孩子的兴趣和基础，再安排适合的课程与学习节奏。',
@@ -91,8 +91,8 @@ it('多轮持续使用填充词即使单轮未达阈值也扣分', () => {
   }));
   const result = analyzeReceptionFluency(makeSession(turns));
   expect(result.deduction).toBe(40);
-  expect(result.fillerCount).toBe(6);
-  expect(result.affectedTurns).toBe(3);
+  expect(result.fillerCount).toBe(10);
+  expect(result.affectedTurns).toBe(5);
 });
 
 it('咨询接待忌讳项在LLM扣分之外只追加一次语声语调40分', async () => {
@@ -135,7 +135,7 @@ it('咨询接待忌讳项在LLM扣分之外只追加一次语声语调40分', as
 });
 
 
-it('六题测试汇总全部回答的持续填充词并逐题保留证据', () => {
+it('多轮少量语气词属于正常润色，不扣分', () => {
   const turns = Array.from({ length: 6 }, (_, index) => ({
     seq: index + 1,
     speaker: 'trainee' as const,
@@ -143,10 +143,10 @@ it('六题测试汇总全部回答的持续填充词并逐题保留证据', () =
     at: '2026-01-01T10:00:00Z',
   }));
   const result = analyzeReceptionFluency(makeSession(turns));
-  expect(result.deduction).toBe(40);
+  expect(result.deduction).toBe(0);
   expect(result.fillerCount).toBe(6);
   expect(result.turns).toHaveLength(6);
-  expect(result.affectedTurns).toBe(6);
+  expect(result.affectedTurns).toBe(0);
 });
 
 
@@ -158,10 +158,21 @@ it('这个那个就是等常见填充词成串出现时触发扣分', () => {
   expect(result.deduction).toBe(40);
 });
 
-it('正常表达中单个这个不触发扣分', () => {
+it('正常表达中的这个就是不误报为填充词', () => {
   const result = analyzeReceptionFluency(makeSession([
-    { seq: 1, speaker: 'trainee', text: '这个课程会先带孩子熟悉棋盘，再通过小游戏培养兴趣。', at: '2026-01-01T10:00:00Z' },
+    { seq: 1, speaker: 'trainee', text: '这个课程会先带孩子熟悉棋盘，其实这就是通过小游戏培养兴趣。', at: '2026-01-01T10:00:00Z' },
   ]));
-  expect(result.fillerCount).toBe(1);
+  expect(result.fillerCount).toBe(0);
+  expect(result.deduction).toBe(0);
+});
+
+it('最近演练中的正常衔接表达和单次口误不扣分', () => {
+  const result = analyzeReceptionFluency(makeSession([
+    { seq: 17, speaker: 'trainee', text: '实话实说啊，确实也有一些孩子坐不住的那我们的教学呢会以兴趣为导向，尽量让课堂的生动有趣。这样孩子如果看动画片呢可以做很久。所以呢其实如果说孩子确实有兴趣，那这个时间呢对他们来说可能就是一种快乐的享受，就在玩就能坐得住了。', at: '2026-01-01T10:00:00Z' },
+    { seq: 19, speaker: 'trainee', text: '那实话实说啊，就是通过一节两节的课呢，要看出孩子有没有天赋呢，确实比较困难。但是呢我们可以看出孩子有没有兴趣。呃，法国思想家蒙恬说兴趣是天赋的征兆嘛。孩子在这方面有兴趣的话呢，其实某种程度上就值得培养。因为很可能呢他能做这件事情获得成就感，也就可能说天赋就不错。', at: '2026-01-01T10:00:00Z' },
+    { seq: 27, speaker: 'trainee', text: '呃，可以是可以可以自己教。但是问题呢就是很多家长他也不是围棋专业的。我们培训机构呢就是会更有效率的让孩子提高哦，节约孩子的时间。', at: '2026-01-01T10:00:00Z' },
+  ]));
+  expect(result.fillerCount).toBe(2);
+  expect(result.repetitionCount).toBe(1);
   expect(result.deduction).toBe(0);
 });
