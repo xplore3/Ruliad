@@ -110,7 +110,8 @@ async function narrateQuantScore(
     `总分：${det.total}/100`,
     '对话记录：',
     transcriptLines,
-    '请只输出 JSON：{"rationale":"面向销售学员的判定理由，用自然培训语言说明表现，例如“开场有感染力，但整体语速偏快”“声音还可以更有力量”；可以引用各项得分和总分，禁止出现半音、分贝、dB、dBFS、Hz、F0、RMS、P90、标准差、动态范围、个人基线、音高、响度、抬升、声学、量化等专业术语或英文缩写","betterScript":"针对扣分块的更优话术示范，不超过60字；无扣分给空字符串"}',
+    '请只输出 JSON：{"rationale":"面向销售学员的判定理由，用自然培训语言说明表现，例如\n开场有感染力，但整体语速偏快\n声音还可以更有力量\n可以引用各项得分和总分，禁止出现半音、分贝、dB、dBFS、Hz、F0、RMS、P90、标准差、动态范围、个人基线、音高、响度、抬升、声学、量化等专业术语或英文缩写","betterScript":"针对扣分块的更优话术示范，不超过60字；无扣分给空字符串"}',
+    'rationale 中不同语义点请用换行符（\n）分隔，让每个语义段成为独立一条，不要把所有内容挤在一个段落里。',
   ].join('\n');
   try {
     const result = await gateway.forTask('judge').chat([{ role: 'user', content: prompt }], { jsonMode: true });
@@ -222,6 +223,7 @@ function buildJudgePrompt(
     def.scoringMode === 'score'
       ? '请只输出 JSON：{"score":0到100的整数总分,"dimensions":"各维度得分明细（仅限该评分标准自身定义的维度）","quote":"引用原文","quoteTurnSeq":数字,"rationale":"判定理由","betterScript":"更优话术示范"}'
       : '请只输出 JSON：{"levelKey":"档位key","quote":"引用原文","quoteTurnSeq":数字,"rationale":"判定理由","betterScript":"更优话术示范"}',
+    'rationale 中不同语义点请用换行符（\n）分隔，让每个语义段成为独立一条，不要把所有内容挤在一个段落里。',
     'betterScript 要求：针对该评分标准的扣分点，给一句学员当时可以直接说的中文话术示范，不超过 60 字；若判定为最高档（无扣分）则给空字符串。',
     '判定纪律（必须严格遵守，违反即判定无效）：',
     '1. 只依据本条评分标准（名称、行为锚定、档位/维度定义）打分，禁止把任何其他销售技巧、培训常识或通用话术规范（如共情、倾听、提问技巧等）作为扣分或加分依据——除非它们就是本条标准明文定义的内容。',

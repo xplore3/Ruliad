@@ -634,9 +634,9 @@ h2.bar::before { content: ''; width: 4px; height: 16px; border-radius: 2px; back
 .bar-inner.a { background: #F5A623; }
 .bar-inner.c { background: #FF6B5B; }
 .stage-note { font-size: 12.5px; color: #6B7280; grid-column: 1/-1; margin-top: -6px; display: flex; flex-direction: column; gap: 4px; flex-wrap: wrap; }
-.numbered-list { display: flex; flex-direction: column; gap: 2px; }
-.numbered-item { display: flex; gap: 6px; line-height: 1.6; }
-.num-dot { color: #FF6B5B; font-weight: 600; flex-shrink: 0; }
+.numbered-list { display: flex; flex-direction: column; gap: 6px; }
+.numbered-item { display: flex; gap: 6px; line-height: 1.8; }
+.num-dot { color: #FF6B5B; font-weight: 700; flex-shrink: 0; min-width: 18px; text-align: right; }
 .stage-note a { color: #FF6B5B; font-weight: 600; }
 .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
 .metric { padding: 16px 18px; }
