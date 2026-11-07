@@ -205,10 +205,11 @@ export async function authRoutes(app: FastifyInstance, ctx: RouteContext): Promi
       let user = await store.getUserByUsername(DEFAULT_TENANT, phone);
       const isNewUser = !user;
       if (!user) {
+        // 新用户注册后先占位 'default'，所属机构由系统管理员在「机构管理」中统一分配
         user = {
           id: randomUUID(),
           tenantId: DEFAULT_TENANT,
-          orgId: (await store.listOrganizations(DEFAULT_TENANT))[0]?.id ?? 'default',
+          orgId: 'default',
           name: name || `用户${phone.slice(-4)}`,
           role: 'trainee',
           username: phone,
@@ -252,8 +253,8 @@ export async function authRoutes(app: FastifyInstance, ctx: RouteContext): Promi
       const user: User = {
         id: randomUUID(),
         tenantId,
-        // 落到租户第一个组织（无组织时退化为 'default'，仅作占位）
-        orgId: (await store.listOrganizations(tenantId))[0]?.id ?? 'default',
+        // 新用户先占位 'default'，所属机构由系统管理员在「机构管理」中统一分配
+        orgId: 'default',
         name: name.trim(),
         role: 'trainee',
         username: username.trim(),
@@ -292,11 +293,16 @@ export async function authRoutes(app: FastifyInstance, ctx: RouteContext): Promi
     }
   );
 
-  // 当前用户（鉴权钩子已就绪 request.userId）
+  // 当前用户（鉴权钩子已就绪 request.userId）；额外附所属机构名，供【我的】页展示
   app.get('/auth/me', async (request, reply) => {
     const user = await store.getUser(request.userId);
     if (!user) return reply.code(404).send({ error: '用户不存在' });
-    return publicUser(user);
+    const [org] = (await store.listOrganizations(user.tenantId)).filter((o) => o.id === user.orgId);
+    return {
+      ...publicUser(user),
+      organizationName: org?.name ?? null,
+      organizationDescription: org?.description ?? null,
+    };
   });
 
   // 修改密码：校验旧密码后换新哈希。token 为无状态 JWT，无法即时吊销，

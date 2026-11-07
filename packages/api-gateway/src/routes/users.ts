@@ -1,11 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import type { Organization, Team, User, UserRole } from '@grasp-mvp/core';
+import type { ManagerType, Organization, Team, User, UserRole } from '@grasp-mvp/core';
 import { hashPassword } from '@grasp-mvp/infra';
 import type { RouteContext } from '../ctx.js';
 import { requireRoles } from '../auth.js';
 
 const ROLES: UserRole[] = ['trainee', 'supervisor', 'admin', 'executive', 'platform'];
+
+/** 管理者可选的管理者类型 */
+const MANAGER_TYPES: ManagerType[] = ['org_head', 'sales_head', 'training_head'];
 
 /** 批量导入的缺省初始密码（未逐项指定 password 时使用） */
 const DEFAULT_PASSWORD = '123456';
@@ -100,6 +103,72 @@ export async function usersRoutes(app: FastifyInstance, ctx: RouteContext): Prom
       }
       const users = await store.listUsers(request.tenantId, role);
       return users.map(({ passwordHash: _passwordHash, ...rest }) => rest);
+    }
+  );
+
+  /**
+   * 更新指定用户（admin 专属）：姓名 / 角色 / 管理者类型 / 所属机构 / 团队。
+   * 角色与管理者类型联动：设为练习者时清除 managerType，设为管理者且未指定类型时默认「机构负责人」。
+   */
+  app.patch<{ Params: { id: string }; Body: Partial<Pick<User, 'name' | 'role' | 'orgId' | 'teamId'>> & { managerType?: ManagerType | null } }>(
+    '/users/:id',
+    { preHandler: requireRoles('admin') },
+    async (request, reply) => {
+      const target = await store.getUser(request.params.id);
+      if (!target) return reply.code(404).send({ error: '用户不存在' });
+      if (target.tenantId !== request.tenantId) {
+        return reply.code(403).send({ error: '无权访问该用户' });
+      }
+
+      const { name, role, orgId, teamId, managerType } = request.body ?? {};
+
+      let nextRole = target.role;
+      if (role !== undefined) {
+        if (!ROLES.includes(role)) {
+          return reply.code(400).send({ error: `role 不合法: ${role}` });
+        }
+        nextRole = role;
+      }
+
+      let nextManagerType = target.managerType;
+      if (managerType !== undefined) {
+        if (managerType !== null && !MANAGER_TYPES.includes(managerType)) {
+          return reply.code(400).send({ error: `managerType 不合法: ${managerType}` });
+        }
+        // 练习者不允许持有管理者类型
+        if (nextRole === 'trainee' && managerType !== null) {
+          return reply.code(400).send({ error: '练习者角色不能设置管理者类型' });
+        }
+        nextManagerType = managerType ?? undefined;
+      }
+      // 角色切为练习者：清掉管理者类型；角色切为管理者且从未设置过：默认机构负责人
+      if (role !== undefined) {
+        if (role === 'trainee') nextManagerType = undefined;
+        else if (!nextManagerType) nextManagerType = 'org_head';
+      }
+
+      if (orgId !== undefined) {
+        const org = (await store.listOrganizations(request.tenantId)).find((o) => o.id === orgId);
+        if (!org) return reply.code(400).send({ error: '机构不存在' });
+      }
+      if (teamId !== undefined) {
+        const team = await store.getTeam(teamId);
+        if (!team || team.orgId !== (orgId ?? target.orgId)) {
+          return reply.code(400).send({ error: '团队不存在或不属于目标机构' });
+        }
+      }
+
+      const patched: User = {
+        ...target,
+        ...(name?.trim() ? { name: name.trim() } : {}),
+        role: nextRole,
+        managerType: nextManagerType,
+        ...(orgId !== undefined ? { orgId } : {}),
+        ...(teamId !== undefined ? { teamId } : {}),
+      };
+      await store.saveUser(patched);
+      const { passwordHash: _passwordHash, ...rest } = patched;
+      return { user: rest };
     }
   );
 

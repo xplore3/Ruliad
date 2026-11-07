@@ -16,6 +16,15 @@ import type {
   DrillScript,
   GoldenCase,
   ScoreItemDef,
+  OrganizationItem,
+  ManagerType,
+  KbEntry,
+  ManagementOverview,
+ManagementTeamResults,
+ManagementTeamAbility,
+ManagementMemberProfile,
+ManagementSessionDetail,
+ManagementKb,
 } from './types';
 
 const TOKEN_KEY = 'grasp-token';
@@ -686,6 +695,97 @@ export async function deleteAccount() {
   await api.delete('/users/me');
 }
 
+// ====== 机构 API ======
+
+/** 机构列表（含成员/团队规模） */
+export async function fetchOrganizations() {
+  const { data } = await api.get('/organizations');
+  return data as { organizations: OrganizationItem[] };
+}
+
+/** 新建机构（系统管理员）；返回新建机构 */
+export async function createOrganization(name: string, parentId?: string, description?: string) {
+  const { data } = await api.post(
+    '/organizations',
+    description ? { name, parentId, description } : parentId ? { name, parentId } : { name }
+  );
+  return data as { organization: OrganizationItem };
+}
+
+/** 更新机构（系统管理员）：名称 / 简介 / 上级机构 */
+export async function updateOrganization(
+  id: string,
+  patch: { name?: string; description?: string | null; parentId?: string | null }
+) {
+  const { data } = await api.put(`/organizations/${id}`, patch);
+  return data as { organization: OrganizationItem };
+}
+
+/** 用户列表（系统管理员专属，已剔除 passwordHash） */
+export async function fetchUsers() {
+  const { data } = await api.get('/users');
+  return data as User[];
+}
+
+/** 更新用户（系统管理员专属）：角色 / 管理者类型 / 所属机构 */
+export async function updateUser(
+  id: string,
+  patch: { role?: User['role']; managerType?: ManagerType | null; orgId?: string }
+) {
+  const { data } = await api.patch(`/users/${id}`, patch);
+  return data as { user: User };
+}
+
+// ====== 管理者后台 API ======
+
+/** 管理总览 */
+export async function fetchManagementOverview() {
+  const { data } = await api.get('/management/overview');
+  return data as ManagementOverview;
+}
+
+/** 团队成果 */
+export async function fetchManagementTeamResults() {
+  const { data } = await api.get('/management/team-results');
+  return data as ManagementTeamResults;
+}
+
+/** 团队能力分析 */
+export async function fetchManagementTeamAbility() {
+  const { data } = await api.get('/management/team-ability');
+  return data as ManagementTeamAbility;
+}
+
+/** 成员档案（团队能力分析下钻） */
+export async function fetchManagementMemberProfile(userId: string) {
+  const { data } = await api.get(`/management/team-ability/member/${userId}`);
+  return data as ManagementMemberProfile;
+}
+
+/** 成员单次练习详情：评分报告 + 录音回放条目（管理者下钻） */
+export async function fetchManagementSessionDetail(userId: string, sessionId: string) {
+  const { data } = await api.get(`/management/team-ability/member/${userId}/session/${sessionId}`);
+  return data as ManagementSessionDetail;
+}
+
+/** 知识库读取 */
+export async function fetchManagementKnowledgeBase() {
+  const { data } = await api.get('/management/knowledge-base');
+  return data as ManagementKb;
+}
+
+/** 知识库整体保存（name + 全量条目，自动递增版本） */
+export async function saveManagementKnowledgeBase(payload: { name: string; entries: Array<Partial<KbEntry>> }) {
+  const { data } = await api.put('/management/knowledge-base', payload);
+  return data as { success: boolean; version: number };
+}
+
+/** 知识库增量保存（按 id upsert；未传 id 视为新增） */
+export async function appendManagementKnowledgeBase(entries: Array<Partial<KbEntry>>) {
+  const { data } = await api.post('/management/knowledge-base', { entries });
+  return data as { added: number; updated: number; total: number; version: number };
+}
+
 // ====== 新手指引 API ======
 
 export type GuidanceVoiceRole = 'persona' | 'coach' | 'sales' | 'narrator' | 'child';
@@ -758,6 +858,77 @@ export async function ttsClip(sessionId: string, text: string, voiceRole: Guidan
     rate: soft ? Math.max(0.5, rate * 0.9) : rate,
   });
   return data as { audioBase64: string; audioFormat: string };
+}
+
+// ====== 录音管理 API（admin） ======
+
+export interface RecordingItem {
+  id: string;
+  sessionId: string;
+  userId: string;
+  userName: string;
+  scenarioId: string;
+  scenarioName: string;
+  mode: 'practice' | 'exam';
+  turnSeq: number;
+  durationSec: number;
+  fileSize: number;
+  createdAt: string;
+  /** 详情接口返回：音频文件是否还在磁盘上 */
+  fileExists?: boolean;
+}
+
+/** 会话分组：同一场练习会话的全部录音（组内按说话顺序 turnSeq 升序） */
+export interface RecordingGroup {
+  sessionId: string;
+  userId: string;
+  userName: string;
+  scenarioId: string;
+  scenarioName: string;
+  mode: 'practice' | 'exam';
+  /** 会话内录音条数 */
+  turnCount: number;
+  /** 会话内最早一条录音时间 */
+  startedAt: string;
+  /** 会话内最近一条录音时间 */
+  lastAt: string;
+  items: RecordingItem[];
+}
+
+export interface RecordingQuery {
+  userId?: string;
+  sessionId?: string;
+  scenarioId?: string;
+  mode?: 'practice' | 'exam';
+  /** 关键字搜索（用户名 / 用户ID / 场景名 / 场景ID / 会话ID） */
+  keyword?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export async function fetchRecordings(query: RecordingQuery = {}) {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(query)) {
+    if (v !== undefined && v !== '') params.set(k, String(v));
+  }
+  const { data } = await api.get(`/recordings?${params.toString()}`);
+  return data as {
+    groups: RecordingGroup[];
+    totalItems: number;
+    total: number;
+    offset: number;
+    limit: number;
+  };
+}
+
+export async function deleteRecording(id: string) {
+  await api.delete(`/recordings/${id}`);
+}
+
+/** 录音回放地址：token 经 query 传入（<audio> 标签无法带 Authorization header） */
+export function recordingAudioUrl(id: string): string {
+  const token = encodeURIComponent(getToken() ?? '');
+  return `/api/v1/recordings/${id}/audio?token=${token}`;
 }
 
 // ====== 语音 WebSocket =======

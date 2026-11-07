@@ -26,8 +26,8 @@ export async function examReportsForUsers(
   return out;
 }
 
-/** 需关注判定：连续 2 次考核未达标 或 7 天无任何会话（overview 与 members 共用） */
-async function attentionKind(
+/** 需关注判定：连续 2 次考核未达标 或 7 天无任何会话（supervisor 与团队能力管理共用） */
+export async function attentionKind(
   ctx: RouteContext,
   userId: string
 ): Promise<'consecutive_fail' | 'inactive' | null> {

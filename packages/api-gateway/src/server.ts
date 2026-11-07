@@ -32,6 +32,7 @@ import { supervisorRoutes } from './routes/supervisor.js';
 import { executiveRoutes } from './routes/executive.js';
 import { analyticsRoutes } from './routes/analytics.js';
 import { dataAssetsRoutes } from './routes/data-assets.js';
+import { recordingsRoutes, recordingAudioRoutes } from './routes/recordings.js';
 import { workshopRoutes } from './routes/workshop.js';
 import { libraryRoutes } from './routes/library.js';
 import { pathsRoutes } from './routes/paths.js';
@@ -39,6 +40,8 @@ import { eventsRoutes } from './routes/events.js';
 import { sandboxRoutes } from './routes/sandbox.js';
 import { abilityDetailRoutes } from './routes/ability-detail.js';
 import { institutionOnboardingRoutes } from './routes/institution-onboarding.js';
+import { organizationsRoutes } from './routes/organizations.js';
+import { managementRoutes } from './routes/management.js';
 
 const port = Number(process.env.API_PORT ?? '3060');
 const host = process.env.API_HOST ?? '0.0.0.0';
@@ -183,6 +186,8 @@ async function main() {
     }
     // 录像回放/关键帧 GET：<video>/<img> 标签无法带 Authorization header，token 经 query 传入，路由内校验
     if (request.method === 'GET' && /^\/api\/v1\/sessions\/[^/]+\/video(\/frames\/\d+)?$/.test(path)) return;
+    // 录音回放 GET：<audio> 标签无法带 Authorization header，token 经 query 传入，路由内校验（仅 admin/platform）
+    if (request.method === 'GET' && /^\/api\/v1\/recordings\/[^/]+\/audio$/.test(path)) return;
     const header = request.headers.authorization;
     const token = header?.startsWith('Bearer ') ? header.slice('Bearer '.length) : undefined;
     const payload = token ? verifyToken(token) : null;
@@ -222,6 +227,7 @@ async function main() {
 
   await app.register((a) => authRoutes(a, ctx), { prefix: '/api/v1' });
   await app.register((a) => usersRoutes(a, ctx), { prefix: '/api/v1' });
+  await app.register((a) => organizationsRoutes(a, ctx), { prefix: '/api/v1' });
   await app.register((a) => tasksRoutes(a, ctx), { prefix: '/api/v1' });
   await app.register((a) => sessionsRoutes(a, ctx), { prefix: '/api/v1' });
   await app.register((a) => voiceRoutes(a, ctx), { prefix: '/api/v1' });
@@ -268,13 +274,31 @@ async function main() {
     },
     { prefix: '/api/v1' }
   );
+  // 内容工坊 / 知识库：读对所有登录用户开放；写操作放宽给管理者（练习者只读）。
+  // 管理者三类负责人（机构/销售/培训）均需维护本机构知识库，故不再限定 admin/platform
   await app.register(
     (a) => {
-      a.addHook('preHandler', requireRoles('admin', 'platform'));
+      a.addHook('preHandler', async (req, reply) => {
+        if (req.method === 'GET') return;
+        if (req.userRole === 'trainee') {
+          return reply.code(403).send({ error: '无权访问' });
+        }
+      });
       return workshopRoutes(a, ctx);
     },
     { prefix: '/api/v1' }
   );
+  // 管理者后台：总览 / 团队成果 / 团队能力（路由内自校验角色，练习者访问返回 403）
+  await app.register((a) => managementRoutes(a, ctx), { prefix: '/api/v1' });
+  // 录音管理：列表/详情/删除限 admin/platform；音频回放路由挂在无角色守卫组（onRequest 放行 query token，路由内自校验）
+  await app.register(
+    (a) => {
+      a.addHook('preHandler', requireRoles('admin', 'platform'));
+      return recordingsRoutes(a, ctx);
+    },
+    { prefix: '/api/v1' }
+  );
+  await app.register((a) => recordingAudioRoutes(a, ctx), { prefix: '/api/v1' });
   await app.register(
     (a) => {
       // 资源库（考题/评分标准/评分回归案例）定义本身不敏感：GET 对全员开放（学员端场景详情要展示评估维度），

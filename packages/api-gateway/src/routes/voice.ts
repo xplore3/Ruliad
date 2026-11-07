@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import type { Session } from '@grasp-mvp/core';
 import type { ASRStream, TTSOptions } from '@grasp-mvp/speech-gateway';
 import type { RouteContext } from '../ctx.js';
 import { tokenFailReason, verifyToken } from '../auth.js';
@@ -110,6 +111,31 @@ export async function personaVoice(
   return profile;
 }
 
+/** 留存本轮上行录音：写 WAV 文件 + 录音记录入库；任何失败都不影响回合 */
+function saveTurnRecordingForSession(
+  ctx: RouteContext,
+  session: Session,
+  pcm: Buffer,
+  turnSeq: number,
+  log?: { warn(obj: object, msg: string): void },
+): void {
+  const meta = {
+    sessionId: session.id,
+    userId: session.userId,
+    tenantId: session.tenantId,
+    scenarioId: session.scenarioId,
+    mode: session.mode,
+    turnSeq,
+  };
+  const saved = saveTurnRecording(pcm, meta);
+  if (!saved) return;
+  void ctx.store
+    .createSessionRecording({ ...meta, ...saved, createdAt: new Date().toISOString() })
+    .catch((err) =>
+      log?.warn({ err, sessionId: session.id }, '录音记录入库失败（不影响回合）')
+    );
+}
+
 /**
  * 语音对练路由：
  * - POST /sessions/:id/voice-turn  一期批量：音频进 → ASR → runTurn → TTS → JSON（含 base64 音频）
@@ -150,7 +176,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
 
     // 声学特征提取：响度/起伏/音调变化/说话时长，随学员轮入库供评分量化判定（失败不影响回合）
     const pcm = wavToPcm(audio);
-    if (pcm) saveTurnRecording(session.id, pcm);
+    if (pcm) saveTurnRecordingForSession(ctx, session, pcm, session.transcript.length + 1, request.log);
     const voiceFeatures = pcm ? analyzePcm16(pcm) ?? undefined : undefined;
 
     const scenario = await store.getScenario(session.scenarioId);
@@ -233,7 +259,6 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
     const userText = (await speech.asr.transcribe(audio, format)).trim();
     if (!userText) return reply.code(422).send({ error: '未识别到有效语音' });
     const pcm = wavToPcm(audio);
-    if (pcm) saveTurnRecording(session.id, pcm);
     const voiceFeatures = pcm ? analyzePcm16(pcm) ?? undefined : undefined;
     const traineeTurn = {
       seq: session.transcript.length + 1,
@@ -242,6 +267,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
       at: new Date().toISOString(),
       ...(voiceFeatures ? { voiceFeatures } : {}),
     };
+    if (pcm) saveTurnRecordingForSession(ctx, session, pcm, traineeTurn.seq, request.log);
     await store.updateSession(session.id, { transcript: [...session.transcript, traineeTurn] });
     return { userText, answeredCount: answeredCount + 1, total: 6 };
   });
@@ -377,7 +403,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
           console.log(`[VoiceCall][trace] calling runTurn: sessionId=${sessionId} userText="${userText.slice(0, 40)}"`);
           // 声学特征提取（本轮上行 PCM）：失败不影响回合；原始录音留存供离线核查
           const uplink = audioChunks.length > 0 ? Buffer.concat(audioChunks) : undefined;
-          if (uplink) saveTurnRecording(sessionId, uplink);
+          if (uplink) saveTurnRecordingForSession(ctx, session, uplink, session.transcript.length + 1, req.log);
           const voiceFeatures = uplink ? analyzePcm16(uplink) ?? undefined : undefined;
           // 首句 TTS 预合成与 runTurn 内的语义一致性审查并行（warmup 只服务家长主应答轮）
           const warmupProfile = await personaVoice(store, scenario.id, scenario.personaConfigId, req.log);
@@ -928,7 +954,10 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
           if (!scenario) return fail('场景缺失');
 
           console.log(`[VoiceCall][trace] calling runTurn: sessionId=${sessionId} userText="${userText.slice(0, 40)}"`);
-          // 声学特征提取（本轮上行 PCM）：失败不影响回合
+          // 声学特征提取（本轮上行 PCM）：失败不影响回合；原始录音留存供 admin 回放核查
+          if (roundAudio.length > 0) {
+            saveTurnRecordingForSession(ctx, session, Buffer.concat(roundAudio), session.transcript.length + 1, req.log);
+          }
           const voiceFeatures = roundAudio.length > 0
             ? analyzePcm16(Buffer.concat(roundAudio)) ?? undefined
             : undefined;

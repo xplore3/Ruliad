@@ -1,5 +1,8 @@
 /** ===== 核心业务类型 ===== */
 
+/** 管理者类型：机构负责人 / 销售负责人 / 培训负责人 */
+export type ManagerType = 'org_head' | 'sales_head' | 'training_head';
+
 export interface User {
   id: string;
   tenantId: string;
@@ -8,6 +11,12 @@ export interface User {
   role: 'trainee' | 'admin' | 'supervisor' | 'executive' | 'platform';
   username: string;
   avatar?: string;
+  /** 管理者类型（仅管理者角色有值） */
+  managerType?: ManagerType;
+  /** /auth/me 附加的所属机构名 */
+  organizationName?: string | null;
+  /** /auth/me 附加的所属机构简介 */
+  organizationDescription?: string | null;
 }
 
 /** 场景类型：drill=实战训练（无剧本自由对练）；practical=实用场景（单点考核，有剧本） */
@@ -149,7 +158,7 @@ export interface ScoreReport {
   fatalViolation?: boolean;
   skillScores: { skillPointId: string; skillPointName?: string; score: number; maxScore?: number }[];
   items: ScoreItem[];
-  violations?: { ruleId: string; kind: string; detail: string; fatal: boolean }[];
+  violations?: { ruleId: string; kind: string; detail: string; fatal: boolean; turnSeq?: number }[];
   ruleStats: {
     fillerCounts: Record<string, number>;
     talkRatio?: number;
@@ -423,4 +432,179 @@ export interface ExamWindow {
   myStatus: 'not_started' | 'in_progress' | 'passed' | 'failed' | 'cooldown';
   myBestScore: number | null;
   nextRetakeAt: string | null;
+}
+
+/** ===== 机构与管理者后台 ===== */
+
+/** 机构列表条目（GET /organizations） */
+export interface OrganizationItem {
+  id: string;
+  tenantId: string;
+  name: string;
+  parentId?: string;
+  /** 机构简介（管理员维护，展示给成员） */
+  description?: string;
+  memberCount: number;
+  teamCount: number;
+}
+
+/** 知识库条目 */
+export interface KbEntry {
+  id: string;
+  kind: 'keypoint' | 'redline' | 'competitor' | 'faq';
+  title: string;
+  content: string;
+  frequency?: number;
+}
+
+/** 管理总览（GET /management/overview） */
+export interface ManagementOverview {
+  me: {
+    id: string;
+    name: string;
+    role: string;
+    managerType: ManagerType | null;
+    managerTypeLabel: string | null;
+  };
+  org: { id: string; name: string | null };
+  stats: {
+    members: number;
+    teams: number;
+    practiceCount: number;
+    examCount: number;
+    completedCount: number;
+    passRate: number | null;
+    avgScore: number | null;
+    certifiedMembers: number;
+  };
+  knowledgeBase: {
+    name: string | null;
+    version: number;
+    entryCount: number;
+    kindCounts: Record<string, number>;
+    effectiveAt: string | null;
+  };
+  attention: { userId: string; userName: string; reason: string }[];
+  recent: {
+    userId: string;
+    name: string;
+    practiceCount: number;
+    lastAt: string | null;
+    lastScore: number | null;
+  }[];
+}
+
+/** 团队成果（GET /management/team-results） */
+export interface ManagementTeamResults {
+  summary: {
+    memberCount: number;
+    examAttempts: number;
+    certifiedCount: number;
+    certRate: number | null;
+    avgScore: number | null;
+  };
+  members: {
+    userId: string;
+    name: string;
+    teamId: string | null;
+    teamName: string | null;
+    examCount: number;
+    passCount: number;
+    bestScore: number | null;
+    latestScore: number | null;
+    avgScore: number | null;
+    certified: boolean;
+    certs: { id: string; examWindowName: string | null; level: string | null; passed: boolean; totalScore: number; issuedAt: string }[];
+  }[];
+}
+
+/** 团队能力分析（GET /management/team-ability） */
+export interface ManagementTeamAbility {
+  skillPoints: { id: string; name: string }[];
+  heatmap: {
+    teamId: string;
+    teamName: string | null;
+    skillPointId: string;
+    skillPointName: string;
+    passRate: number;
+    avgScore: number;
+    sampleSize: number;
+  }[];
+  members: {
+    userId: string;
+    name: string;
+    teamId: string | null;
+    teamName: string | null;
+    attention: 'consecutive_fail' | 'inactive' | null;
+    latestTotalScore: number | null;
+    avgLevel: number | null;
+    skillDetails: {
+      skillPointId: string;
+      name: string;
+      level: number | null;
+      latestScore: number | null;
+      historyCount: number;
+    }[];
+  }[];
+  weakSkills: { skillPointId: string; skillPointName: string; avgScore: number; memberCount: number }[];
+  attention: { userId: string; userName: string; reason: string }[];
+}
+
+/** 成员档案（GET /management/team-ability/member/:userId） */
+export interface ManagementMemberProfile {
+  userId: string;
+  name: string;
+  timeline: {
+    sessionId: string;
+    at: string;
+    scenarioName: string;
+    mode: string;
+    totalScore: number | null;
+    passed: boolean | null;
+    /** 该场会话的录音回合数（0 = 纯文字对练，无录音） */
+    recTurns: number | null;
+    /** 该场录音总时长（秒） */
+    recDurationSec: number | null;
+  }[];
+  skillDetails: {
+    skillPointId: string;
+    name: string;
+    level: number | null;
+    history: { at: string; score: number; sessionId: string; mode: string }[];
+  }[];
+}
+
+/** 成员单次练习详情（GET /management/team-ability/member/:userId/session/:sessionId） */
+export interface ManagementSessionDetail {
+  session: {
+    id: string;
+    scenarioName: string;
+    mode: string;
+    status: string;
+    at: string;
+    durationSec: number | null;
+  };
+  report: ScoreReport | null;
+  prevScore: number | null;
+  recordings: {
+    id: string;
+    turnSeq: number;
+    durationSec: number;
+    fileSize: number;
+    createdAt: string;
+  }[];
+}
+
+/** 知识库（GET /management/knowledge-base） */
+export interface ManagementKb {
+  kb: {
+    id: string;
+    tenantId: string;
+    name: string;
+    version: number;
+    effectiveAt: string;
+    entries: KbEntry[];
+  } | null;
+  kindCounts: Record<string, number>;
+  entries: KbEntry[];
 }

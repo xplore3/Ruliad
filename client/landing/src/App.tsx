@@ -126,6 +126,31 @@ function IconArrows() {
   );
 }
 
+/* 技术底座 5 项技术 */
+const TECH_ITEMS = [
+  { name: '认知计算', nameEn: 'Cognitive Computing' },
+  { name: '情感计算', nameEn: 'Affective Computing' },
+  { name: '认知—情绪—行为建模', nameEn: 'Cognition–Emotion–Behavior Modeling' },
+  { name: '主体性计算', nameEn: 'Subjecthood Computing' },
+  { name: '模拟技术', nameEn: 'Scenario Modeling & Agent Simulation' },
+];
+
+function TechCard({ item, index }: { item: { name: string; nameEn: string }; index: number }) {
+  return (
+    <div
+      className="group flex w-full items-center gap-3 rounded-2xl border border-[var(--color-line)] px-6 py-4 transition hover:-translate-y-0.5 hover:shadow-[var(--shadow-card)] lg:w-[300px] lg:shrink-0"
+      style={{ backgroundColor: C.card }}>
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white" style={{ backgroundColor: index % 2 === 0 ? C.coral : C.green }}>
+        {index + 1}
+      </div>
+      <div>
+        <div className="text-sm font-bold" style={{ color: C.text }}>{item.name}</div>
+        <div className="text-[11px] tracking-wide" style={{ color: C.textDim }}>{item.nameEn}</div>
+      </div>
+    </div>
+  );
+}
+
 function IconCompass({ color = 'currentColor' }: { color?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className="h-8 w-8">
@@ -420,7 +445,7 @@ export default function App() {
       <section className="px-6 py-24" style={{ backgroundColor: '#fff' }}>
         <div className="mx-auto max-w-6xl">
           <SectionTitle
-            title="AI时代，销售能力建设需要新的训练机制"
+            title="AI时代，销售能力建设需要新的机制"
             subtitle="AI没有替代销售，而是让组织和个人的销售能力有更大提升空间、更快提升速度、更好用的提升工具。"
             id="ai-opportunity"
           />
@@ -511,26 +536,18 @@ export default function App() {
             title="技术底座"
             subtitle="以认知计算与模拟技术为底座，使训练场景可构建、训练对象可模拟、训练过程可解释、训练结果可验证。"
           />
-          <div className="mt-14 flex flex-wrap justify-center gap-4">
-            {[
-              { name: '认知计算', nameEn: 'Cognitive Computing' },
-              { name: '情感计算', nameEn: 'Affective Computing' },
-              { name: '认知—情绪—行为建模', nameEn: 'Cognition–Emotion–Behavior Modeling' },
-              { name: '主体性计算', nameEn: 'Subjecthood Computing' },
-              { name: '模拟技术', nameEn: 'Scenario Modeling & Agent Simulation' },
-            ].map((item, i) => (
-              <div key={i}
-                className="group flex items-center gap-3 rounded-2xl border border-[var(--color-line)] px-6 py-4 transition hover:-translate-y-0.5 hover:shadow-[var(--shadow-card)]"
-                style={{ backgroundColor: C.card }}>
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white" style={{ backgroundColor: i % 2 === 0 ? C.coral : C.green }}>
-                  {i + 1}
-                </div>
-                <div>
-                  <div className="text-sm font-bold" style={{ color: C.text }}>{item.name}</div>
-                  <div className="text-[11px] tracking-wide" style={{ color: C.textDim }}>{item.nameEn}</div>
-                </div>
-              </div>
-            ))}
+          {/* 第一行 2 个、第二行 3 个；移动端每行 1 个 */}
+          <div className="mt-14 flex flex-col items-center gap-4">
+            <div className="flex w-full flex-col items-center gap-4 lg:flex-row lg:items-stretch lg:justify-center">
+              {TECH_ITEMS.slice(0, 2).map((item, i) => (
+                <TechCard key={i} item={item} index={i} />
+              ))}
+            </div>
+            <div className="flex w-full flex-col items-center gap-4 lg:flex-row lg:items-stretch lg:justify-center">
+              {TECH_ITEMS.slice(2).map((item, i) => (
+                <TechCard key={i + 2} item={item} index={i + 2} />
+              ))}
+            </div>
           </div>
           <div className="mt-10 text-center">
             <a href="#/tech" className="inline-flex items-center gap-2 text-sm font-semibold transition hover:opacity-80" style={{ color: C.coral }}>

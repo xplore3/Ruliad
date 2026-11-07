@@ -56,6 +56,7 @@ interface ScenarioInfo {
 
 const AUTO_MIC_KEY = 'grasp-auto-mic';
 const PERSONA_FALLBACK_MS = 10000;
+const REVIEW_REDIRECT_MS = 10000;
 
 /** 示范播完后教练的询问 */
 const GUIDE_CHOICE_QUESTION = '想再听一个版本的示范，还是开始模拟练习？';
@@ -133,6 +134,7 @@ export default function Practice() {
   const [replyText, setReplyText] = useState('');
   const [wsReady, setWsReady] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [completionModalOpen, setCompletionModalOpen] = useState(false);
   const [autoMic, setAutoMic] = useState(() => localStorage.getItem(AUTO_MIC_KEY) !== '0');
 
   // ===== 新手指引状态 =====
@@ -1410,9 +1412,9 @@ export default function Practice() {
     playerRef.current?.stopAll();
     stopGuidanceMedia();
     setStatusBoth('evaluating');
-    // 先进入评分页；即使结束请求失败，复盘接口也会自动启动评分，不把用户留在练习页。
+    setCompletionModalOpen(true);
+    // 即使结束请求失败，复盘接口也会自动启动评分，不把用户留在练习页。
     void endSession(sessionId).catch(() => undefined);
-    navigate(`/review/${sessionId}`);
   };
 
   const handleStop = async () => {
@@ -1423,6 +1425,15 @@ export default function Practice() {
   useEffect(() => {
     if (status === 'time_up') void finishSession();
   }, [status]);
+
+  useEffect(() => {
+    if (!completionModalOpen || !sessionId) return;
+    const timer = setTimeout(
+      () => navigate(`/review/${sessionId}`, { replace: true }),
+      REVIEW_REDIRECT_MS
+    );
+    return () => clearTimeout(timer);
+  }, [completionModalOpen, navigate, sessionId]);
 
   const handleBack = () => {
     if (status !== 'ended' && status !== 'failed' && status !== 'evaluating') {
@@ -2030,6 +2041,31 @@ export default function Practice() {
             <div className="boot-meta">
               {persona ? `${persona.name}${persona.occupation ? ` · ${persona.occupation}` : ''}` : ''}
               {durationMinutes ? ` · 限时 ${durationMinutes} 分钟` : ''}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {completionModalOpen && (
+        <div className="fixed inset-0 z-[220] flex items-center justify-center bg-[#17191F]/40 px-5">
+          <div
+            className="flex min-h-[360px] w-full max-w-[460px] flex-col items-center justify-center rounded-[24px] border-2 border-[#F5EEEB] bg-white px-10 pt-12 pb-16 text-center shadow-[0_16px_48px_rgba(23,25,31,0.16)] sm:px-12"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="practice-completed-title"
+          >
+            <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-[#FFF0ED] text-coral">
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            </div>
+            <h2 id="practice-completed-title" className="mb-3 text-[22px] font-semibold">练习已结束</h2>
+            <p className="text-[14px] leading-7 text-text-secondary">
+              即将进入评分页面，评分结果生成后会自动展示
+            </p>
+            <div className="mt-8 flex items-center justify-center gap-2 text-[13px] text-text-tertiary" aria-live="polite">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-coral/25 border-t-coral" />
+              正在准备评分页，请稍候
             </div>
           </div>
         </div>

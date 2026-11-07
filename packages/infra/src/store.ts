@@ -27,6 +27,7 @@ import type {
   ScoreReport,
   Session,
   SessionMode,
+  SessionRecording,
   SkillPoint,
   Team,
   User,
@@ -52,6 +53,14 @@ export interface CertFilter {
   userId?: string;
   examWindowId?: string;
   tenantId?: string;
+}
+
+export interface RecordingFilter {
+  tenantId?: string;
+  userId?: string;
+  sessionId?: string;
+  scenarioId?: string;
+  mode?: SessionMode;
 }
 
 /** 种子数据（scripts/seed 使用） */
@@ -125,6 +134,12 @@ export interface Store {
   getSession(id: string): Promise<Session | undefined>;
   updateSession(id: string, patch: Partial<Session>): Promise<void>;
   listSessions(filter: SessionFilter): Promise<Session[]>;
+
+  // ---- 练习录音（admin 录音管理） ----
+  createSessionRecording(rec: SessionRecording): Promise<void>;
+  listSessionRecordings(filter: RecordingFilter): Promise<SessionRecording[]>;
+  getSessionRecording(id: string): Promise<SessionRecording | undefined>;
+  deleteSessionRecording(id: string): Promise<void>;
 
   // ---- 评分 ----
   saveScoreReport(report: ScoreReport): Promise<void>;

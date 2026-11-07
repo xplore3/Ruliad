@@ -28,13 +28,14 @@ import type {
   ScoreItemDef,
   ScoreReport,
   Session,
+  SessionRecording,
   SkillPoint,
   Team,
   User,
   UserRole,
   UserSkillState,
 } from '@grasp-mvp/core';
-import type { AppealFilter, CertFilter, SeedData, SessionFilter, Store } from './store.js';
+import type { AppealFilter, CertFilter, RecordingFilter, SeedData, SessionFilter, Store } from './store.js';
 
 /** 去掉 undefined 值（Prisma Json 字段不接受 undefined） */
 function sanitize<T>(obj: T): T {
@@ -150,6 +151,7 @@ export class PrismaStore implements Store {
   private goldenCases;
 private regressionRuns;
 private quizQuestions;
+private sessionRecordings;
 private domainEvents;
 
   constructor(prisma?: PrismaClient) {
@@ -184,6 +186,7 @@ private domainEvents;
     this.goldenCases = docTable<GoldenCase>(this.prisma.goldenCase, ['id', 'name']);
 this.regressionRuns = docTable<RegressionRun>(this.prisma.regressionRun, ['id', 'at', 'passed']);
 this.quizQuestions = docTable<QuizQuestion>(this.prisma.quizQuestion, ['id', 'tenantId', 'scenarioId', 'skillPointId', 'type']);
+this.sessionRecordings = docTable<SessionRecording>(this.prisma.sessionRecording, ['id', 'sessionId', 'tenantId', 'userId', 'scenarioId', 'mode', 'turnSeq', 'filePath', 'fileSize', 'durationSec', 'createdAt']);
 this.domainEvents = docTable<DomainEvent>(this.prisma.domainEvent, ['id', 'type', 'tenantId', 'sessionId', 'userId', 'at'], 'payload');
   }
 
@@ -323,6 +326,26 @@ this.domainEvents = docTable<DomainEvent>(this.prisma.domainEvent, ['id', 'type'
     if (filter.examWindowId) where.examWindowId = filter.examWindowId;
     if (filter.tenantId) where.tenantId = filter.tenantId;
     return this.sessions.list(where);
+  }
+
+  // ---- 练习录音（admin 录音管理） ----
+  createSessionRecording(rec: SessionRecording) {
+    return this.sessionRecordings.create(rec);
+  }
+  getSessionRecording(id: string) {
+    return this.sessionRecordings.get(id);
+  }
+  listSessionRecordings(filter: RecordingFilter) {
+    const where: Record<string, unknown> = {};
+    if (filter.tenantId) where.tenantId = filter.tenantId;
+    if (filter.userId) where.userId = filter.userId;
+    if (filter.sessionId) where.sessionId = filter.sessionId;
+    if (filter.scenarioId) where.scenarioId = filter.scenarioId;
+    if (filter.mode) where.mode = filter.mode;
+    return this.sessionRecordings.list(where);
+  }
+  deleteSessionRecording(id: string) {
+    return this.sessionRecordings.delete(id);
   }
 
   // ---- 评分 ----

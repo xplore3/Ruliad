@@ -52,6 +52,8 @@ pnpm install
   注：Prisma 不支持 SQLite 的 Json 列，`data`/`payload` 为 JSON 文本列（PrismaStore 内
   序列化）；如需改回 PostgreSQL，将 schema provider 改回 `postgresql`、`String` 载荷列改回
   `Json`、重建迁移并还原 PrismaStore 的 toJson/fromRow 即可。
+  本地开发改 schema 后用 `pnpm db:generate && pnpm db:migrate`；
+  线上部署用 `pnpm db:deploy`（或 `bash scripts/deploy-cloud.sh` 一键完成），不要漏掉迁移步骤。
 - **LLM**：在 `packages/api-gateway/.env` 配置 `LLM_PROVIDER`（可选 `deepseek` / `kimi` /
   `qwen` / `openai` / `zhipu` / `baichuan` / `agnes` / `custom`）+ 对应的
   `<PROVIDER>_API_KEY` / `<PROVIDER>_BASE_URL` / `<PROVIDER>_CHAT_MODEL`
@@ -78,12 +80,19 @@ pnpm install
 # 云端部署步骤
 cd /app && pnpm install && pnpm build
 
+# 数据库迁移（每次 schema 变更后必做；复用 API 的 DATABASE_URL，确保目标库一致）
+set -a; source packages/api-gateway/.env; set +a
+pnpm db:deploy
+
 # 方式一：直接启动（自动灌种 + 增量同步）
 pm2 startOrRestart packages/api-gateway/ecosystem.config.cjs
 
 # 方式二：先手动灌种再启动（适合初始化大量数据时）
 pnpm --filter @grasp-mvp/api-gateway seed
 pm2 startOrRestart packages/api-gateway/ecosystem.config.cjs
+
+# 也可以直接用一键脚本（等价于 install + build + 迁移 + 重启 API）
+bash scripts/deploy-cloud.sh
 
 # 前端部署
 pm2 startOrRestart client/landing/ecosystem.config.cjs       # 落地页

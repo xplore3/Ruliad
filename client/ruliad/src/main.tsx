@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import './index.css';
-import { isTokenValid } from './api';
+import { getStoredUser, isTokenValid } from './api';
 import Layout from './components/Layout';
 import Home from './pages/Home';
 import Profile from './pages/Profile';
@@ -20,11 +20,32 @@ import Agreement from './pages/Agreement';
 import Privacy from './pages/Privacy';
 import HumorTest from './pages/HumorTest';
 import InstitutionOnboarding from './pages/InstitutionOnboarding';
+import Recordings from './pages/Recordings';
+import PracticeRecords from './pages/PracticeRecords';
+import OrganizationManagement from './pages/OrganizationManagement';
+import Ability from './pages/Ability';
+import Management from './pages/Management';
+import ManagementOverview from './pages/management/Overview';
+import ManagementTeamResults from './pages/management/TeamResults';
+import ManagementTeamAbility from './pages/management/TeamAbility';
+import ManagementKnowledgeBase from './pages/management/KnowledgeBase';
+import ManagementMemberProfile from './pages/management/MemberProfile';
+import ManagementSessionDetail from './pages/management/SessionDetail';
+import RequireManager from './components/RequireManager';
 
 function RequireAuth({ children }: { children: ReactNode }) {
   if (!isTokenValid()) {
     const redirect = `${window.location.pathname}${window.location.search}`;
     return <Navigate to={`/login?redirect=${encodeURIComponent(redirect)}`} replace />;
+  }
+  return <>{children}</>;
+}
+
+/** 角色守卫：仅指定角色可访问，否则回首页（防止直接输 URL 绕过入口限制） */
+function RequireRole({ roles, children }: { roles: string[]; children: ReactNode }) {
+  const user = getStoredUser();
+  if (!user || !roles.includes(user.role)) {
+    return <Navigate to="/home" replace />;
   }
   return <>{children}</>;
 }
@@ -44,7 +65,42 @@ createRoot(document.getElementById('root')!).render(
           <Route path="/" element={<Navigate to="/home" replace />} />
           <Route path="/home" element={<Home />} />
           <Route path="/profile" element={<Profile />} />
+          <Route
+            path="/recordings"
+            element={
+              <RequireRole roles={['admin', 'platform']}>
+                <Recordings />
+              </RequireRole>
+            }
+          />
+          {/* 机构管理：仅系统管理员可进入（入口在【我的】页） */}
+          <Route
+            path="/admin/organizations"
+            element={
+              <RequireRole roles={['admin']}>
+                <OrganizationManagement />
+              </RequireRole>
+            }
+          />
           <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/practice-records" element={<PracticeRecords />} />
+          <Route path="/ability" element={<Ability />} />
+          {/* 团队能力管理：仅管理者角色可进入（入口在【我的】页） */}
+          <Route
+            path="/management"
+            element={
+              <RequireManager>
+                <Management />
+              </RequireManager>
+            }
+          >
+            <Route index element={<ManagementOverview />} />
+            <Route path="team-results" element={<ManagementTeamResults />} />
+            <Route path="team-ability" element={<ManagementTeamAbility />} />
+            <Route path="knowledge-base" element={<ManagementKnowledgeBase />} />
+            <Route path="member/:userId" element={<ManagementMemberProfile />} />
+            <Route path="member/:userId/session/:sessionId" element={<ManagementSessionDetail />} />
+          </Route>
           <Route path="/build" element={<Build />} />
           <Route path="/library" element={<Library />} />
           <Route path="/scenario/:id" element={<ScenarioDetail />} />
