@@ -88,6 +88,29 @@ export interface ReceptionQuestion {
 
 export type ReceptionTrialDisposition = 'accept' | 'decline';
 
+/**
+ * 练习录音：学员每轮上行语音留存（16kHz PCM16 mono → WAV），
+ * 供 admin 在「录音管理」页查看、回放与离线核查；文件存 recordings/ 目录，本表存元数据。
+ */
+export interface SessionRecording {
+  id: string;
+  sessionId: string;
+  tenantId: string;
+  /** 学员用户 id */
+  userId: string;
+  scenarioId: string;
+  mode: SessionMode;
+  /** 会话内回合序号（第几轮学员发言，从 1 起） */
+  turnSeq: number;
+  /** 文件相对路径（相对 recordings 根目录） */
+  filePath: string;
+  /** 文件大小（字节） */
+  fileSize: number;
+  /** 时长（秒） */
+  durationSec: number;
+  createdAt: string;
+}
+
 export interface Session {
   id: string;
   tenantId: string;

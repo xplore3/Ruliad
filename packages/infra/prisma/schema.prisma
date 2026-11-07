@@ -254,6 +254,27 @@ model Appeal {
   @@index([sessionId])
 }
 
+/// 练习录音：学员每轮上行语音（16kHz PCM16 mono → WAV）留存记录，供 admin 查看/回放/离线核查；
+/// 文件本体存 recordings/ 目录（filePath 为相对路径），本表存元数据（文档风格：索引列 + data JSON）
+model SessionRecording {
+id          String   @id @default(uuid())
+sessionId   String
+tenantId    String
+userId      String
+scenarioId  String
+mode        String // practice | exam
+turnSeq     Int // 会话内学员回合序号（从 1 起）
+filePath    String
+fileSize    Int
+durationSec Float
+createdAt   DateTime @default(now())
+data        String
+
+@@index([sessionId, turnSeq])
+@@index([tenantId, userId])
+@@index([scenarioId])
+}
+
 // ---------------- 考核认证 ----------------
 
 model ExamWindow {

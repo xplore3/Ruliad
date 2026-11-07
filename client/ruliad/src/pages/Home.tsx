@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchScenarios, fetchMySessions, fetchExamWindows, fetchPreferences, createSession, apiError, getStoredUser, fetchInstitutionOnboardingStatus } from '../api';
+import { fetchScenarios, fetchMySessions, fetchExamWindows, fetchPreferences, createSession, apiError, getStoredUser } from '../api';
 import type { MySessionRecord } from '../api';
 import type { ExamWindow, Scenario } from '../types';
 import { CATEGORY_RULES, categoryOf, matchCategory } from '../lib/categories';
@@ -133,20 +133,6 @@ export default function Home() {
   const [practicedOnly, setPracticedOnly] = useState(false);
   const [startingId, setStartingId] = useState<string | null>(null);
   const [startError, setStartError] = useState('');
-  const [onboardingCompleted, setOnboardingCompleted] = useState(false);
-  const onboardingCheckedRef = useRef(false);
-  const canManageInstitution = ['admin', 'platform'].includes(getStoredUser()?.role ?? '');
-
-  useEffect(() => {
-    if (onboardingCheckedRef.current) return;
-    onboardingCheckedRef.current = true;
-    void fetchInstitutionOnboardingStatus()
-      .then((status) => {
-        setOnboardingCompleted(status.completed);
-        if (canManageInstitution && !status.completed) navigate('/institution-onboarding');
-      })
-      .catch(() => undefined);
-  }, [navigate, canManageInstitution]);
 
   /** 实战训练卡片：从场景类型为「实战训练」的场景中匹配（优先按卡片类别，回退到该类型第一个） */
   const drillScenarios = useMemo(() => scenarios.filter((s) => s.sceneType === 'drill'), [scenarios]);
@@ -265,23 +251,6 @@ export default function Home() {
         </div>
       ) : (
         <>
-          {canManageInstitution && (
-            <div className="card train-card" style={{ marginBottom: 28 }} onClick={() => navigate('/institution-onboarding')}>
-              <div className="train-left">
-                <div className="train-icon"><IconConsult className="h-6 w-6" /></div>
-                <h3>{onboardingCompleted ? '修改初始化信息' : '初始化信息'}</h3>
-                <p className="desc">
-                  {onboardingCompleted
-                    ? '查看并修改已提交的机构问答，重新提交后应用于所有场景'
-                    : '通过 20 个问题建立培训机构定制资料库，供所有场景使用'}
-                </p>
-                <div className="train-meta">
-                  <span className="train-go">{onboardingCompleted ? '修改并重新提交 →' : '开始初始化 →'}</span>
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* 实战训练 */}
           <div className="sec-head">
             <h2 className="bar-title">实战训练</h2>

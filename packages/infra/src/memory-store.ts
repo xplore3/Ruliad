@@ -26,13 +26,14 @@ import type {
   ScoreItemDef,
   ScoreReport,
   Session,
+  SessionRecording,
   SkillPoint,
   Team,
   User,
   UserRole,
   UserSkillState,
 } from '@grasp-mvp/core';
-import type { AppealFilter, CertFilter, SeedData, SessionFilter, Store } from './store.js';
+import type { AppealFilter, CertFilter, RecordingFilter, SeedData, SessionFilter, Store } from './store.js';
 
 /**
  * 内存仓储：本地无 SQLite 数据库时的降级实现，同时用于单元/集成测试。
@@ -51,6 +52,7 @@ export class MemoryStore implements Store {
   private learningPaths = new Map<string, LearningPath>();
   private scenarioTasks = new Map<string, ScenarioTask>();
   private sessions = new Map<string, Session>();
+  private sessionRecordings = new Map<string, SessionRecording>();
   private scoreReports = new Map<string, ScoreReport>();
   private scoreItemDefs = new Map<string, ScoreItemDef>();
   private demoFaqs = new Map<string, DemoFaq>();
@@ -207,6 +209,27 @@ private events: DomainEvent[] = [];
         (!filter.examWindowId || s.examWindowId === filter.examWindowId) &&
         (!filter.tenantId || s.tenantId === filter.tenantId)
     );
+  }
+
+  // ---- 练习录音（admin 录音管理） ----
+  async createSessionRecording(rec: SessionRecording) {
+    this.sessionRecordings.set(rec.id, rec);
+  }
+  async getSessionRecording(id: string) {
+    return this.sessionRecordings.get(id);
+  }
+  async listSessionRecordings(filter: RecordingFilter) {
+    return [...this.sessionRecordings.values()].filter(
+      (r) =>
+        (!filter.tenantId || r.tenantId === filter.tenantId) &&
+        (!filter.userId || r.userId === filter.userId) &&
+        (!filter.sessionId || r.sessionId === filter.sessionId) &&
+        (!filter.scenarioId || r.scenarioId === filter.scenarioId) &&
+        (!filter.mode || r.mode === filter.mode)
+    );
+  }
+  async deleteSessionRecording(id: string) {
+    this.sessionRecordings.delete(id);
   }
 
   // ---- 评分 ----

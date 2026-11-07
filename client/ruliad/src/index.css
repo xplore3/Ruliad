@@ -157,6 +157,10 @@ body.no-tab .tabbar { display: none; }
 .menu a.active { color: var(--text); font-weight: 700; }
 .menu a.active::after { content: ""; position: absolute; left: 50%; bottom: -1px; transform: translateX(-50%); width: 16px; height: 3px; border-radius: 2px; background: var(--coral); }
 .topnav .me { display: flex; align-items: center; gap: 12px; }
+/* 顶部导航栏左侧：二级页面返回按钮 + Logo */
+.nav-left { display: flex; align-items: center; gap: 14px; }
+.nav-back-btn { width: 34px; height: 34px; border-radius: 50%; flex: none; display: flex; align-items: center; justify-content: center; background: #F7F7F8; color: #6B7280; border: none; cursor: pointer; transition: background .15s, color .15s; }
+.nav-back-btn:hover { background: #FFF0EE; color: #FF6B5B; }
 
 /* ===== 通用组件 ===== */
 .btn {
@@ -740,6 +744,31 @@ h2.bar::before { content: ''; width: 4px; height: 16px; border-radius: 2px; back
 .rec .rscore .unit { font-size: 11px; color: #6B7280; }
 .rec .rlink { margin-left: 14px; flex: none; font-size: 13px; color: #FF6B5B; font-weight: 600; white-space: nowrap; }
 
+/* 练习记录分页 */
+.pagination { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 10px; }
+.pg-btn { padding: 7px 14px; min-height: 34px; font-size: 13px; color: #1F2329; background: #fff; border: 1px solid #EBEBEF; border-radius: 999px; cursor: pointer; transition: all .15s; white-space: nowrap; }
+.pg-btn:hover:not(:disabled) { border-color: #FF6B5B; color: #FF6B5B; }
+.pg-btn:disabled { opacity: .4; cursor: not-allowed; }
+.pg-pages { display: flex; align-items: center; gap: 6px; }
+.pg-num { min-width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; padding: 0 8px; font-size: 13px; font-weight: 600; color: #6B7280; background: #fff; border: 1px solid #EBEBEF; border-radius: 999px; cursor: pointer; transition: all .15s; }
+.pg-num:hover { border-color: #FF6B5B; color: #FF6B5B; }
+.pg-num.on { background: #FF6B5B; border-color: #FF6B5B; color: #fff; }
+.pg-ellipsis { padding: 0 4px; font-size: 13px; color: #9CA3AF; user-select: none; }
+
+/* 录音管理：按练习会话分组，组内回合行按说话顺序排列 */
+.rec-group { padding: 14px 18px; }
+.rec-group-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.rec-group-head .avatar { width: 42px; height: 42px; font-size: 16px; flex: none; }
+.rec-group-head .rmain { flex: 1; min-width: 0; }
+.rec-group-head h3 { font-size: 15px; margin-bottom: 3px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rec-group-head .meta { font-size: 12.5px; color: #6B7280; }
+.rec-group-link { flex: none; margin-left: auto; white-space: nowrap; }
+.rec-turns { display: flex; flex-direction: column; gap: 8px; }
+.rec-turn { display: flex; align-items: center; gap: 12px; background: #F7F7F8; border-radius: 12px; padding: 8px 12px; }
+.rec-turn .turn-no { flex: none; font-size: 13px; font-weight: 600; white-space: nowrap; }
+.rec-turn .turn-meta { flex: 1; min-width: 0; font-size: 12px; color: #6B7280; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rec-turn audio { width: 320px; max-width: 45%; height: 32px; flex: none; }
+
 .empty { padding: 44px 24px; text-align: center; }
 .empty .ic { font-size: 56px; line-height: 1; margin-bottom: 14px; }
 .empty h3 { font-size: 16px; margin-bottom: 6px; }
@@ -764,10 +793,19 @@ h2.bar::before { content: ''; width: 4px; height: 16px; border-radius: 2px; back
   .filterbar .group { width: 100%; }
   .filterbar .group .chip { flex: 1; justify-content: center; }
   .filterbar select.input { flex: 1; }
-  .rec { padding: 14px; }
-  .rec .avatar { width: 42px; height: 42px; font-size: 16px; }
-  .rec .rscore b { font-size: 18px; }
-  .rec .rlink { margin-left: 8px; }
+.rec { padding: 14px; }
+.rec .avatar { width: 42px; height: 42px; font-size: 16px; }
+.rec .rscore b { font-size: 18px; }
+.rec .rlink { margin-left: 8px; }
+.pagination { gap: 6px; flex-wrap: wrap; }
+.pg-btn { padding: 6px 12px; }
+.pg-num { min-width: 30px; height: 30px; }
+.rec-group { padding: 12px; }
+.rec-group-link { margin-left: 0; width: 100%; justify-content: center; }
+.rec-turn { flex-wrap: wrap; gap: 8px; }
+.rec-turn .turn-meta { order: 3; width: 100%; }
+.rec-turn .btn { margin-left: auto; }
+.rec-turn audio { order: 4; width: 100%; max-width: none; }
 }
 
 /* ===== 设置页 ===== */

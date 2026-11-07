@@ -125,17 +125,6 @@ export default function ScenarioDetail() {
 
   return (
     <div className="px-4 py-4 pb-8">
-      {/* 顶部返回 */}
-      <button
-        onClick={() => navigate('/home')}
-        className="flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary mb-4 transition-colors"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <polyline points="15 18 9 12 15 6" />
-        </svg>
-        返回
-      </button>
-
       {/* 场景头部卡片 */}
       <div className="bg-dark-card rounded-2xl p-4 border border-white/5 mb-5">
         <div className="flex items-center gap-2 mb-3">

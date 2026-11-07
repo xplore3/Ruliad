@@ -1,4 +1,4 @@
-import { Outlet, NavLink, useLocation } from 'react-router-dom';
+import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { fetchGrowth } from '../api';
 
@@ -27,11 +27,17 @@ const TAB_ITEMS = [
   { path: '/profile', label: '我的', icon: ProfileTabIcon },
 ];
 
+/** 一级页面（主 Tab）路径；带顶部导航栏的其余均为二级页面，展示返回按钮 */
+const TAB_PATHS = ['/home', '/build', '/dashboard', '/profile'];
+
 const FULLSCREEN_PATHS = ['/practice', '/call', '/review', '/login'];
 
 export default function Layout() {
   const location = useLocation();
   const isFullscreen = FULLSCREEN_PATHS.some((p) => location.pathname.startsWith(p));
+  /** 二级页面（非主 Tab）：顶部导航栏左上角展示返回按钮（忽略路径尾部斜杠） */
+  const cleanPath = location.pathname.replace(/\/+$/, '') || '/';
+  const isSecondary = !TAB_PATHS.includes(cleanPath);
   /** 连续练习天数；null = 加载失败/加载中，不展示徽章 */
   const [streak, setStreak] = useState<number | null>(null);
 
@@ -64,7 +70,7 @@ export default function Layout() {
   return (
     <div className="layout-wrapper">
       {/* PC Top Navigation - matches prototype .topnav */}
-      {!isFullscreen && <TopBar streak={streak} />}
+      {!isFullscreen && <TopBar streak={streak} showBack={isSecondary} />}
 
       {/* Main content - matches prototype .wrap */}
       <main className="wrap" style={{ paddingTop: isFullscreen ? 0 : undefined }}>
@@ -93,15 +99,18 @@ export default function Layout() {
 }
 
 // ===== Top Bar (matches prototype .topnav) =====
-function TopBar({ streak }: { streak: number | null }) {
+function TopBar({ streak, showBack }: { streak: number | null; showBack: boolean }) {
   return (
     <nav className="topnav">
       <div className="inner">
-        {/* Logo */}
-        <NavLink to="/home" className="logo">
-          <span className="dot" />
-          Graspit
-        </NavLink>
+        {/* Logo（二级页面在左侧追加返回按钮，导航栏本身保留） */}
+        <div className="nav-left">
+          {showBack && <NavBackButton />}
+          <NavLink to="/home" className="logo">
+            <span className="dot" />
+            Graspit
+          </NavLink>
+        </div>
 
         {/* Menu */}
         <div className="menu">
@@ -130,6 +139,27 @@ function TopBar({ streak }: { streak: number | null }) {
         </div>
       </div>
     </nav>
+  );
+}
+
+/** 二级页面返回按钮：返回上一个访问过的页面，无历史记录（如直接打开链接）时回首页 */
+function NavBackButton() {
+  const navigate = useNavigate();
+  return (
+    <button
+      type="button"
+      className="nav-back-btn"
+      aria-label="返回"
+      title="返回"
+      onClick={() => {
+        if (window.history.length > 1) navigate(-1);
+        else navigate('/home');
+      }}
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="15 18 9 12 15 6" />
+      </svg>
+    </button>
   );
 }
 

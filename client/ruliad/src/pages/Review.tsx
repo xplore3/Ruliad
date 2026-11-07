@@ -102,7 +102,7 @@ export default function Review() {
     return (
       <div className="md:!pb-0">
         <div className="topbar">
-          <button className="back-btn" onClick={() => navigate(-1)} aria-label="返回">
+          <button className="back-btn" onClick={() => navigate('/home')} aria-label="返回">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
           </button>
           <span className="topbar-title">练习报告</span>
@@ -144,7 +144,7 @@ export default function Review() {
     return (
       <div className="md:!pb-0">
         <div className="topbar">
-          <button className="back-btn" onClick={() => navigate(-1)} aria-label="返回">
+          <button className="back-btn" onClick={() => navigate('/home')} aria-label="返回">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
           </button>
           <span className="topbar-title">练习报告</span>
@@ -257,7 +257,7 @@ export default function Review() {
     <div className="md:!pb-0">
       {/* 手机顶部栏 */}
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)} aria-label="返回">
+        <button className="back-btn" onClick={() => navigate('/home')} aria-label="返回">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
         </button>
         <span className="topbar-title">练习报告</span>
@@ -268,14 +268,8 @@ export default function Review() {
         <div className="card head-card">
           <div className="ring shrink-0">
             <svg width="130" height="130" viewBox="0 0 130 130">
-              <defs>
-                <linearGradient id="scoreGrad" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0%" stopColor="#FF6B5B" />
-                  <stop offset="100%" stopColor="#F5A623" />
-                </linearGradient>
-              </defs>
               <circle cx="65" cy="65" r="54" fill="none" stroke="#EBEBEF" strokeWidth="10" />
-              <circle cx="65" cy="65" r="54" fill="none" stroke="url(#scoreGrad)" strokeWidth="10"
+              <circle cx="65" cy="65" r="54" fill="none" stroke="#FF6B5B" strokeWidth="10"
                 strokeLinecap="round" strokeDasharray={`${(score / 100) * ringCircumference} ${ringCircumference}`} />
             </svg>
             <div className="val"><b>{score}</b><span>本次得分</span></div>
@@ -395,6 +389,7 @@ export default function Review() {
                 {creating ? '创建中…' : '再练一次'}
               </button>
             )}
+            <button className="btn btn-ghost btn-sm" onClick={() => navigate('/ability')}>能力进阶图</button>
             <button className="btn btn-ghost btn-sm" onClick={() => void handleShare()}>分享报告</button>
           </div>
         </div>
