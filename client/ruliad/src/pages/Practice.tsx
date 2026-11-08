@@ -528,13 +528,15 @@ export default function Practice() {
     }
   };
 
-  /** 进 live 入口：有指引配置旁白时先播第4步开场旁白，播完（或失败）再正式进场 */
+  /** 跳过全部指引和开场旁白，直接进入正式对练 */
   const skipGuidance = () => {
     stopGuidanceMedia();
     enterLive();
   };
 
+  /** 正常结束指引：有指引配置旁白时先播第4步开场旁白，播完（或失败）再正式进场 */
   const startLive = () => {
+    if (phaseRef.current === 'live') return;
     stopGuidanceMedia();
     const narration = isVoice ? guidanceRef.current?.liveIntro?.narration : undefined;
     if (sessionId && narration) {
@@ -928,7 +930,7 @@ export default function Practice() {
 
   // ===== 新手指引：示范对话 =====
   const beginGuide = async (version: number) => {
-    if (!sessionId) return;
+    if (!sessionId || phaseRef.current === 'live') return;
     stopGuidanceMedia();
     const token = demoTokenRef.current;
     setPhaseBoth('guide');
@@ -1124,6 +1126,7 @@ export default function Practice() {
     setErrorMsg('');
     try {
       const res = text ? await demoChoiceText(sessionId, text) : await demoChoice(sessionId, audio!);
+      if (phaseRef.current !== 'guide') return;
       if (!res.text) throw new Error('empty asr');
       setGuideText(`我：${res.text}`);
       setGuideHint('');

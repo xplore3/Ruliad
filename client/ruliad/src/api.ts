@@ -336,6 +336,7 @@ export interface MySessionRecord {
   status: string;
   totalScore: number | null;
   passed: boolean | null;
+  completionStatus?: 'completed' | 'incomplete';
   durationSec: number | null;
   at: string;
 }

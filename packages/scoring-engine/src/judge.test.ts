@@ -251,3 +251,235 @@ describe('judgeItem betterScript', () => {
     expect(result.betterScript).toBeUndefined();
   });
 });
+
+describe('地推礼貌礼仪的客户主动告别', () => {
+  const politenessDef: ScoreItemDef = {
+    ...def,
+    id: 'item-politeness',
+    name: '礼貌礼仪',
+    category: '地推',
+    judgePrompt: '购买后应致谢，需要学员回应的告别环节应礼貌收尾。',
+    levels: [
+      { key: 'excellent', label: '优秀', score: 100, description: '整体礼貌' },
+      { key: 'good', label: '良好', score: 75, description: '遗漏一次礼貌环节' },
+      { key: 'pass', label: '待提升', score: 50, description: '整体礼貌不足' },
+      { key: 'fail', label: '不合格', score: 0, description: '明确不尊重客户' },
+    ],
+  };
+  const groundScenario = {
+    id: 'scenario-ground',
+    tenantId: 'tenant-demo',
+    name: '地推销售',
+    personaConfigId: 'persona-parent',
+    skillPointIds: ['sp-compliance'],
+    successCriteria: { passScore: 70 },
+    durationMinutes: 25,
+    difficulty: 1,
+    category: '地推' as const,
+  };
+  const farewellSession: Session = {
+    ...session,
+    scenarioId: groundScenario.id,
+    transcript: [
+      { seq: 1, speaker: 'trainee', text: '谢谢您的信任和支持，感谢您参加我们的试听课。', at: '2026-01-01T10:00:00Z' },
+      { seq: 2, speaker: 'persona', text: '那我们先走了啊，周六见。', at: '2026-01-01T10:00:05Z' },
+    ],
+  };
+
+  function capturingGateway(output: string, prompts: string[]): LLMGateway {
+    const handler: MockHandler = (messages) => {
+      const content = messages[0].content;
+      prompts.push(typeof content === 'string' ? content : '');
+      return output;
+    };
+    return { forTask: () => new MockLLMProvider(handler) };
+  }
+
+  it('客户说先走了和周六见后结束演练不算学员遗漏告别', async () => {
+    const prompts: string[] = [];
+    const gateway = capturingGateway(JSON.stringify({
+      levelKey: 'excellent',
+      quote: '谢谢您的信任和支持',
+      quoteTurnSeq: 1,
+      rationale: '整体礼貌，客户主动告别并自然结束演练。',
+      betterScript: '',
+    }), prompts);
+
+    const result = await judgeItem(politenessDef, farewellSession, gateway, groundScenario);
+    expect(result.score).toBe(100);
+    expect(prompts).toHaveLength(2);
+    expect(prompts.every((prompt) => prompt.includes('客户主动说') && prompt.includes('禁止因此扣分'))).toBe(true);
+  });
+
+  it('客户尚未告别时不错误追加自然结束豁免', async () => {
+    const prompts: string[] = [];
+    const gateway = capturingGateway(JSON.stringify({
+      levelKey: 'good',
+      quote: '我回家考虑一下',
+      quoteTurnSeq: 2,
+      rationale: '整体礼貌，但告别尚未完成。',
+      betterScript: '',
+    }), prompts);
+    const pendingSession: Session = {
+      ...farewellSession,
+      transcript: [
+        farewellSession.transcript[0],
+        { seq: 2, speaker: 'persona', text: '我回家考虑一下。', at: '2026-01-01T10:00:05Z' },
+      ],
+    };
+
+    const result = await judgeItem(politenessDef, pendingSession, gateway, groundScenario);
+    expect(result.score).toBe(75);
+    expect(prompts.every((prompt) => !prompt.includes('本场告别事实'))).toBe(true);
+  });
+
+  it('客户主动告别不豁免其他明确不礼貌表达', async () => {
+    const prompts: string[] = [];
+    const gateway = capturingGateway(JSON.stringify({
+      levelKey: 'fail',
+      quote: '不用你妹呀',
+      quoteTurnSeq: 1,
+      rationale: '存在明确不尊重客户的表达。',
+      betterScript: '',
+    }), prompts);
+    const rudeSession: Session = {
+      ...farewellSession,
+      transcript: [
+        { seq: 1, speaker: 'trainee', text: '不用你妹呀。', at: '2026-01-01T10:00:00Z' },
+        farewellSession.transcript[1],
+      ],
+    };
+
+    const result = await judgeItem(politenessDef, rudeSession, gateway, groundScenario);
+    expect(result.score).toBe(0);
+    expect(prompts.every((prompt) => prompt.includes('其他明确的不礼貌行为仍按标准判定'))).toBe(true);
+  });
+});
+
+describe('地推甄别客户意向的递卡判定', () => {
+  const intentDef: ScoreItemDef = {
+    ...def,
+    id: 'item-ground-intent',
+    name: '甄别客户意向',
+    category: '地推',
+    scoringMode: 'score',
+    judgePrompt: '有试听活动介绍但缺少明确递卡动作只得20分；客户未经学员引导自己拿卡不算。',
+    levels: [],
+  };
+  const groundScenario = {
+    id: 'scenario-ground',
+    tenantId: 'tenant-demo',
+    name: '地推销售',
+    personaConfigId: 'persona-parent',
+    skillPointIds: ['sp-need'],
+    successCriteria: { passScore: 70 },
+    durationMinutes: 25,
+    difficulty: 1,
+    category: '地推' as const,
+  };
+  const handoffSession: Session = {
+    ...session,
+    scenarioId: groundScenario.id,
+    transcript: [
+      { seq: 6, speaker: 'trainee', text: '我们想邀请您带孩子来参加我们的围棋试听活动。来，您拿上，我给您介绍一下。', at: '2026-01-01T10:00:00Z' },
+      { seq: 7, speaker: 'persona', text: '（客户放慢了脚步，接过邀请函看了看）哦，围棋啊。', at: '2026-01-01T10:00:05Z' },
+    ],
+  };
+
+  function capturingGateway(output: string, prompts: string[]): LLMGateway {
+    const handler: MockHandler = (messages) => {
+      const content = messages[0].content;
+      prompts.push(typeof content === 'string' ? content : '');
+      return output;
+    };
+    return { forTask: () => new MockLLMProvider(handler) };
+  }
+
+  it('您拿上结合客户接过邀请函属于学员明确引导递卡', async () => {
+    const prompts: string[] = [];
+    const gateway = capturingGateway(JSON.stringify({
+      score: 100,
+      quote: '来，您拿上，我给您介绍一下。',
+      quoteTurnSeq: 6,
+      rationale: '已介绍活动并明确引导客户拿上邀请函。',
+      betterScript: '',
+    }), prompts);
+
+    const result = await judgeItem(intentDef, handoffSession, gateway, groundScenario);
+    expect(result.score).toBe(100);
+    expect(prompts.every((prompt) => prompt.includes('本场递卡事实') && prompt.includes('自然口语中省略'))).toBe(true);
+    expect(prompts.every((prompt) => prompt.includes('不得把客户后续接卡认定为未经引导') || prompt.includes('也不得把客户后续接卡认定为未经引导'))).toBe(true);
+  });
+
+  it('客户未经引导自己拿卡时不追加已完成递卡事实', async () => {
+    const prompts: string[] = [];
+    const gateway = capturingGateway(JSON.stringify({
+      score: 20,
+      quote: '客户自己接过邀请函',
+      quoteTurnSeq: 7,
+      rationale: '有活动介绍，但学员没有递卡引导。',
+      betterScript: '来，您先拿上邀请函。',
+    }), prompts);
+    const selfServeSession: Session = {
+      ...handoffSession,
+      transcript: [
+        { seq: 6, speaker: 'trainee', text: '我们想邀请您带孩子来参加我们的围棋试听活动。', at: '2026-01-01T10:00:00Z' },
+        handoffSession.transcript[1],
+      ],
+    };
+
+    const result = await judgeItem(intentDef, selfServeSession, gateway, groundScenario);
+    expect(result.score).toBe(20);
+    expect(prompts.every((prompt) => !prompt.includes('本场递卡事实'))).toBe(true);
+    expect(prompts.every((prompt) => prompt.includes('客户未经学员引导自己拿卡不算'))).toBe(true);
+  });
+});
+
+describe('地推改进话术的具体业务动作', () => {
+  const actionDef: ScoreItemDef = {
+    ...def,
+    id: 'item-ground-action',
+    name: '坚持销售邀请函',
+    category: '地推',
+    scoringMode: 'score',
+    levels: [],
+  };
+  const groundScenario = {
+    id: 'scenario-ground',
+    tenantId: 'tenant-demo',
+    name: '地推销售',
+    personaConfigId: 'persona-parent',
+    skillPointIds: ['sp-closing'],
+    successCriteria: { passScore: 70 },
+    durationMinutes: 25,
+    difficulty: 1,
+    category: '地推' as const,
+  };
+
+  it('您看一下等没有业务动作的建议自动改为具体推进话术', async () => {
+    const gateway = gatewayWith(JSON.stringify({
+      score: 0,
+      quote: '您看一下',
+      quoteTurnSeq: 2,
+      rationale: '没有推进客户接卡和登记。',
+      betterScript: '您看一下。',
+    }));
+
+    const result = await judgeItem(actionDef, session, gateway, groundScenario);
+    expect(result.betterScript).toBe('来，您拿上邀请函，我给您登记姓名和电话，再约孩子周六到校体验。');
+  });
+
+  it('已经包含具体动作的话术保持原样', async () => {
+    const betterScript = '来，您拿上邀请函，先填写姓名和电话，我再帮您约周六试听。';
+    const gateway = gatewayWith(JSON.stringify({
+      score: 0,
+      quote: '您看一下',
+      quoteTurnSeq: 2,
+      rationale: '需要继续推进。',
+      betterScript,
+    }));
+
+    const result = await judgeItem(actionDef, session, gateway, groundScenario);
+    expect(result.betterScript).toBe(betterScript);
+  });
+});

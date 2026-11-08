@@ -34,6 +34,13 @@ it('咨询接待忌讳40分始终按乘法计算总分', () => {
   expect(result.totalScore).toBe(46);
 });
 
+it('地推销售忌讳同样按固定信心指数乘算总分', () => {
+  const groundPushTaboo = { ...item(45, true), itemName: '地推销售忌讳' };
+  const result = applyConfidenceIndex(80, [item(80, false), groundPushTaboo]);
+  expect(result.confidenceIndex).toBe(0.55);
+  expect(result.totalScore).toBe(44);
+});
+
 it('扣减参数再高信心指数也不低于20%', () => {
   const items = [item(80, false), item(100, true), item(50, true)];
   expect(confidenceIndexOf(items)).toBe(0.2);

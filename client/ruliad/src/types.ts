@@ -155,6 +155,8 @@ export interface ScoreReport {
   baseScore?: number;
   confidenceIndex?: number;
   passed: boolean;
+  completionStatus?: 'completed' | 'incomplete';
+  completionReason?: string;
   fatalViolation?: boolean;
   skillScores: { skillPointId: string; skillPointName?: string; score: number; maxScore?: number }[];
   items: ScoreItem[];

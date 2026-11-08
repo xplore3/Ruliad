@@ -73,6 +73,8 @@ export interface TranscriptTurn {
   isHint?: boolean;
   /** 本轮学员发言是对孩子说的（孩子模式路由判定）：该轮语音不计入音高/响度/语速等语音声学考核 */
   addressedToChild?: boolean;
+  /** 无情感支持和有效趣味铺垫时直接问孩子是否喜欢，计入地推封闭式问题忌讳 */
+  groundChildClosedQuestion?: boolean;
   /** 学员语音轮的声学特征（文字轮/未开启语音分析时无此字段） */
   voiceFeatures?: VoiceFeatures;
   /** 本轮表达方式与意图：语气（玩笑/认真）与意图（承诺/威胁/劝说等）独立，由全局分析器产生并供对白与评分共用 */
@@ -160,6 +162,14 @@ export interface Session {
   childMode?: boolean;
   /** 从销售第一次说服孩子起计算的沟通轮数；第二轮孩子仍抗拒时家长强制结束 */
   childAttemptCount?: number;
+  /** 销售已提前说服孩子，六连问末题需换成其他未问过的问题 */
+  childInterestResolved?: boolean;
+  /** 地推客户已给过一次“我回去琢磨琢磨”的最后推进机会 */
+  groundPushLastChance?: boolean;
+  /** 演练是否因未达到场景目标而提前终止；有报告但不计为完成 */
+  completionStatus?: 'incomplete';
+  /** 未完成的具体原因，用于评分总结与改进建议 */
+  completionReason?: string;
   startedAt: string;
   endedAt?: string;
 }

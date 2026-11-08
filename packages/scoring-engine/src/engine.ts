@@ -15,7 +15,7 @@ import { judgeItem } from './judge.js';
 import { runRuleChecks } from './rules.js';
 import { generateSummary } from './summary.js';
 import { judgeVideo } from './video-judge.js';
-import { buildImprovementGoal } from './improvement.js';
+import { buildGroundPushIncompleteGoal, buildImprovementGoal } from './improvement.js';
 import { applyConfidenceIndex } from './confidence.js';
 
 function weightedAverage(items: Array<{ score: number; weight: number }>): number {
@@ -135,13 +135,15 @@ export async function scoreSession(
     maxScore: 100,
   }));
 
-  const { baseScore, confidenceIndex, totalScore } = applyConfidenceIndex(
+  const { baseScore, confidenceIndex, totalScore: scoredTotal } = applyConfidenceIndex(
     Math.round(weightedAverage(scored.map((i) => ({ score: i.score, weight: weightOf.get(i.itemId) ?? 1 })))),
     items
   );
+  const incomplete = session.completionStatus === 'incomplete';
+  const totalScore = incomplete ? 0 : scoredTotal;
 
   const fatalViolation = violations.some((v) => v.fatal);
-  const passed = totalScore >= scenario.successCriteria.passScore && !fatalViolation;
+  const passed = !incomplete && totalScore >= scenario.successCriteria.passScore && !fatalViolation;
 
   // 视频表现评审：有录像关键帧且配置视觉模型时产出；失败返回 null 不影响主评分
   let videoReview: Awaited<ReturnType<typeof judgeVideo>>;
@@ -173,19 +175,23 @@ export async function scoreSession(
       }
     : undefined;
 
-  const improvementGoal = buildImprovementGoal(items, relevantDefs, violations, baseScore);
+  const improvementGoal = incomplete
+    ? buildGroundPushIncompleteGoal(session)
+    : buildImprovementGoal(items, relevantDefs, violations, baseScore);
 
   // ---- 教练总结：LLM 优先生成，失败回退模板，保证报告始终带 summary ----
   const fillerTotal = Object.values(stats.fillerCounts).reduce((sum, n) => sum + n, 0);
-  const summary = await generateSummary(session, scenario, gateway, {
-    totalScore,
-    passed,
-    fatalViolation,
-    items,
-    defs: relevantDefs,
-    fillerTotal,
-    improvementGoal,
-  });
+  const summary = incomplete
+    ? `本场演练未完成。${improvementGoal.rationale}\n改进建议：${improvementGoal.suggestion}`
+    : await generateSummary(session, scenario, gateway, {
+        totalScore,
+        passed,
+        fatalViolation,
+        items,
+        defs: relevantDefs,
+        fillerTotal,
+        improvementGoal,
+      });
 
   log?.info(
     {
@@ -206,6 +212,8 @@ export async function scoreSession(
     baseScore,
     confidenceIndex,
     passed,
+    completionStatus: incomplete ? 'incomplete' : 'completed',
+    completionReason: session.completionReason,
     fatalViolation,
     skillScores,
     items,

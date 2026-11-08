@@ -285,4 +285,59 @@ describe('scoreSession', () => {
     expect(maxActive).toBeGreaterThan(2);
     expect(maxActive).toBeLessThanOrEqual(6);
   });
+
+  it('地推最后机会后仍不推进时报告未完成并优先改进首个缺失步骤', async () => {
+    const groundDefs: ScoreItemDef[] = [{
+      ...defs[0],
+      id: 'ground-initiative',
+      name: '地推主动性',
+      category: '地推',
+      levels: [{ key: 'fail', label: '不合格', score: 0, description: '没有推进' }],
+    }];
+    const report = await scoreSession(
+      {
+        ...session,
+        scenarioId: 'scenario-ground',
+        completionStatus: 'incomplete',
+        completionReason: '客户已给最后推进机会，但学员仍只有空泛邀请，没有售卖邀请函或约定时间。',
+      },
+      { ...scenario, id: 'scenario-ground', category: '地推' },
+      groundDefs,
+      gateway
+    );
+    expect(report.totalScore).toBe(0);
+    expect(report.passed).toBe(false);
+    expect(report.completionStatus).toBe('incomplete');
+    expect(report.items[0].score).toBe(0);
+    expect(report.items[0].rationale).toContain('最后推进机会');
+    expect(report.improvementGoal?.title).toBe('先让家长拿上邀请函');
+    expect(report.improvementGoal?.suggestion).toContain('您拿上邀请函');
+    expect(report.summary).toContain('本场演练未完成');
+  });
+
+  it('未能说服孩子时按卖邀请函失败给出沟通策略建议', async () => {
+    const childDefs: ScoreItemDef[] = [{
+      ...defs[0],
+      id: 'ground-child-strategy',
+      name: '跟孩子沟通策略',
+      category: '地推',
+      levels: [{ key: 'fail', label: '不合格', score: 0, description: '策略不当' }],
+    }];
+    const report = await scoreSession(
+      {
+        ...session,
+        scenarioId: 'scenario-ground',
+        completionStatus: 'incomplete',
+        completionReason: '卖邀请函失败：销售未能用合理策略说服孩子。',
+      },
+      { ...scenario, id: 'scenario-ground', category: '地推' },
+      childDefs,
+      gateway
+    );
+    expect(report.completionStatus).toBe('incomplete');
+    expect(report.improvementGoal?.title).toBe('改进与孩子沟通的策略');
+    expect(report.improvementGoal?.suggestion).toContain('先给孩子情感支持');
+    expect(report.improvementGoal?.suggestion).toContain('能逗孩子开心的故事');
+    expect(report.summary).toContain('卖邀请函失败');
+  });
 });

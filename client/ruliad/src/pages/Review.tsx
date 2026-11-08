@@ -171,7 +171,8 @@ export default function Review() {
   }
 
   const score = report.totalScore;
-  const scoreDiff = prevScore != null ? score - prevScore : null;
+  const incomplete = report.completionStatus === 'incomplete';
+  const scoreDiff = !incomplete && prevScore != null ? score - prevScore : null;
   const deductionPoints = report.items.filter((item) => item.isDeduction).reduce((sum, item) => sum + Math.max(0, item.score), 0);
   const baseScore = report.baseScore ?? Math.min(100, score + deductionPoints);
   const confidenceIndex = report.confidenceIndex ?? Math.max(0.2, 1 - deductionPoints / 100);
@@ -235,7 +236,9 @@ export default function Review() {
   const handleShare = async () => {
     const url = window.location.href;
     const title = 'Graspit 练习报告';
-    const text = `我在 Graspit 完成了「${scenario?.name ?? '销售练习'}」，本次得分 ${score} 分${report.passed ? '，已通过' : '，未通过'}（及格线 ${scenario?.passScore ?? '-'} 分）。`;
+    const text = incomplete
+      ? `我在 Graspit 进行了「${scenario?.name ?? '销售练习'}」，本场未完成。${report.completionReason ?? ''}`
+      : `我在 Graspit 完成了「${scenario?.name ?? '销售练习'}」，本次得分 ${score} 分${report.passed ? '，已通过' : '，未通过'}（及格线 ${scenario?.passScore ?? '-'} 分）。`;
     if (navigator.share) {
       try {
         await navigator.share({ title, text, url });
@@ -272,12 +275,12 @@ export default function Review() {
               <circle cx="65" cy="65" r="54" fill="none" stroke="#FF6B5B" strokeWidth="10"
                 strokeLinecap="round" strokeDasharray={`${(score / 100) * ringCircumference} ${ringCircumference}`} />
             </svg>
-            <div className="val"><b>{score}</b><span>本次得分</span></div>
+            <div className="val"><b style={incomplete ? { fontSize: '24px' } : undefined}>{incomplete ? '未完成' : score}</b><span>本次练习</span></div>
           </div>
           <div className="grow">
             <div className="score-line">
               <span style={{ fontSize: '13px', color: '#6B7280' }}>本次练习</span>
-              <b>{score} 分</b>
+              <b>{incomplete ? '未完成' : `${score} 分`}</b>
               {scoreDiff != null && (
                 <span className="up" style={scoreDiff < 0 ? { color: '#FF6B5B' } : undefined}>
                   {scoreDiff >= 0 ? '↑' : '↓'} 比上次 {scoreDiff >= 0 ? '+' : ''}{scoreDiff}
@@ -285,8 +288,12 @@ export default function Review() {
               )}
             </div>
             <p className="verdict">
-              {report.passed ? '本次练习已通过' : '本次练习未通过'}
-              {scenario ? `（及格线 ${scenario.passScore} 分）` : ''}。
+              {incomplete
+                ? report.completionReason?.includes('卖邀请函失败')
+                  ? '卖邀请函失败，未能用合理策略说服孩子，客户带孩子离开'
+                  : '本次练习未完成，客户在最后一次推进机会后离开'
+                : report.passed ? '本次练习已通过' : '本次练习未通过'}
+              {!incomplete && scenario ? `（及格线 ${scenario.passScore} 分）` : ''}。
             </p>
             {deductionPoints > 0 && (
               <div className="small" style={{ color: '#2FAE7B', marginBottom: '6px' }}>
