@@ -62,7 +62,7 @@ const REVIEW_REDIRECT_MS = 10000;
 const GUIDE_CHOICE_QUESTION = '想再听一个版本的示范，还是开始模拟练习？';
 /** 自动聆听 VAD 参数（参考服务端 voice.ts 的 RMS + 静音判停思路）：新手指引与 live 阶段共用；
  * 语音判定用 AdaptiveVad 自适应噪声底，不再使用固定 RMS 阈值 */
-const VAD_SILENCE_MS = 2500;
+const VAD_SILENCE_MS = 1200;
 /** 新手指引（资格提问/示范选择）的判停静音时长：回答通常简短，比 live 阶段更激进地收尾 */
 const GUIDE_VAD_SILENCE_MS = 800;
 const VAD_MAX_RECORD_MS = 60000;/** 自动聆听识别失败的重试上限，超过后给出文字提示 */
@@ -564,6 +564,8 @@ export default function Practice() {
   // ===== 点击「我准备好了」：有引导资源的场景先走资格提问，否则直接开练 =====
   const handleReady = async () => {
     setErrorMsg('');
+    // 必须在首个 await 前解锁正式对练的 AudioContext，否则 iOS 后续异步 TTS 静音
+    if (isVoice) playerRef.current?.resume();
     // guidance 请求仍在途时先等它落定，避免误判走旧回退逻辑
     if (isVoice && !guidanceRef.current && guidanceReqRef.current) {
       await guidanceReqRef.current.catch(() => { /* 失败按回退逻辑处理 */ });

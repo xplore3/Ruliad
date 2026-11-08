@@ -24,8 +24,8 @@ export interface ChatResult {
   usage?: { promptTokens: number; completionTokens: number };
 }
 
-/** 任务类型：路由到不同模型，防止"自评偏倚"；video_judge 路由到视觉模型 */
-export type LLMTask = 'actor' | 'judge' | 'judge_secondary' | 'extractor' | 'video_judge';
+/** 任务类型：路由到不同模型；judge_realtime 用于对练回复的低延迟审查，video_judge 路由到视觉模型 */
+export type LLMTask = 'actor' | 'judge' | 'judge_realtime' | 'judge_secondary' | 'extractor' | 'video_judge';
 
 export interface LLMProvider {
   name: string;

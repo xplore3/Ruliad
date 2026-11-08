@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { MemoryStore } from '@grasp-mvp/infra';
 import { MockLLMProvider } from '@grasp-mvp/llm-gateway';
 import type { LLMGateway, Scenario, ScoreItemDef, Session } from '@grasp-mvp/core';
@@ -52,62 +52,48 @@ function makeSession(): Session {
   };
 }
 
-it('后台预评分复用相同对话快照，新内容触发重新评分', async () => {
-  const store = new MemoryStore();
-  await store.upsertScoreItemDef(def);
-  let llmCalls = 0;
-  const gateway: LLMGateway = {
+function makeGateway(count: () => void): LLMGateway {
+  return {
     forTask: () => new MockLLMProvider(() => {
-      llmCalls += 1;
+      count();
       return JSON.stringify({ levelKey: 'good', quote: '课程通过故事和游戏培养孩子兴趣', quoteTurnSeq: 2, rationale: '回答完整', betterScript: '' });
     }),
   };
-  const ctx = { store, gateway } as unknown as RouteContext;
+}
+
+afterEach(() => {
+  clearScoringCache('session-scoring-cache');
+  vi.useRealTimers();
+});
+
+it('主动评分立即执行并取消待执行预评分，相同快照继续复用缓存', async () => {
+  vi.useFakeTimers();
+  const store = new MemoryStore();
+  await store.upsertScoreItemDef(def);
+  let llmCalls = 0;
+  const ctx = { store, gateway: makeGateway(() => { llmCalls += 1; }) } as unknown as RouteContext;
   const session = makeSession();
 
   preScoreSession(ctx, session, scenario);
+  expect(llmCalls).toBe(0);
   const first = await scoreSessionWithCache(ctx, session, scenario);
   const callsAfterFirst = llmCalls;
+  expect(callsAfterFirst).toBeGreaterThan(0);
+
+  await vi.advanceTimersByTimeAsync(15_000);
+  expect(llmCalls).toBe(callsAfterFirst);
   const cached = await scoreSessionWithCache(ctx, session, scenario);
   expect(cached.id).toBe(first.id);
   expect(llmCalls).toBe(callsAfterFirst);
-
-  const updated: Session = {
-    ...session,
-    transcript: [
-      ...session.transcript,
-      { seq: 5, speaker: 'persona', text: '好的。', at: '2026-01-01T10:00:40Z' },
-      { seq: 6, speaker: 'trainee', text: '谢谢，到时候见。', at: '2026-01-01T10:00:50Z' },
-    ],
-  };
-  const rescored = await scoreSessionWithCache(ctx, updated, scenario);
-  expect(rescored.id).not.toBe(first.id);
-  expect(llmCalls).toBeGreaterThan(callsAfterFirst);
 });
 
-it('旧快照仍在评分时也立即启动最新快照预评分', async () => {
+it('连续新回合只在空闲后执行最新快照预评分', async () => {
+  vi.useFakeTimers();
   const store = new MemoryStore();
   await store.upsertScoreItemDef(def);
-  const session = makeSession();
-  clearScoringCache(session.id);
   let llmCalls = 0;
-  const gateway: LLMGateway = {
-    forTask: () => ({
-      name: 'delayed-mock',
-      chat: async () => {
-        llmCalls += 1;
-        await new Promise((resolve) => setTimeout(resolve, 30));
-        return {
-          model: 'delayed-mock',
-          content: JSON.stringify({ levelKey: 'good', quote: '回答完整', quoteTurnSeq: 2, rationale: '回答完整', betterScript: '' }),
-        };
-      },
-    }),
-  };
-  const ctx = { store, gateway } as unknown as RouteContext;
-  preScoreSession(ctx, session, scenario);
-  await new Promise((resolve) => setTimeout(resolve, 5));
-  const callsBeforeLatest = llmCalls;
+  const ctx = { store, gateway: makeGateway(() => { llmCalls += 1; }) } as unknown as RouteContext;
+  const session = makeSession();
   const updated: Session = {
     ...session,
     transcript: [
@@ -116,9 +102,16 @@ it('旧快照仍在评分时也立即启动最新快照预评分', async () => {
       { seq: 6, speaker: 'trainee', text: '谢谢，到时候见。', at: '2026-01-01T10:00:50Z' },
     ],
   };
+
+  preScoreSession(ctx, session, scenario);
+  await vi.advanceTimersByTimeAsync(5_000);
   preScoreSession(ctx, updated, scenario);
-  await new Promise((resolve) => setTimeout(resolve, 5));
-  expect(llmCalls).toBeGreaterThan(callsBeforeLatest);
+  await vi.advanceTimersByTimeAsync(14_999);
+  expect(llmCalls).toBe(0);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(llmCalls).toBeGreaterThan(0);
+
+  const callsAfterPreScore = llmCalls;
   await scoreSessionWithCache(ctx, updated, scenario);
-  clearScoringCache(session.id);
+  expect(llmCalls).toBe(callsAfterPreScore);
 });

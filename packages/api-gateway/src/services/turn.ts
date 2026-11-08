@@ -1,5 +1,5 @@
 import { EventTypes, type PersonaConfig, type QuizQuestion, type QuizQuestionPublic, type ReceptionQuestion, type Scenario, type ScenarioGuidance, type Session, type TranscriptTurn, type VoiceFeatures } from '@grasp-mvp/core';
-import { analyzeExpressionIntent, bandFor, checkConsistency, classifyAddressTarget, compilePersona, EmotionTracker, PersonaActor, replyAsChild, ruleCheck, shouldCustomerLeave } from '@grasp-mvp/role-engine';
+import { analyzeExpressionIntent, bandFor, checkConsistency, classifyAddressTarget, compilePersona, EmotionTracker, PersonaActor, replyAsChild, ruleCheck } from '@grasp-mvp/role-engine';
 import type { RouteContext } from '../ctx.js';
 import { mkEvent } from '../events.js';
 import { drillScriptPrompt, institutionKnowledgePrompt, archetypePrompt, resolveDrillScript, initialCustomerArchetype, FIRST_SCENE_MAX_MS, GIVE_UP_PATTERN, SCENE_TRANSITION_NARRATION } from './drill.js';
@@ -245,15 +245,29 @@ export async function runTurn(
     at: now,
     ...(voiceFeatures && !isSystemGreeting ? { voiceFeatures } : {}),
   };
-  const intentPromise = voiceFeatures && !isSystemGreeting
-    ? analyzeExpressionIntent(gateway.forTask('actor'), traineeTurn, `${scenario.name}${scenario.script?.purpose ? `：${scenario.script.purpose}` : ''}`)
-    : Promise.resolve(undefined);
+  const analyzeIntentInBackground = () => {
+    if (!voiceFeatures || isSystemGreeting) return;
+    void analyzeExpressionIntent(
+      gateway.forTask('actor'),
+      traineeTurn,
+      `${scenario.name}${scenario.script?.purpose ? `：${scenario.script.purpose}` : ''}`
+    ).then(async (expressionIntent) => {
+      const latest = await store.getSession(session.id);
+      if (!latest) return;
+      const transcript = latest.transcript.map((turn) =>
+        turn.seq === traineeTurn.seq && turn.speaker === 'trainee'
+          ? { ...turn, expressionIntent }
+          : turn
+      );
+      await store.updateSession(session.id, { transcript });
+    }).catch((err) => {
+      console.warn('[runTurn] 后台表达意图分析落库失败:', err instanceof Error ? err.message : String(err));
+    });
+  };
   const guidance = await store.getScenarioGuidance(scenario.id).catch(() => undefined);
   const totalSeconds = countdownSecondsOf(scenario, guidance);
   const lastTrace = session.emotionTrace[session.emotionTrace.length - 1];
   const traineeTurnCount = session.transcript.filter((t) => t.speaker === 'trainee').length;
-  const expressionIntent = await intentPromise;
-  if (expressionIntent) traineeTurn.expressionIntent = expressionIntent;
 
   // ---- 孩子模式：家长问孩子后激活。学员发言先经路由器判定对话对象——
   // 对孩子说的由孩子角色直接应答；第二次沟通仍抗拒时家长直接带走孩子并结束 ----
@@ -301,6 +315,7 @@ export async function runTurn(
           completionStatus: 'incomplete',
           completionReason: `卖邀请函失败：销售未能用合理策略说服孩子。${strategy.reason}`,
         });
+        analyzeIntentInBackground();
         return {
           traineeTurn,
           personaTurn,
@@ -318,6 +333,7 @@ export async function runTurn(
         childAttemptCount,
         childInterestResolved,
       });
+      analyzeIntentInBackground();
       void store.appendEvent(
         mkEvent(EventTypes.SESSION_TURN, {
           tenantId: session.tenantId,
@@ -382,29 +398,15 @@ export async function runTurn(
   let completionReason = session.completionReason;
   let warmupAudio: Buffer | undefined;
   let warmupFormat: string | undefined;
-  const lastSceneCoachIndex = session.transcript
-    .map((t) => t.speaker === 'coach' && t.text === SCENE_TRANSITION_NARRATION)
-    .lastIndexOf(true);
-  const isOpening = !session.transcript.slice(lastSceneCoachIndex + 1).some((t) => t.speaker === 'trainee');
   const receptionFollowup = !isSystemGreeting && scenario.category === '咨询接待'
     ? receptionTrialFollowup({ ...session, transcript: transcriptSoFar })
     : undefined;
-  const offPoint = !receptionFollowup && scenario.category === '地推' && !isSystemGreeting && await shouldCustomerLeave(
-    gateway.forTask('actor'),
-    transcriptSoFar,
-    drillScript?.content ?? bundle.systemPrompt,
-    isOpening
-  ).catch(() => false);
-  const groundPushProgress = !receptionFollowup && !offPoint && !isSystemGreeting && !dualScene && scenario.category === '地推'
+  const groundPushProgress = !receptionFollowup && !isSystemGreeting && !dualScene && scenario.category === '地推'
     ? await assessGroundPushProgress(gateway.forTask('actor'), transcriptSoFar, groundPushLastChance)
     : undefined;
   if (receptionFollowup) {
     replyText = receptionFollowup.text;
     shouldClose = receptionFollowup.shouldClose;
-  } else if (offPoint) {
-    // 开场不合格、明显跑题或持续无目的闲聊：潜在客户不再配合，强制结束
-    replyText = '（客户看了看时间，打断销售）抱歉，我们还有事，先走了。';
-    shouldClose = true;
   } else if (groundPushProgress && !groundPushProgress.substantive) {
     if (groundPushLastChance) {
       replyText = '好的，我回去琢磨琢磨，先走了。';
@@ -419,7 +421,7 @@ export async function runTurn(
     // 快速通道：不再调用 LLM 生成客户回复与一致性校验
     replyText = '（客户摆了摆手，快步走远了）';
   } else {
-    // LLM 回复时顺带判断本场是否应自然结束（shouldClose）：剧情终点/目标达成/谈判破裂/客户离开
+    // 主回复同时判断剧情结束与地推客户离场，不再串行调用独立耐心判定器
     const reply = await actor.replyWithSignal(bundle, band, transcriptSoFar, session.coachIntensity);
     replyText = reply.text;
     shouldClose = reply.shouldClose;
@@ -428,7 +430,7 @@ export async function runTurn(
 
     // 一致性校验分两层：
     // ① 明显关键词违例（AI 自曝/考核泄露）同步拦截并重生成一次——快，不额外调 LLM；
-    // ② 语义级一致性审查（LLM）与首句 TTS 预合成并行：审查必须通过才播放，
+    // ② 低延迟语义审查与首句 TTS 预合成并行：审查必须通过才播放，
     //    但等待时间取两者最大值而非相加；语义违例时预合成音频作废、带纠正指令重生成一次。
     if (ruleCheck(replyText).length > 0) {
       const retryBand = { ...band, instruction: band.instruction + CONSISTENCY_CORRECTION };
@@ -445,11 +447,11 @@ export async function runTurn(
       }
     }
     const warmupPromise = (ttsWarmup ? ttsWarmup(replyText) : Promise.resolve(null)).catch(() => null);
-    const audit = await checkConsistency(gateway.forTask('judge'), bundle, replyText).catch(() => ({ pass: true, reasons: [] as string[] }));
+    const audit = await checkConsistency(gateway.forTask('judge_realtime'), bundle, replyText).catch(() => ({ pass: true, reasons: [] as string[] }));
     if (!audit.pass) {
       const retryBand = { ...band, instruction: band.instruction + CONSISTENCY_CORRECTION };
       const retry = await actor.replyWithSignal(bundle, retryBand, transcriptSoFar, session.coachIntensity);
-      const recheck = await checkConsistency(gateway.forTask('judge'), bundle, retry.text).catch(() => ({ pass: true, reasons: [] as string[] }));
+      const recheck = await checkConsistency(gateway.forTask('judge_realtime'), bundle, retry.text).catch(() => ({ pass: true, reasons: [] as string[] }));
       if (recheck.pass) {
         replyText = retry.text;
         shouldClose = retry.shouldClose;
@@ -545,6 +547,7 @@ export async function runTurn(
       ...(childTurn ? { childMode: true, childAttemptCount: 0 } : {}),
     });
     preScoreSession(ctx, { ...session, transcript, emotionTrace, receptionQuestionIndex, groundPushLastChance, completionStatus, completionReason }, scenario);
+    analyzeIntentInBackground();
   }
 
   void store.appendEvent(

@@ -32,7 +32,7 @@ function pcmRMS(buf: Buffer): number {
 }
 
 /** VAD 配置 */
-const VAD_SILENCE_MS = 2500; // 允许说话中的自然停顿，避免 1 秒静音就把本轮截断
+const VAD_SILENCE_MS = 1200; // 保留基本换气停顿，同时避免说完后固定等待数秒
 const VAD_CHUNK_MS = 100; // 每 100ms 检测一次
 
 /** VAD 自适应阈值范围与噪声倍率：AGC 关闭后不同麦克风的原始电平差异大，

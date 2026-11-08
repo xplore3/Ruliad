@@ -341,9 +341,9 @@ export class TtsPlayer {
     this.playing = false;
   }
 
-  /** 浏览器自动播放策略下，用户手势后恢复被挂起的 AudioContext */
+  /** 浏览器自动播放策略下，在用户手势中创建并恢复 AudioContext */
   resume() {
-    if (this.ctx && this.ctx.state === 'suspended') void this.ctx.resume();
+    this.ensureCtx();
   }
 
   dispose() {

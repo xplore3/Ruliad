@@ -16,7 +16,7 @@ const judgePrompt = `
 describe('createLLMGateway', () => {
   it('无 API Key 时所有任务路由到 mock', () => {
     const gateway = createLLMGateway({});
-    for (const task of ['actor', 'judge', 'judge_secondary', 'extractor'] as const) {
+    for (const task of ['actor', 'judge', 'judge_realtime', 'judge_secondary', 'extractor'] as const) {
       expect(gateway.forTask(task).name).toBe('mock');
     }
   });
@@ -25,6 +25,7 @@ describe('createLLMGateway', () => {
     const gateway = createLLMGateway({ LLM_API_KEY: 'k', LLM_MODEL: 'm1' });
     expect(gateway.forTask('actor').name).toBe('openai-compatible');
     expect(gateway.forTask('judge').name).toBe('openai-compatible');
+    expect(gateway.forTask('judge_realtime').name).toBe('openai-compatible');
     expect(gateway.forTask('judge_secondary').name).toBe('openai-compatible');
   });
 

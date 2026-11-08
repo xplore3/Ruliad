@@ -58,14 +58,19 @@ describe('checkConsistency', () => {
     expect(called).toBe(false);
   });
 
-  it('LLM 判 pass=true 时通过', async () => {
-    const result = await checkConsistency(
-      mockLlm('{"pass":true,"reason":""}'),
-      bundle,
-      '价格确实不便宜，但保障到位。'
-    );
+  it('LLM 判 pass=true 时通过，并限制实时审查输出长度', async () => {
+    let capturedOptions: Parameters<LLMProvider['chat']>[1];
+    const llm: LLMProvider = {
+      name: 'spy',
+      chat: async (_messages, options) => {
+        capturedOptions = options;
+        return { content: '{"pass":true,"reason":""}', model: 'spy' };
+      },
+    };
+    const result = await checkConsistency(llm, bundle, '价格确实不便宜，但保障到位。');
     expect(result.pass).toBe(true);
     expect(result.reasons).toEqual([]);
+    expect(capturedOptions).toEqual({ jsonMode: true, temperature: 0, maxTokens: 128 });
   });
 
   it('LLM 判 pass=false 时不通过并带原因', async () => {

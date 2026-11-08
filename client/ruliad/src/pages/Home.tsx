@@ -348,7 +348,6 @@ export default function Home() {
                         <i className="cdot" style={{ background: cat?.color ?? '#8A8F98' }} />
                         {cat?.label ?? '综合场景'}
                       </span>
-                      {(scene.sceneType ?? 'practical') !== 'drill' && <span className="scripted">有剧本</span>}
                       <span className="diff">{difficultyLabel(scene.difficulty)} · 约 {scene.durationMinutes} 分钟</span>
                       {score != null && <span className="practiced">已练习 · {score} 分</span>}
                     </div>
