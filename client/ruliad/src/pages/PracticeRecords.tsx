@@ -214,7 +214,7 @@ export default function PracticeRecords() {
                   <div className="meta">{meta}</div>
                 </div>
                 <div className="rscore">
-                  {done ? (
+                  {done && r.completionStatus !== 'incomplete' ? (
                     <>
                       <b className={scoreClass(r.totalScore ?? 0)}>{r.totalScore}</b>
                       <span className="unit"> 分</span>

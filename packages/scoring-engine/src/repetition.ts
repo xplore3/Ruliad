@@ -11,6 +11,7 @@ export interface RepeatedIdea {
   text: string;
   count: number;
   turnSeqs: number[];
+  occurrences: { text: string; turnSeq: number }[];
 }
 
 export interface ReceptionRepetitionAnalysis {
@@ -83,6 +84,7 @@ function repeatedIdeas(clauses: Clause[]): RepeatedIdea[] {
       text: group[0].text,
       count: group.length,
       turnSeqs: [...new Set(group.map((clause) => clause.seq))].sort((a, b) => a - b),
+      occurrences: group.map((clause) => ({ text: clause.text, turnSeq: clause.seq })),
     }))
     .sort((a, b) => b.count - a.count);
   const byTurns = new Map<string, RepeatedIdea>();
@@ -102,12 +104,13 @@ export function analyzeReceptionRepetition(session: Session): ReceptionRepetitio
       .map((text) => ({ text: text.trim(), normalized: normalize(text), seq: turn.seq }))
       .filter((clause) => clause.text && clause.normalized.length >= 6)
     );
-  const meaningless = traineeTurns.flatMap((turn) => turn.text
+  const meaninglessClauses = traineeTurns.flatMap((turn) => turn.text
     .split(/[。！？!?；;，,\n]+/)
     .map((text) => text.trim())
     .filter((text) => MEANINGLESS_CLAUSE_PATTERN.test(text))
-    .map(() => turn.seq)
+    .map((text) => ({ text, seq: turn.seq }))
   );
+  const meaningless = meaninglessClauses.map((clause) => clause.seq);
   const groups = repeatedIdeas(clauses);
   const repeatedTriggered = groups.length >= REPEATED_GROUPS_THRESHOLD;
   const meaninglessTriggered = meaningless.length >= MEANINGLESS_THRESHOLD && new Set(meaningless).size >= 2;
@@ -117,9 +120,16 @@ export function analyzeReceptionRepetition(session: Session): ReceptionRepetitio
     ...(meaninglessTriggered ? meaningless : []),
   ]).size;
   const evidence = repeatedTriggered
-    ? groups.map((group) => `第${group.turnSeqs.join('、')}轮反复表达“${group.text}”共${group.count}次`)
+    ? groups.map((group, index) => `重复${index + 1}：${group.occurrences.map((occurrence) => `第${occurrence.turnSeq}轮“${occurrence.text}”`).join('；')}（同一意思共${group.count}次）`)
     : [];
-  if (meaninglessTriggered) evidence.push(`多轮累计出现没有实际信息的语气或填充表达共${meaningless.length}次`);
+  if (meaninglessTriggered) {
+    const byTurn = new Map<number, string[]>();
+    for (const clause of meaninglessClauses) byTurn.set(clause.seq, [...(byTurn.get(clause.seq) ?? []), clause.text]);
+    const details = [...byTurn.entries()]
+      .map(([seq, texts]) => `第${seq}轮${texts.map((text) => `“${text}”`).join('、')}`)
+      .join('；');
+    evidence.push(`无实际信息的语气或填充表达共${meaningless.length}次：${details}`);
+  }
   const rationale = triggered
     ? `${evidence.join('；')}。重复表达的情况出现3次及以上（例如A说两遍、B说两遍、C说两遍），或无实际意义表达过多，商务沟通不够简洁，全局扣10分。`
     : '未发现3组及以上重复表达（例如A说两遍、B说两遍、C说两遍），或过多没有实际意义的表达，简洁沟通项不扣分。';

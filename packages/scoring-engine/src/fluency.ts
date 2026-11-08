@@ -95,7 +95,24 @@ export function analyzeReceptionFluency(session: Session): ReceptionFluencyAnaly
   const repetitionTurns = turns.filter((turn) => turn.repetitionCount > 0).length;
   const sustainedFillers = fillerCount >= 10 && fillerTurns >= 3;
   const sustainedRepetitions = repetitionCount >= 4 && repetitionTurns >= 2;
-  const triggered = severeTurns.length > 0 || sustainedFillers || sustainedRepetitions;
+  const singleTurnSevere = turns.length === 1 && severeTurns.length === 1;
+  const severeTurnRatio = severeTurns.length / turns.length;
+  const sustainedSevere = severeTurns.length >= 2 && severeTurnRatio >= 0.25;
+  const triggered = singleTurnSevere || sustainedSevere || sustainedFillers || sustainedRepetitions;
+  const levelTwo = severeTurns.length >= 3 || sustainedFillers || sustainedRepetitions;
+  const levelThree =
+    (severeTurns.length >= 4 && severeTurnRatio >= 0.5) || fillerCount >= 20 || repetitionCount >= 8;
+  const levelFour =
+    (severeTurns.length >= 6 && severeTurnRatio >= 0.65) || fillerCount >= 30 || repetitionCount >= 12;
+  const severityLevel = !triggered ? 0 : levelFour ? 4 : levelThree ? 3 : levelTwo ? 2 : 1;
+  const deduction = Math.min(RECEPTION_FLUENCY_DEDUCTION, severityLevel * 10);
+  const severityRationales = [
+    '',
+    '整体存在轻度磕绊，对客户体验影响较小',
+    '磕绊已多轮出现，开始影响表达连贯性',
+    '磕绊较频繁，容易影响客户体验',
+    '磕绊严重且持续，已明显影响客户体验',
+  ];
   const evidence = severeTurns.map((turn) => `第${turn.seq}轮${turn.reasons.join('、')}`);
   if (sustainedFillers && !severeTurns.some((turn) => turn.fillerCount > 0)) {
     evidence.push(`多轮累计出现填充词 ${fillerCount} 次`);
@@ -109,11 +126,11 @@ export function analyzeReceptionFluency(session: Session): ReceptionFluencyAnaly
     ...(sustainedRepetitions ? turns.filter((turn) => turn.repetitionCount > 0).map((turn) => turn.seq) : []),
   ]).size;
   const rationale = triggered
-    ? `${evidence.join('；')}。这些表现已经明显影响表达连贯性，全局扣40分。`
-    : '未发现成串填充词、持续重复断句或频繁句中停顿，磕磕绊绊项不扣分。正常语气词、衔接润色、换气和句尾停顿不会触发扣分。';
+    ? `${evidence.join('；')}。${severityRationales[severityLevel]}，全局扣${deduction}分。`
+    : '按整场表现判断，未发现成串填充词、持续重复断句或多轮频繁句中停顿，磕磕绊绊项不扣分。正常语气词、衔接润色、个别句中停顿，以及与孩子交流时的自然等待和耐心停顿，不会触发扣分。';
   return {
     triggered,
-    deduction: triggered ? RECEPTION_FLUENCY_DEDUCTION : 0,
+    deduction,
     rationale,
     evidence,
     fillerCount,

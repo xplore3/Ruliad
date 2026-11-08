@@ -23,6 +23,7 @@ export async function growthRoutes(app: FastifyInstance, ctx: RouteContext): Pro
           status: s.status,
           totalScore: report?.totalScore ?? null,
           passed: report?.passed ?? null,
+          completionStatus: report?.completionStatus,
           durationSec: s.endedAt
             ? Math.round((new Date(s.endedAt).getTime() - new Date(s.liveStartedAt ?? s.startedAt).getTime()) / 1000)
             : null,

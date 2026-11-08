@@ -51,20 +51,20 @@ it('单个语气词和句尾停顿不扣分', () => {
   expect(result.fillerCount).toBe(1);
 });
 
-it('成串嗯啊等填充词触发全局扣40分', () => {
+it('成串嗯啊等填充词刚达到阈值时扣10分', () => {
   const result = analyzeReceptionFluency(makeSession([
     { seq: 1, speaker: 'trainee', text: '嗯，啊，呃，我们会先了解孩子的情况。', at: '2026-01-01T10:00:00Z' },
   ]));
-  expect(result.deduction).toBe(40);
+  expect(result.deduction).toBe(10);
   expect(result.fillerCount).toBe(3);
-  expect(result.rationale).toContain('全局扣40分');
+  expect(result.rationale).toContain('全局扣10分');
 });
 
 it('多次重复字词触发扣分', () => {
   const result = analyzeReceptionFluency(makeSession([
     { seq: 1, speaker: 'trainee', text: '我我我想了解一下这这这个课程怎么安排。', at: '2026-01-01T10:00:00Z' },
   ]));
-  expect(result.deduction).toBe(40);
+  expect(result.deduction).toBe(10);
   expect(result.repetitionCount).toBe(2);
 });
 
@@ -78,11 +78,11 @@ it('频繁句中停顿且停顿占比较高触发扣分', () => {
       { atMs: 4500, durationMs: 500 },
     ]),
   ]));
-  expect(result.deduction).toBe(40);
+  expect(result.deduction).toBe(10);
   expect(result.disruptedPauseCount).toBe(3);
 });
 
-it('多轮高频使用填充词即使单轮未达阈值也扣分', () => {
+it('多轮高频使用填充词即使单轮未达阈值也扣20分', () => {
   const turns = [1, 2, 3, 4, 5].map((seq) => ({
     seq,
     speaker: 'trainee' as const,
@@ -90,12 +90,12 @@ it('多轮高频使用填充词即使单轮未达阈值也扣分', () => {
     at: '2026-01-01T10:00:00Z',
   }));
   const result = analyzeReceptionFluency(makeSession(turns));
-  expect(result.deduction).toBe(40);
+  expect(result.deduction).toBe(20);
   expect(result.fillerCount).toBe(10);
   expect(result.affectedTurns).toBe(5);
 });
 
-it('咨询接待忌讳项在LLM扣分之外只追加一次语声语调40分', async () => {
+it('咨询接待忌讳项在LLM扣分之外只追加一次语声语调10分', async () => {
   const session = makeSession([
     { seq: 1, speaker: 'trainee', text: '嗯，啊，呃，我们会先了解孩子的情况。', at: '2026-01-01T10:00:00Z' },
   ]);
@@ -128,10 +128,10 @@ it('咨询接待忌讳项在LLM扣分之外只追加一次语声语调40分', as
   const result = await judgeItem(def, session, {
     forTask: () => new MockLLMProvider(() => JSON.stringify({ score: 0, rationale: '其他忌讳未触犯' })),
   }, scenario);
-  expect(result.score).toBe(40);
+  expect(result.score).toBe(10);
   expect(result.isDeduction).toBe(true);
   expect(result.rationale).toContain('其他忌讳未触犯');
-  expect(result.rationale.match(/全局扣40分/g)).toHaveLength(1);
+  expect(result.rationale.match(/全局扣10分/g)).toHaveLength(1);
 });
 
 
@@ -155,7 +155,7 @@ it('这个那个就是等常见填充词成串出现时触发扣分', () => {
     { seq: 1, speaker: 'trainee', text: '这个，那个，就是说，我们会先了解孩子的情况。', at: '2026-01-01T10:00:00Z' },
   ]));
   expect(result.fillerCount).toBe(3);
-  expect(result.deduction).toBe(40);
+  expect(result.deduction).toBe(10);
 });
 
 it('正常表达中的这个就是不误报为填充词', () => {
@@ -175,4 +175,61 @@ it('最近演练中的正常衔接表达和单次口误不扣分', () => {
   expect(result.fillerCount).toBe(2);
   expect(result.repetitionCount).toBe(1);
   expect(result.deduction).toBe(0);
+});
+
+it('多轮演练只有个别轮次停顿偏高时按整体表现不扣分', () => {
+  const turns = Array.from({ length: 16 }, (_, index) =>
+    voiceTurn(index + 1, '宝贝，不着急，我们慢慢看，想清楚再告诉老师。', [], 2200)
+  );
+  const naturalPauses = [
+    { atMs: 800, durationMs: 700 },
+    { atMs: 2000, durationMs: 700 },
+    { atMs: 3200, durationMs: 700 },
+  ];
+  turns[7] = voiceTurn(8, '我们先了解孩子的兴趣，再安排适合的课程。', naturalPauses);
+  turns[15] = voiceTurn(16, '您可以带孩子先来体验，之后再决定是否报名。', naturalPauses);
+
+  const result = analyzeReceptionFluency(makeSession(turns));
+  expect(result.turns.filter((turn) => turn.severe)).toHaveLength(2);
+  expect(result.deduction).toBe(0);
+  expect(result.rationale).toContain('个别句中停顿');
+  expect(result.rationale).toContain('耐心停顿');
+});
+
+it('严重停顿刚覆盖整场四分之一轮次时扣10分', () => {
+  const turns = Array.from({ length: 8 }, (_, index) =>
+    voiceTurn(index + 1, '我们会先了解孩子的兴趣和基础，再安排课程。', [], 2200)
+  );
+  const disruptedPauses = [
+    { atMs: 800, durationMs: 700 },
+    { atMs: 2000, durationMs: 700 },
+    { atMs: 3200, durationMs: 700 },
+  ];
+  turns[1] = voiceTurn(2, '这个课程会先带孩子熟悉棋盘。', disruptedPauses);
+  turns[4] = voiceTurn(5, '之后老师会安排小游戏和对局。', disruptedPauses);
+
+  const result = analyzeReceptionFluency(makeSession(turns));
+  expect(result.turns.filter((turn) => turn.severe)).toHaveLength(2);
+  expect(result.deduction).toBe(10);
+});
+
+it('异常轮次增加时扣分从10分逐步提高到40分', () => {
+  const disruptedPauses = [
+    { atMs: 800, durationMs: 700 },
+    { atMs: 2000, durationMs: 700 },
+    { atMs: 3200, durationMs: 700 },
+  ];
+  const deductions = [2, 3, 4, 6].map((severeCount) => {
+    const turns = Array.from({ length: 8 }, (_, index) =>
+      voiceTurn(
+        index + 1,
+        '我们会先了解孩子的兴趣和基础，再安排课程。',
+        index < severeCount ? disruptedPauses : [],
+        index < severeCount ? 800 : 2200,
+      )
+    );
+    return analyzeReceptionFluency(makeSession(turns)).deduction;
+  });
+
+  expect(deductions).toEqual([10, 20, 30, 40]);
 });

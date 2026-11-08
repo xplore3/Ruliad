@@ -299,7 +299,7 @@ export default function HumorTest() {
             <div style={{ padding: 20, borderRadius: 12, border: '1px solid #E5E7EB', marginBottom: 20 }}>
               <div className="small muted" style={{ marginBottom: 8 }}>测试说明</div>
               <p style={{ margin: 0, lineHeight: 1.7 }}>
-                请逐题用语音自然回答。六题结束后，系统汇总全部回答，检测“嗯、啊、这个、那个、就是、然后、其实”等成串填充词、重复字词和频繁句中停顿；触发后全局扣 40 分。单个填充词、正常换气和句尾停顿不会扣分。
+                请逐题用语音自然回答。六题结束后，系统汇总全部回答，检测“嗯、啊、这个、那个、就是、然后、其实”等成串填充词、重复字词和频繁句中停顿；达到阈值后按整体严重程度扣 10–40 分。单个填充词、正常换气、句尾停顿和个别自然停顿不会扣分。
               </p>
             </div>
           </>

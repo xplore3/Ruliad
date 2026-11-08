@@ -180,6 +180,10 @@ export interface ScoreReport {
   /** 全局信心指数（0.2～1）：总分 = 基础分 × 信心指数 */
   confidenceIndex?: number;
   passed: boolean;
+  /** 未完成演练也会生成报告，但不给完成分并强制未通过 */
+  completionStatus?: 'completed' | 'incomplete';
+  /** 未完成的具体原因与改进依据 */
+  completionReason?: string;
   /** 一票否决触发 */
   fatalViolation: boolean;
   skillScores: SkillScore[];

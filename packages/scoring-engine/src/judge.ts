@@ -15,6 +15,7 @@ import { analyzeReceptionRepetition } from './repetition.js';
 import { analyzeReceptionTrialInvitation } from './trial-invitation.js';
 import { judgeReceptionTrialInitiative } from './trial-initiative.js';
 import { analyzeReceptionKnowledgeHonesty } from './knowledge-honesty.js';
+import { analyzeGroundChildClosedQuestions } from './ground-child-closed.js';
 
 /** 定量 metric 的中文名与单位（用于评语与计分明细） */
 const METRIC_LABELS: Record<string, { label: string; unit: string }> = {
@@ -130,7 +131,7 @@ async function narrateQuantScore(
     const parsed = JSON.parse(result.content) as { rationale?: unknown; betterScript?: unknown };
     return {
       rationale: String(parsed.rationale ?? ''),
-      betterScript: String(parsed.betterScript ?? ''),
+      betterScript: actionableGroundBetterScript(String(parsed.betterScript ?? ''), scenario?.category ?? def.category),
     };
   } catch {
     return { rationale: det.hasMissingData ? '语音数据不足的项目按中间分计。' : '', betterScript: '' };
@@ -203,6 +204,27 @@ function buildProsodyLines(session: Session): string[] {
   return lines;
 }
 
+const CUSTOMER_FAREWELL_PATTERN = /先走了|再见|拜拜|回头见|下次见|周[一二三四五六日天]见/;
+const VAGUE_GROUND_SCRIPT_PATTERN = /(?:您|你)(?:先)?(?:看|了解)(?:一下|下)/;
+const CONCRETE_GROUND_ACTION_PATTERN = /拿上|接过|登记|填写|支付|购买|订好|定下|约定|安排|报名/;
+
+function actionableGroundBetterScript(script: string, category?: string): string {
+  if (
+    category !== '地推' ||
+    !script ||
+    !VAGUE_GROUND_SCRIPT_PATTERN.test(script) ||
+    CONCRETE_GROUND_ACTION_PATTERN.test(script)
+  ) {
+    return script;
+  }
+  return '来，您拿上邀请函，我给您登记姓名和电话，再约孩子周六到校体验。';
+}
+
+function customerEndedWithFarewell(session: Session): boolean {
+  const lastTurn = [...session.transcript].reverse().find((turn) => turn.speaker !== 'coach');
+  return lastTurn?.speaker === 'persona' && CUSTOMER_FAREWELL_PATTERN.test(lastTurn.text);
+}
+
 /** 组装 judge prompt：评分标准定义 + 档位 JSON + 场景考核点 + 语音表现统计 + 带 seq 的转写（+ 可选的重点评分维度） */
 function buildJudgePrompt(
   def: ScoreItemDef,
@@ -222,10 +244,29 @@ function buildJudgePrompt(
       scenarioLines.push(`本场主要考核点：${scenario.script.assessmentPoints.join('；')}`);
     }
   }
+  const customerFarewellLines =
+    def.name === '礼貌礼仪' && (scenario?.category ?? def.category) === '地推' && customerEndedWithFarewell(session)
+      ? ['本场告别事实：最后一轮是客户主动说“先走了”“再见”或约定下次见面并自然结束演练，告别环节已经完整闭环。学员没有追加回复告别语不属于遗漏，禁止因此扣分或降低档位；此条优先于上方关于告别环节的通用要求。其他明确的不礼貌行为仍按标准判定。']
+      : [];
+  const invitationHandoffTurn =
+    def.name === '甄别客户意向' && (scenario?.category ?? def.category) === '地推'
+      ? session.transcript.find((turn) => turn.speaker === 'trainee' && /(?:您|你)(?:先)?拿(?:上|着|一下)/.test(turn.text))
+      : undefined;
+  const groundIntentLines =
+    def.name === '甄别客户意向' && (scenario?.category ?? def.category) === '地推'
+      ? [
+          '递卡判定必须结合地推上下文和动作含义，不得做逐字匹配。“来，您拿上”“您拿着”“来，您先拿一下”等等同于“您拿上邀请函”，自然口语中省略“邀请函”宾语不影响动作成立。客户随后接过邀请函是对学员引导的响应，不得歪曲成客户未经引导自己拿卡。',
+          ...(invitationHandoffTurn
+            ? [`本场递卡事实：第${invitationHandoffTurn.seq}轮学员说“${invitationHandoffTurn.text}”，已经包含明确的“您拿上”递卡动作，应按已引导客户接邀请函评分。禁止以没有逐字说出“邀请函”为由扣30分，也不得把客户后续接卡认定为未经引导。`]
+            : []),
+        ]
+      : [];
   return [
     def.judgePrompt,
     `评分标准：${def.name}`,
     `行为锚定：${def.behaviorAnchor}`,
+    ...customerFarewellLines,
+    ...groundIntentLines,
     ...scenarioLines,
     ...(def.scoringMode === 'score' ? [] : [`可选档位（JSON）：${JSON.stringify(def.levels)}`]),
     ...(stats ? buildStatsLines(stats) : []),
@@ -236,7 +277,7 @@ function buildJudgePrompt(
       ? '请只输出 JSON：{"score":0到100的整数总分,"dimensions":"各维度得分明细（仅限该评分标准自身定义的维度）","quote":"引用原文","quoteTurnSeq":数字,"rationale":"判定理由","betterScript":"更优话术示范"}'
       : '请只输出 JSON：{"levelKey":"档位key","quote":"引用原文","quoteTurnSeq":数字,"rationale":"判定理由","betterScript":"更优话术示范"}',
     'rationale 中不同语义点请用换行符（\n）分隔，让每个语义段成为独立一条，不要把所有内容挤在一个段落里。',
-    'betterScript 要求：针对该评分标准的扣分点，给一句学员当时可以直接说的中文话术示范，不超过 60 字；若判定为最高档（无扣分）则给空字符串。',
+    'betterScript 要求：针对该评分标准的扣分点，给一句学员当时可以直接说的中文话术示范，不超过 60 字；若判定为最高档（无扣分）则给空字符串。话术必须写清具体对象、动作和业务目的，不得只写“注意沟通”“您看一下”“您了解一下”等空泛建议。地推场景涉及业务推进时，应明确让客户拿上邀请函、填写姓名电话、选择支付方式或约定到校时间等下一步动作。',
     '判定纪律（必须严格遵守，违反即判定无效）：',
     '1. 只依据本条评分标准（名称、行为锚定、档位/维度定义）打分，禁止把任何其他销售技巧、培训常识或通用话术规范（如共情、倾听、提问技巧等）作为扣分或加分依据——除非它们就是本条标准明文定义的内容。',
     '2. rationale 只能陈述与本标准直接相关的表现证据，不得点评本标准未涵盖的方面，哪怕学员在那些方面表现很差也一个字不提。',
@@ -331,6 +372,27 @@ export async function judgeItem(
   if (def.name === '主动性确定试听时间' && scenario?.category === '咨询接待' && session.receptionQuestions?.length === 10) {
     return judgeReceptionTrialInitiative(def, session);
   }
+  if (['地推主动性', '地推范主动性'].includes(def.name) && scenario?.category === '地推' && session.completionStatus === 'incomplete') {
+    const lastTrainee = [...session.transcript].reverse().find((turn) => turn.speaker === 'trainee');
+    return {
+      itemId: def.id,
+      itemName: def.name,
+      skillPointId: def.skillPointId,
+      levelKey: 'fail',
+      levelLabel: '不合格',
+      score: 0,
+      quote: lastTrainee?.text ?? '',
+      quoteTurnSeq: lastTrainee?.seq ?? 0,
+      rationale: session.completionReason ?? '客户已给最后推进机会，但学员仍没有实质成交动作，地推主动性不合格，本场未完成。',
+      betterScript: '来，您拿上邀请函，在这边填一下姓名和电话。您是微信还是支付宝？我们现在订好，再约孩子到校体验的时间。',
+      confidence: 0.99,
+      judgeAgree: true,
+      isReference: false,
+      isObservation: def.isObservation,
+      isDeduction: def.deductionOnly,
+      layer: def.layer,
+    };
+  }
   // 确定性定量计分：配置了 quantitativeRule 的标准跳过 LLM 打分，按语音量化数据查表，
   // LLM 只写评语——分数永不动摇（缺声学数据时按中间分计并在明细中注明）
   if (def.scoringMode === 'score' && def.quantitativeRule) {
@@ -383,6 +445,7 @@ export async function judgeItem(
 
   const prompt = buildJudgePrompt(def, session, scenario, scoringFocus, stats);
   const primary = await runJudge(gateway.forTask('judge'), prompt, def);
+  primary.betterScript = actionableGroundBetterScript(primary.betterScript, scenario?.category ?? def.category);
   const secondary = await runJudge(gateway.forTask('judge_secondary'), prompt, def);
 
   // 直接打分模式：双 judge 分差 ≤10 视为一致（取均值），否则取主 judge 并标记"参考"
@@ -395,29 +458,34 @@ export async function judgeItem(
       ? primary.rationale
       : `${primary.rationale}（双 judge 不一致：次 judge 判 ${s} 分，取主 judge 结果）`;
     const isReceptionTaboo = def.name === '咨询接待忌讳事项' && scenario?.category === '咨询接待';
-    const fluency = isReceptionTaboo ? analyzeReceptionFluency(session) : undefined;
-    const repetition = isReceptionTaboo ? analyzeReceptionRepetition(session) : undefined;
-    const trialInvitation = isReceptionTaboo ? await analyzeReceptionTrialInvitation(session, gateway) : undefined;
+    const isGroundPushTaboo = def.name === '地推销售忌讳' && scenario?.category === '地推';
+    const usesSharedTabooRules = isReceptionTaboo || isGroundPushTaboo;
+    const fluency = usesSharedTabooRules ? analyzeReceptionFluency(session) : undefined;
+    const repetition = usesSharedTabooRules ? analyzeReceptionRepetition(session) : undefined;
+    const trialInvitation = usesSharedTabooRules ? await analyzeReceptionTrialInvitation(session, gateway) : undefined;
     const knowledgeHonesty = isReceptionTaboo
       ? await analyzeReceptionKnowledgeHonesty(session, gateway, institutionKB)
       : undefined;
+    const childClosedQuestions = isGroundPushTaboo ? analyzeGroundChildClosedQuestions(session) : undefined;
     const quoteTurnSeq = fluency?.triggered
       ? fluency.quoteTurnSeq
       : repetition?.triggered
         ? repetition.quoteTurnSeq
         : trialInvitation?.triggered
           ? trialInvitation.quoteTurnSeq
-          : knowledgeHonesty?.triggered
-            ? knowledgeHonesty.quoteTurnSeq
-            : primary.quoteTurnSeq;
+          : childClosedQuestions?.triggered
+            ? childClosedQuestions.quoteTurnSeq
+            : knowledgeHonesty?.triggered
+              ? knowledgeHonesty.quoteTurnSeq
+              : primary.quoteTurnSeq;
     return {
       itemId: def.id,
       itemName: def.name,
       skillPointId: def.skillPointId,
       levelKey: 'score',
       levelLabel: '得分',
-      score: Math.min(100, baseScore + (fluency?.deduction ?? 0) + (repetition?.deduction ?? 0) + (trialInvitation?.deduction ?? 0) + (knowledgeHonesty?.deduction ?? 0)),
-      quote: fluency?.triggered || repetition?.triggered || trialInvitation?.triggered || knowledgeHonesty?.triggered
+      score: Math.min(100, baseScore + (fluency?.deduction ?? 0) + (repetition?.deduction ?? 0) + (trialInvitation?.deduction ?? 0) + (childClosedQuestions?.deduction ?? 0) + (knowledgeHonesty?.deduction ?? 0)),
+      quote: fluency?.triggered || repetition?.triggered || trialInvitation?.triggered || childClosedQuestions?.triggered || knowledgeHonesty?.triggered
         ? session.transcript.find((turn) => turn.seq === quoteTurnSeq)?.text ?? primary.quote
         : primary.quote,
       quoteTurnSeq,
@@ -425,14 +493,16 @@ export async function judgeItem(
         baseRationale,
         fluency ? `语声语调：${fluency.rationale}` : '',
         repetition ? `简洁沟通：${repetition.rationale}` : '',
-        trialInvitation ? `试听邀约：${trialInvitation.rationale}` : '',
+        trialInvitation ? `邀约提问：${trialInvitation.rationale}` : '',
+        childClosedQuestions ? `孩子沟通：${childClosedQuestions.rationale}` : '',
         knowledgeHonesty ? `资料真实性：${knowledgeHonesty.rationale}` : '',
       ].filter(Boolean).join('\n'),
       betterScript: [
         primary.betterScript,
         fluency?.triggered ? '放慢语速，先组织好语言再完整表达，减少嗯、啊和重复断句。' : '',
         repetition?.triggered ? '直接回应客户当前的问题，同一意思表达一次即可，把新信息讲简洁、讲全面。' : '',
-        trialInvitation?.triggered ? '您什么时候方便试听？我给您安排。' : '',
+        trialInvitation?.triggered ? '您什么时候方便参加？我给您安排。' : '',
+        childClosedQuestions?.triggered ? '先尊重和鼓励孩子，再讲一个有趣的故事或做个小游戏，孩子开心后再问他喜不喜欢。' : '',
         knowledgeHonesty?.triggered ? '我是新来的，对您问的问题确实不清楚，我马上了解清楚再回复您。' : '',
       ].filter(Boolean).join('；') || undefined,
       confidence: agree ? 0.95 : 0.5,
@@ -464,11 +534,18 @@ export async function judgeItem(
           quoteTurnSeq: repetition.quoteTurnSeq,
         }] : []),
         ...(trialInvitation?.triggered ? [{
-          title: '用开放式问题推进试听',
+          title: '用开放式问题推进邀约',
           impact: trialInvitation.deduction,
           rationale: trialInvitation.rationale,
-          suggestion: '您什么时候方便试听？我给您安排。',
+          suggestion: '您什么时候方便参加？我给您安排。',
           quoteTurnSeq: trialInvitation.quoteTurnSeq,
+        }] : []),
+        ...(childClosedQuestions?.triggered ? [{
+          title: '先铺垫再询问孩子兴趣',
+          impact: childClosedQuestions.deduction,
+          rationale: childClosedQuestions.rationale,
+          suggestion: '先尊重和鼓励孩子，再讲一个有趣的故事或做个小游戏，孩子开心后再问他喜不喜欢。',
+          quoteTurnSeq: childClosedQuestions.quoteTurnSeq,
         }] : []),
         ...(knowledgeHonesty?.triggered ? [{
           title: '不确定时先核实，不信口胡说',

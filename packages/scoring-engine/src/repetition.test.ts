@@ -135,3 +135,20 @@ it('简洁沟通扣10分与语声语调扣40分分别累加', async () => {
   expect(result.rationale).toContain('全局扣40分');
   expect(result.rationale).toContain('全局扣10分');
 });
+
+it('扣分理由列出每次语义重复原句及逐轮填充词证据', () => {
+  const result = analyzeReceptionRepetition(makeSession([
+    '我们会先了解孩子的兴趣和基础，再安排合适的课程。嗯，啊，呃，这个',
+    '先了解孩子的兴趣与基础，然后安排合适的课程。那个，就是，然后，其实',
+    '试听课会让孩子熟悉围棋规则。嗯，啊，呃，这个',
+    '试听会让孩子熟悉围棋规则。',
+    '缺课后可以按照机构政策安排补课。',
+    '缺课后可以按照机构政策安排补课。',
+  ]));
+  expect(result.deduction).toBe(10);
+  expect(result.rationale).toContain('第1轮“我们会先了解孩子的兴趣和基础”');
+  expect(result.rationale).toContain('第2轮“先了解孩子的兴趣与基础”');
+  expect(result.rationale).toContain('无实际信息的语气或填充表达共12次：第1轮“嗯”、“啊”、“呃”、“这个”');
+  expect(result.rationale).toContain('第2轮“那个”、“就是”、“然后”、“其实”');
+  expect(result.rationale).toContain('第3轮“嗯”、“啊”、“呃”、“这个”');
+});

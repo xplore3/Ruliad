@@ -5,6 +5,8 @@ import { mkEvent } from '../events.js';
 import { drillScriptPrompt, institutionKnowledgePrompt, archetypePrompt, resolveDrillScript, initialCustomerArchetype, FIRST_SCENE_MAX_MS, GIVE_UP_PATTERN, SCENE_TRANSITION_NARRATION } from './drill.js';
 import { receptionQuestionPrompt } from './reception-questions.js';
 import { receptionTrialFollowup } from './reception-followup.js';
+import { assessGroundPushProgress } from './ground-push-progress.js';
+import { assessChildStrategy, isChildClosedQuestion } from './child-strategy.js';
 import { preScoreSession } from './scoring.js';
 
 /** 一致性校验重试仍失败时的兜底角色化文案 */
@@ -259,8 +261,21 @@ export async function runTurn(
     const target = await classifyAddressTarget(gateway.forTask('actor'), session.transcript, text);
     if (target === 'child') {
       traineeTurn.addressedToChild = true;
-      const childReply = await replyAsChild(gateway.forTask('actor'), [...session.transcript, traineeTurn], text)
-        .catch(() => ({ text: '', resistant: true }));
+      const closedQuestion = scenario.category === '地推' && isChildClosedQuestion(text);
+      const strategy = scenario.category === '地推'
+        ? await assessChildStrategy(gateway.forTask('actor'), [...session.transcript, traineeTurn])
+        : { effective: null, reason: '' };
+      let childReply: { text: string; resistant: boolean };
+      if (strategy.effective === true) {
+        childReply = { text: closedQuestion ? '我喜欢！' : '哈哈，真好玩！', resistant: false };
+      } else if (strategy.effective === false) {
+        childReply = { text: closedQuestion ? '我不喜欢。' : '我不想玩。', resistant: true };
+        if (closedQuestion) traineeTurn.groundChildClosedQuestion = true;
+      } else {
+        childReply = await replyAsChild(gateway.forTask('actor'), [...session.transcript, traineeTurn], text)
+          .catch(() => ({ text: '', resistant: true }));
+      }
+      const childInterestResolved = session.childInterestResolved || (closedQuestion && strategy.effective === true);
       const childReplyTurn: TranscriptTurn = {
         seq: traineeTurn.seq + 1,
         speaker: 'child',
@@ -282,6 +297,9 @@ export async function runTurn(
           transcript: [...session.transcript, traineeTurn, childReplyTurn, personaTurn],
           childMode: false,
           childAttemptCount,
+          childInterestResolved,
+          completionStatus: 'incomplete',
+          completionReason: `卖邀请函失败：销售未能用合理策略说服孩子。${strategy.reason}`,
         });
         return {
           traineeTurn,
@@ -298,6 +316,7 @@ export async function runTurn(
         transcript: [...session.transcript, traineeTurn, childReplyTurn],
         childMode: true,
         childAttemptCount,
+        childInterestResolved,
       });
       void store.appendEvent(
         mkEvent(EventTypes.SESSION_TURN, {
@@ -330,6 +349,9 @@ export async function runTurn(
     return null;
   }
   const { bundle, drillScript } = runtime;
+  if (scenario.category === '地推' && session.childInterestResolved) {
+    bundle.systemPrompt = `${bundle.systemPrompt}\n\n【六连问末题替换（必须执行）】\n销售已提前说服孩子，孩子已明确喜欢或愿意参加。六连问最后一问不得再使用“孩子不喜欢/宝贝你想去吗”，改从以下问题中选择一道本场尚未问过的问题：孩子学的太多了、我太忙了、一周上几次课、我们家有点远、学费怎么收、你们根据年龄分班吗、这个需要孩子练习很长时间吗、你们有内部教材和课程体系吗。检查完整对话，任何问题都不得重复。`;
+  }
 
   // 双场制只适用于地推：咨询接待永不进入固定无兴趣小场
   const dualScene =
@@ -355,6 +377,9 @@ export async function runTurn(
   let shouldClose = false;
   let asksChild = false;
   let receptionQuestionIndex = session.receptionQuestionIndex;
+  let groundPushLastChance = session.groundPushLastChance ?? false;
+  let completionStatus = session.completionStatus;
+  let completionReason = session.completionReason;
   let warmupAudio: Buffer | undefined;
   let warmupFormat: string | undefined;
   const lastSceneCoachIndex = session.transcript
@@ -370,6 +395,9 @@ export async function runTurn(
     drillScript?.content ?? bundle.systemPrompt,
     isOpening
   ).catch(() => false);
+  const groundPushProgress = !receptionFollowup && !offPoint && !isSystemGreeting && !dualScene && scenario.category === '地推'
+    ? await assessGroundPushProgress(gateway.forTask('actor'), transcriptSoFar, groundPushLastChance)
+    : undefined;
   if (receptionFollowup) {
     replyText = receptionFollowup.text;
     shouldClose = receptionFollowup.shouldClose;
@@ -377,6 +405,16 @@ export async function runTurn(
     // 开场不合格、明显跑题或持续无目的闲聊：潜在客户不再配合，强制结束
     replyText = '（客户看了看时间，打断销售）抱歉，我们还有事，先走了。';
     shouldClose = true;
+  } else if (groundPushProgress && !groundPushProgress.substantive) {
+    if (groundPushLastChance) {
+      replyText = '好的，我回去琢磨琢磨，先走了。';
+      shouldClose = true;
+      completionStatus = 'incomplete';
+      completionReason = `客户已给“我回去琢磨琢磨”的最后推进机会，但学员仍未作出售卖邀请函、填写信息、选择支付方式或约定时间等实质动作。${groundPushProgress.reason}`;
+    } else {
+      replyText = '好的，我回去琢磨琢磨。';
+      groundPushLastChance = true;
+    }
   } else if (!isSystemGreeting && dualScene && traineeGaveUp) {
     // 快速通道：不再调用 LLM 生成客户回复与一致性校验
     replyText = '（客户摆了摆手，快步走远了）';
@@ -500,10 +538,13 @@ export async function runTurn(
       transcript,
       emotionTrace,
       receptionQuestionIndex,
+      groundPushLastChance,
+      completionStatus,
+      completionReason,
       // 家长问孩子 → 激活孩子模式，并从销售第一次说服孩子起计算两轮机会
       ...(childTurn ? { childMode: true, childAttemptCount: 0 } : {}),
     });
-    preScoreSession(ctx, { ...session, transcript, emotionTrace, receptionQuestionIndex }, scenario);
+    preScoreSession(ctx, { ...session, transcript, emotionTrace, receptionQuestionIndex, groundPushLastChance, completionStatus, completionReason }, scenario);
   }
 
   void store.appendEvent(
