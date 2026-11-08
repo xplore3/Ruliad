@@ -11,6 +11,8 @@ interface ScoringCacheEntry {
 }
 
 const scoringCache = new Map<string, ScoringCacheEntry>();
+const preScoreTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const PRE_SCORE_IDLE_MS = 15_000;
 
 function scoringRevision(session: Session): string {
   const lastTurn = session.transcript[session.transcript.length - 1];
@@ -18,6 +20,7 @@ function scoringRevision(session: Session): string {
     session.transcript.length,
     lastTurn?.seq ?? 0,
     lastTurn?.at ?? '',
+    session.transcript.map((turn) => `${turn.seq}:${turn.expressionIntent?.tone ?? ''}:${turn.expressionIntent?.intent ?? ''}`).join('|'),
     session.videoFrames?.length ?? 0,
     session.quizResults?.length ?? 0,
   ].join(':');
@@ -76,16 +79,35 @@ function startScoring(
   return entry;
 }
 
+function cancelPreScore(sessionId: string): void {
+  const timer = preScoreTimers.get(sessionId);
+  if (timer) clearTimeout(timer);
+  preScoreTimers.delete(sessionId);
+}
+
 export function clearScoringCache(sessionId: string): void {
+  cancelPreScore(sessionId);
   scoringCache.delete(sessionId);
 }
 
 export function preScoreSession(ctx: RouteContext, session: Session, scenario: Scenario): void {
+  cancelPreScore(session.id);
   const dialogueTurns = session.transcript.filter((turn) => turn.speaker === 'trainee' || turn.speaker === 'persona').length;
   if (dialogueTurns < 4) return;
   const current = scoringCache.get(session.id);
   if (current?.revision === scoringRevision(session)) return;
-  startScoring(ctx, session, scenario);
+
+  const timer = setTimeout(() => {
+    preScoreTimers.delete(session.id);
+    void ctx.store.getSession(session.id).catch(() => undefined).then((latest) => {
+      const snapshot = latest ?? session;
+      const cached = scoringCache.get(session.id);
+      if (cached?.revision === scoringRevision(snapshot) || (cached && !cached.settled)) return;
+      startScoring(ctx, snapshot, scenario);
+    });
+  }, PRE_SCORE_IDLE_MS);
+  timer.unref();
+  preScoreTimers.set(session.id, timer);
 }
 
 export async function scoreSessionWithCache(
@@ -94,6 +116,7 @@ export async function scoreSessionWithCache(
   scenario: Scenario,
   log?: FastifyBaseLogger
 ): Promise<ScoreReport> {
+  cancelPreScore(session.id);
   const revision = scoringRevision(session);
   const current = scoringCache.get(session.id);
   if (current?.revision === revision) {

@@ -147,7 +147,7 @@ export function createLLMGateway(
   options: GatewayOptions = {}
 ): LLMGateway {
   const providers = new Map<LLMTask, LLMProvider>();
-  const tasks: LLMTask[] = ['actor', 'judge', 'judge_secondary', 'extractor', 'video_judge'];
+  const tasks: LLMTask[] = ['actor', 'judge', 'judge_realtime', 'judge_secondary', 'extractor', 'video_judge'];
 
   // ---- 诊断：启动时 dump LLM 链路选择 ----
   const LLM_PROVIDER = env.LLM_PROVIDER;
@@ -165,22 +165,29 @@ export function createLLMGateway(
   // 请求超时：默认 60s（provider 内默认值），LLM_TIMEOUT_MS 可覆盖（非法值忽略）
   const parsedTimeout = Number(env.LLM_TIMEOUT_MS);
   const timeoutMs = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : undefined;
+  const parsedRealtimeTimeout = Number(env.LLM_REALTIME_TIMEOUT_MS);
+  const realtimeTimeoutMs = Number.isFinite(parsedRealtimeTimeout) && parsedRealtimeTimeout > 0
+    ? parsedRealtimeTimeout
+    : 3000;
   if (main) {
     console.log(`[LLMGateway][diag] → selected: real provider (baseUrl=${main.baseUrl}, model=${main.model}, key=${main.apiKey.slice(0, 6)}...)`);
     if (options.logger?.info) options.logger.info({ baseUrl: main.baseUrl, model: main.model, keyPrefix: main.apiKey.slice(0, 6) }, 'LLM Gateway: 使用真实 provider');
     const baseUrl = main.baseUrl;
     const fallbackModel = main.model;
 
-    const mainProvider = (model?: string) =>
+    const mainProvider = (model?: string, requestTimeoutMs = timeoutMs) =>
       new OpenAICompatibleProvider({
         apiKey: main.apiKey,
         baseUrl,
         model: model ?? fallbackModel,
-        timeoutMs,
+        timeoutMs: requestTimeoutMs,
       });
 
     providers.set('actor', mainProvider(env.LLM_MODEL_ACTOR));
     providers.set('judge', mainProvider(env.LLM_MODEL_JUDGE));
+    const realtimeJudgeModel = env.LLM_MODEL_JUDGE_REALTIME ??
+      (env.LLM_PROVIDER?.trim().toLowerCase() === 'deepseek' ? 'deepseek-chat' : undefined);
+    providers.set('judge_realtime', mainProvider(realtimeJudgeModel, realtimeTimeoutMs));
     providers.set('extractor', mainProvider(env.LLM_MODEL_EXTRACTOR));
     // 视频评审：需视觉模型（如 qwen-vl-plus）；未单独配置时回退主模型（非视觉模型会在调用时失败，由调用方兜底跳过）
     providers.set('video_judge', mainProvider(env.LLM_MODEL_VIDEO_JUDGE));

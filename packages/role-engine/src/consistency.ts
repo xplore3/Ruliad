@@ -76,7 +76,11 @@ export async function checkConsistency(
   ].join('\n');
 
   try {
-    const result = await llm.chat([{ role: 'user', content: prompt }], { jsonMode: true });
+    const result = await llm.chat([{ role: 'user', content: prompt }], {
+      jsonMode: true,
+      temperature: 0,
+      maxTokens: 128,
+    });
     const parsed = JSON.parse(result.content) as LlmCheckParsed;
     if (parsed.pass === false) {
       return { pass: false, reasons: [String(parsed.reason ?? '语义一致性校验未通过')] };

@@ -1037,9 +1037,6 @@ body.no-tab { background: linear-gradient(160deg, #FFF0EE, #F7F7F8 40%); }
   background: rgba(255,255,255,.96); border: 1px solid #E2E8F0; }
 .scene-grid .cover .diff { position: absolute; bottom: 8px; right: 8px; z-index: 1; font-size: 11px;
   color: #64748B; background: rgba(255,255,255,.90); padding: 2px 8px; border-radius: 999px; }
-.scene-grid .cover .scripted { position: absolute; top: 8px; right: 8px; z-index: 1;
-  background: rgba(255,255,255,.96); color: #64748B; font-size: 11px; font-weight: 600;
-  padding: 2px 8px; border-radius: 999px; border: 1px solid #E2E8F0; }
 .scene-grid .cover .practiced { position: absolute; bottom: 8px; left: 8px; z-index: 1;
   background: rgba(255,255,255,.96); color: #FF6B5B; font-size: 11px; font-weight: 600;
   padding: 2px 8px; border-radius: 999px; border: 1px solid #E2E8F0; }
