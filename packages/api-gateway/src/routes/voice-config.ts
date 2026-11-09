@@ -814,8 +814,9 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
       scope: plan.scope,
       scopeReason: plan.scopeReason,
       impact: plan.impact,
-      general: plan.op.general === true,
-      generalReason: plan.op.generalReason,
+      // 服务端权限策略判定的通用/共享作用域同样视为 general（与 LLM 标记一致对外呈现）
+      general: plan.scope === 'general' || plan.op.general === true,
+      generalReason: plan.scope === 'general' ? (plan.scopeReason ?? plan.op.generalReason) : plan.op.generalReason,
       planKind: plan.primary.kind,
     }));
 
@@ -1060,7 +1061,7 @@ async function executePlan(
         // 计划补丁中的展示字段一并落库，避免只建出「有背景没属性」的空角色
         for (const key of ['name', 'occupation', 'industry', 'personalityTags', 'objections', 'hiddenInfo', 'decisionStyle', 'voiceProfile', 'avatar'] as const) {
           const value = (payload as Record<string, unknown>)[key];
-          if (value !== undefined) (persona as Record<string, unknown>)[key] = value;
+          if (value !== undefined) (persona as unknown as Record<string, unknown>)[key] = value;
         }
         persona.background = personaBackground(persona);
         await store.savePersonaConfig(persona);
