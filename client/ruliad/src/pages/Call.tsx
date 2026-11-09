@@ -437,7 +437,7 @@ export default function Call() {
             {/* PC 侧栏 */}
             <aside className="call-side">
               <div className="card panel">
-                <h3 style={{ marginBottom: '8px', fontWeight: 700, fontSize: '15px' }}>🎯 本场目标</h3>
+                <h3 className="bar-title" style={{ marginBottom: '8px', fontWeight: 700, fontSize: '15px' }}>本场目标</h3>
                 <ul className="goal">
                   {(scenarioInfo?.coverageTopics?.length
                     ? scenarioInfo.coverageTopics

@@ -67,7 +67,7 @@ export default function ManagementMemberProfile() {
 
       {/* 技能详情 */}
       <div className="card" style={{ padding: '18px 22px', marginBottom: 18 }}>
-        <b style={{ fontSize: 15.5 }}>📈 技能档位</b>
+        <div className="bar-title"><b style={{ fontSize: 15.5 }}>技能档位</b></div>
         {data.skillDetails.length === 0 ? (
           <p className="small muted" style={{ marginTop: 10 }}>暂无技能数据</p>
         ) : (
@@ -107,7 +107,7 @@ export default function ManagementMemberProfile() {
 
       {/* 会话时间线 */}
       <div className="card" style={{ padding: '18px 22px' }}>
-        <b style={{ fontSize: 15.5 }}>🧾 会话时间线</b>
+        <div className="bar-title"><b style={{ fontSize: 15.5 }}>会话时间线</b></div>
         {data.timeline.length === 0 ? (
           <p className="small muted" style={{ marginTop: 10 }}>暂无已完成会话</p>
         ) : (

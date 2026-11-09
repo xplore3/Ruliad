@@ -62,7 +62,7 @@ const REVIEW_REDIRECT_MS = 10000;
 const GUIDE_CHOICE_QUESTION = '想再听一个版本的示范，还是开始模拟练习？';
 /** 自动聆听 VAD 参数（参考服务端 voice.ts 的 RMS + 静音判停思路）：新手指引与 live 阶段共用；
  * 语音判定用 AdaptiveVad 自适应噪声底，不再使用固定 RMS 阈值 */
-const VAD_SILENCE_MS = 1200;
+const VAD_SILENCE_MS = 2500;
 /** 新手指引（资格提问/示范选择）的判停静音时长：回答通常简短，比 live 阶段更激进地收尾 */
 const GUIDE_VAD_SILENCE_MS = 800;
 const VAD_MAX_RECORD_MS = 60000;/** 自动聆听识别失败的重试上限，超过后给出文字提示 */
@@ -2023,7 +2023,7 @@ export default function Practice() {
           {/* ---- 右：场景信息与教练 ---- */}
           <aside className="side-r">
             <div className="card panel" style={{ marginBottom: 14 }}>
-              <h3 style={{ marginBottom: '8px', fontSize: '15px', fontWeight: 700 }}>🎯 本场信息</h3>
+              <h3 className="bar-title" style={{ marginBottom: '8px', fontSize: '15px', fontWeight: 700 }}>本场信息</h3>
               <ul className="goal">
                 <li>{scenario?.name ?? '—'}</li>
                 <li>限时 {durationMinutes ?? '-'} 分钟 · {sessionMode === 'practice' ? '练习模式' : '考核模式'}</li>

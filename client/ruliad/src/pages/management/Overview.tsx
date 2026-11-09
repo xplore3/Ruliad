@@ -61,7 +61,7 @@ export default function ManagementOverview() {
     <div>
       {/* 机构信息 */}
       <div className="card" style={{ padding: '16px 22px', marginBottom: 18, display: 'flex', alignItems: 'center', gap: 12 }}>
-        <div className="avatar av2" style={{ width: 42, height: 42, fontSize: 17, flex: 'none' }}>🏢</div>
+        <div className="org-mark" />
         <div style={{ flex: 1 }}>
           <b style={{ fontSize: 15.5 }}>{data.org.name ?? '未绑定机构'}</b>
           <div className="small muted">
@@ -86,7 +86,7 @@ export default function ManagementOverview() {
       {/* 知识库概览 */}
       <div className="card" style={{ padding: '18px 22px', marginBottom: 18 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <b style={{ fontSize: 15.5 }}>📚 知识库</b>
+          <div className="bar-title"><b style={{ fontSize: 15.5 }}>知识库</b></div>
           <span className="small muted">v{kb.version} · 生效于 {fmtDate(kb.effectiveAt)}</span>
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -101,7 +101,7 @@ export default function ManagementOverview() {
 
       {/* 需关注 */}
       <div className="card" style={{ padding: '18px 22px', marginBottom: 18 }}>
-        <b style={{ fontSize: 15.5 }}>⚠️ 需关注成员</b>
+        <div className="bar-title"><b style={{ fontSize: 15.5 }}>需关注成员</b></div>
         {attention.length === 0 ? (
           <p className="small muted" style={{ marginTop: 10 }}>暂无需要特别关注的成员</p>
         ) : (
@@ -119,7 +119,7 @@ export default function ManagementOverview() {
 
       {/* 近期活跃 */}
       <div className="card" style={{ padding: '18px 22px' }}>
-        <b style={{ fontSize: 15.5 }}>🕒 近期活跃</b>
+        <div className="bar-title"><b style={{ fontSize: 15.5 }}>近期活跃</b></div>
         {recent.length === 0 ? (
           <p className="small muted" style={{ marginTop: 10 }}>暂无成员活动</p>
         ) : (

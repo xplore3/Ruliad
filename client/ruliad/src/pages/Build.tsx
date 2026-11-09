@@ -793,7 +793,7 @@ export default function Build() {
       {activeTab === 'list' && (
         <section className="section">
           <div className="sec-head">
-            <h2><span>🛠️</span> 我的场景</h2>
+            <h2 className="bar-title">我的场景</h2>
             <div style={{ display: 'flex', gap: 8 }}>
               {isAdmin && (
                 <button className="btn btn-ghost" onClick={() => navigate('/library')}>
@@ -884,7 +884,7 @@ export default function Build() {
         <section className="section" style={{ paddingTop: 8 }}>
           <div className="sec-head">
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-              <h2><span>✏️</span> 场景编辑器</h2>
+              <h2 className="bar-title">场景编辑器</h2>
               <div className="seg">
                 <button onClick={() => setEditorMode('voice')} className={editorMode === 'voice' ? 'on' : ''}>
                   🎙️ 语音自动处理
@@ -924,7 +924,7 @@ export default function Build() {
               {editorMode === 'voice' && (
               <div className="card formsec">
                 <div className="fs-head">
-                  <h3>🎙️ 语音创建 / 编辑</h3>
+                  <h3 className="bar-title">语音创建 / 编辑</h3>
                   <span className="sub">说出想要的场景或要修改的地方，自动识别并填入下方表单</span>
                 </div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
@@ -996,7 +996,7 @@ export default function Build() {
               {editorMode === 'form' && (<>
               {/* ① 场景基础 */}
               <div className="card formsec" id="bsec-base">
-                <div className="fs-head"><h3>① 场景基础</h3><span className="sub">这个场景是做什么的</span></div>
+                <div className="fs-head"><h3 className="bar-title">场景基础</h3><span className="sub">这个场景是做什么的</span></div>
                 <div className="field">
                   <label>场景标题</label>
                   <input type="text" value={form.name} onChange={(e) => updateForm({ name: e.target.value })} className="input" placeholder="如：首次电话邀约" maxLength={30} />
@@ -1054,7 +1054,7 @@ export default function Build() {
 
               {/* ② 练习目标 */}
               <div className="card formsec" id="bsec-goal">
-                <div className="fs-head"><h3>② 练习目标</h3><span className="sub">练完要达成什么</span></div>
+                <div className="fs-head"><h3 className="bar-title">练习目标</h3><span className="sub">练完要达成什么</span></div>
                 <div className="field">
                   <label>我方目标</label>
                   <textarea value={form.goal} onChange={(e) => updateForm({ goal: e.target.value })} className="input" rows={2} />
@@ -1073,7 +1073,7 @@ export default function Build() {
 
               {/* ③ 角色画像 */}
               <div className="card formsec" id="bsec-role">
-                <div className="fs-head"><h3>③ 角色画像</h3><span className="sub">你在和谁对话</span></div>
+                <div className="fs-head"><h3 className="bar-title">角色画像</h3><span className="sub">你在和谁对话</span></div>
                 <div className="row3">
                   <div className="field"><label>姓名</label><input type="text" value={form.roleName} onChange={(e) => updateForm({ roleName: e.target.value })} className="input" /></div>
                   <div className="field"><label>职位</label><input type="text" value={form.roleTitle} onChange={(e) => updateForm({ roleTitle: e.target.value })} className="input" /></div>
@@ -1109,7 +1109,7 @@ export default function Build() {
 
               {/* ④ 对话参数 */}
               <div className="card formsec" id="bsec-params">
-                <div className="fs-head"><h3>④ 对话参数</h3><span className="sub">角色说话的脾气</span></div>
+                <div className="fs-head"><h3 className="bar-title">对话参数</h3><span className="sub">角色说话的脾气</span></div>
                 <div className="field">
                   <label>语速</label>
                   <input type="range" min={1} max={3} step={1} value={form.speechRate} onChange={(e) => updateForm({ speechRate: Number(e.target.value) })} />
@@ -1132,7 +1132,7 @@ export default function Build() {
 
               {/* ⑤ 评估配置 */}
               <div className="card formsec" id="bsec-eval">
-                <div className="fs-head"><h3>⑤ 评估配置</h3><span className="sub">考核技能点与六维权重</span></div>
+                <div className="fs-head"><h3 className="bar-title">评估配置</h3><span className="sub">考核技能点与六维权重</span></div>
                 <div className="field">
                   <label>考核技能点（可多选）</label>
                   <div className="pick">
@@ -1163,7 +1163,7 @@ export default function Build() {
 
               {/* ⑥ 剧本配置（仅实用场景） */}
               <div className="card formsec" id="bsec-script">
-                <div className="fs-head"><h3>⑥ 剧本配置</h3><span className="sub">有剧本对练的流程与考核点</span></div>
+                <div className="fs-head"><h3 className="bar-title">剧本配置</h3><span className="sub">有剧本对练的流程与考核点</span></div>
                 {form.sceneType === 'drill' ? (
                   <div className="hint">当前为「实战训练」类型，无需配置剧本。</div>
                 ) : (
@@ -1194,7 +1194,7 @@ export default function Build() {
 
               {/* ⑦ 参与者 */}
               <div className="card formsec" id="bsec-participants">
-                <div className="fs-head"><h3>⑦ 参与者</h3><span className="sub">各参与者的特征、说话方式与参与目的</span></div>
+                <div className="fs-head"><h3 className="bar-title">参与者</h3><span className="sub">各参与者的特征、说话方式与参与目的</span></div>
                 {form.participants.length === 0 && (
                   <div className="hint" style={{ marginBottom: 8 }}>尚未添加参与者，点击下方按钮添加（通常包含学员与客户两方）。</div>
                 )}
@@ -1264,7 +1264,7 @@ export default function Build() {
               {/* 试聊三轮预览 */}
               {trial.open && (
                 <div className="card formsec">
-                  <div className="fs-head"><h3>🎧 试聊预览</h3><span className="sub">第 {Math.min(trialRounds + (trialFinished ? 0 : 1), 3)} / 3 轮</span></div>
+                  <div className="fs-head"><h3 className="bar-title">试聊预览</h3><span className="sub">第 {Math.min(trialRounds + (trialFinished ? 0 : 1), 3)} / 3 轮</span></div>
                   {trial.messages.length === 0 && (
                     <div className="hint" style={{ marginBottom: 8 }}>以销售身份发第一句话，角色会以客户口吻回应。</div>
                   )}

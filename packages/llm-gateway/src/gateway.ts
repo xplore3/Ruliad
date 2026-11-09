@@ -32,6 +32,31 @@ function wrapDiagLogging(
   logger?: LLMDiagLogger
 ): LLMProvider {
   if (!logger) return provider;
+  const logResult = (startedAt: number, result: Awaited<ReturnType<LLMProvider['chat']>>) => {
+    logger.info(
+      {
+        task,
+        provider: provider.name,
+        model: result.model,
+        ms: Date.now() - startedAt,
+        promptTokens: result.usage?.promptTokens,
+        completionTokens: result.usage?.completionTokens,
+        contentLength: result.content.length,
+      },
+      'LLM 调用完成'
+    );
+  };
+  const logError = (startedAt: number, err: unknown) => {
+    logger.warn(
+      {
+        task,
+        provider: provider.name,
+        ms: Date.now() - startedAt,
+        err: err instanceof Error ? err.message : String(err),
+      },
+      'LLM 调用失败'
+    );
+  };
   return {
     name: provider.name,
     async chat(messages, options) {
@@ -39,44 +64,45 @@ function wrapDiagLogging(
       logger.info({ task, provider: provider.name, messages: messages.length }, 'LLM 调用开始');
       try {
         const result = await provider.chat(messages, options);
-        logger.info(
-          {
-            task,
-            provider: provider.name,
-            model: result.model,
-            ms: Date.now() - startedAt,
-            promptTokens: result.usage?.promptTokens,
-            completionTokens: result.usage?.completionTokens,
-            contentLength: result.content.length,
-          },
-          'LLM 调用完成'
-        );
+        logResult(startedAt, result);
         return result;
       } catch (err) {
-        logger.warn(
-          {
-            task,
-            provider: provider.name,
-            ms: Date.now() - startedAt,
-            err: err instanceof Error ? err.message : String(err),
-          },
-          'LLM 调用失败'
-        );
+        logError(startedAt, err);
         throw err;
       }
     },
+    chatStream: provider.chatStream && (async (messages, options, onDelta) => {
+      const startedAt = Date.now();
+      logger.info({ task, provider: provider.name, messages: messages.length, stream: true }, 'LLM 调用开始');
+      try {
+        const result = await provider.chatStream!(messages, options, onDelta);
+        logResult(startedAt, result);
+        return result;
+      } catch (err) {
+        logError(startedAt, err);
+        throw err;
+      }
+    }),
   };
 }
 
 function wrapUsage(provider: LLMProvider, task: LLMTask, onUsage?: (info: UsageInfo) => void): LLMProvider {
   if (!onUsage) return provider;
+  const record = (result: Awaited<ReturnType<LLMProvider['chat']>>) => {
+    onUsage({ task, model: result.model, usage: result.usage });
+  };
   return {
     name: provider.name,
     async chat(messages, options) {
       const result = await provider.chat(messages, options);
-      onUsage({ task, model: result.model, usage: result.usage });
+      record(result);
       return result;
     },
+    chatStream: provider.chatStream && (async (messages, options, onDelta) => {
+      const result = await provider.chatStream!(messages, options, onDelta);
+      record(result);
+      return result;
+    }),
   };
 }
 

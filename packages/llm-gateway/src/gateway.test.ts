@@ -125,3 +125,29 @@ describe('OpenAICompatibleProvider', () => {
     await expect(provider.chat([{ role: 'user', content: 'hi' }])).rejects.toThrow('500');
   });
 });
+
+
+it('OpenAI 兼容 SSE 流式响应逐段回调并聚合正式内容', async () => {
+  let capturedBody = '';
+  const encoder = new TextEncoder();
+  const fakeFetch = async (_url: string, init: { body: string }) => {
+    capturedBody = init.body;
+    return {
+      ok: true,
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode('data: {"model":"m1","choices":[{"delta":{"content":"第一句。"}}]}\n\n'));
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"第二句。"}}]}\n\n'));
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      }),
+    };
+  };
+  const provider = new OpenAICompatibleProvider({ apiKey: 'k', baseUrl: 'https://example.com/v1', model: 'm1' }, fakeFetch);
+  const deltas: string[] = [];
+  const result = await provider.chatStream!([{ role: 'user', content: 'hi' }], undefined, (delta) => deltas.push(delta));
+  expect(JSON.parse(capturedBody).stream).toBe(true);
+  expect(deltas).toEqual(['第一句。', '第二句。']);
+  expect(result.content).toBe('第一句。第二句。');
+});

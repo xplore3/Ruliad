@@ -485,7 +485,7 @@ h2.bar::before { content: ''; width: 4px; height: 16px; border-radius: 2px; back
 
 /* ===== 表单分节卡片 ===== */
 .formsec { padding: 22px 24px; margin-bottom: 18px; }
-.formsec .fs-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 18px; }
+.formsec .fs-head { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
 .formsec .fs-head h3 { font-size: 16px; }
 .formsec .fs-head .sub { font-size: 12px; color: #6B7280; }
 .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
@@ -781,6 +781,9 @@ h2.bar::before { content: ''; width: 4px; height: 16px; border-radius: 2px; back
 .me-list a + a { border-top: 1px solid #EBEBEF; }
 .me-list a:hover { background: #F7F7F8; }
 .me-list a .ic { font-size: 19px; }
+.me-list a .me-dot { width: 4px; height: 16px; border-radius: 2px; background: #FF6B5B; flex: none; }
+/* 「我的」页所属机构标识：主色调圆角色块 */
+.org-mark { width: 44px; height: 44px; border-radius: 12px; background: #FF6B5B; flex: none; }
 .me-list a .arrow { margin-left: auto; color: #6B7280; font-weight: 400; }
 
 @media (max-width:768px) {

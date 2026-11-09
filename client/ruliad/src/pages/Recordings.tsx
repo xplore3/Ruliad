@@ -163,7 +163,7 @@ export default function Recordings() {
     <main className="wrap">
       <section className="section" style={{ paddingBottom: 12 }}>
         <div className="sec-head">
-          <h2>🎙️ 录音管理</h2>
+          <h2 className="bar-title">录音管理</h2>
           <span className="more">
             共 {totalItems} 条录音{totalGroups > 0 ? ` · ${totalGroups} 场练习` : ''}
           </span>

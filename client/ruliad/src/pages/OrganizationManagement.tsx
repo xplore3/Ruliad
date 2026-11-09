@@ -276,7 +276,7 @@ export default function OrganizationManagement() {
     <main className="wrap">
       <section className="section" style={{ paddingBottom: 12 }}>
         <div className="sec-head">
-          <h2>🏢 机构管理</h2>
+          <h2 className="bar-title">机构管理</h2>
           <span className="more" style={{ color: '#FF6B5B', cursor: 'pointer' }} onClick={() => navigate('/profile')}>
             返回我的 ›
           </span>
@@ -339,7 +339,7 @@ export default function OrganizationManagement() {
           {selectedOrg && (
             <section className="section" style={{ paddingBottom: 6 }}>
               <div className="sec-head">
-                <h2>🏢 {selectedOrg.name}</h2>
+                <h2 className="bar-title">{selectedOrg.name}</h2>
                 <span className="more">成员 {selectedOrg.memberCount} 人 · 小组 {selectedOrg.teamCount} 个</span>
               </div>
               {/* 机构简介（展示给机构成员） */}
@@ -503,7 +503,7 @@ export default function OrganizationManagement() {
           {!selectedOrg && unassignedUsers.length > 0 && (
             <section className="section" style={{ paddingBottom: 6 }}>
               <div className="sec-head">
-                <h2>👤 未分配机构</h2>
+                <h2 className="bar-title">未分配机构</h2>
                 <span className="more">{unassignedUsers.length} 人</span>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

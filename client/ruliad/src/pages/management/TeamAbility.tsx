@@ -69,7 +69,7 @@ export default function ManagementTeamAbility() {
     <div>
       {/* 团队薄弱技能 */}
       <div className="card" style={{ padding: '18px 22px', marginBottom: 18 }}>
-        <b style={{ fontSize: 15.5 }}>🧊 团队薄弱技能</b>
+        <div className="bar-title"><b style={{ fontSize: 15.5 }}>团队薄弱技能</b></div>
         {data.weakSkills.length === 0 ? (
           <p className="small muted" style={{ marginTop: 10 }}>暂无薄弱技能数据，完成考核后自动生成</p>
         ) : (
@@ -93,7 +93,7 @@ export default function ManagementTeamAbility() {
       {/* 团队 × 技能热力图 */}
       <div className="card" style={{ padding: '18px 22px', marginBottom: 18, overflowX: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <b style={{ fontSize: 15.5 }}>🔥 团队能力热力图</b>
+          <div className="bar-title"><b style={{ fontSize: 15.5 }}>团队能力热力图</b></div>
           <span className="small muted">基于基线考核 · 得分均值</span>
         </div>
         {skillRows.length === 0 || teams.length === 0 ? (
@@ -144,7 +144,7 @@ export default function ManagementTeamAbility() {
       {/* 需关注 */}
       {data.attention.length > 0 && (
         <div className="card" style={{ padding: '18px 22px', marginBottom: 18 }}>
-          <b style={{ fontSize: 15.5 }}>⚠️ 需关注成员</b>
+          <div className="bar-title"><b style={{ fontSize: 15.5 }}>需关注成员</b></div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
             {data.attention.map((a) => (
               <div key={a.userId} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -160,7 +160,7 @@ export default function ManagementTeamAbility() {
       {/* 成员能力明细 */}
       <div className="card" style={{ padding: '8px 18px' }}>
         <div style={{ padding: '12px 8px' }}>
-          <b style={{ fontSize: 15.5 }}>👥 成员能力明细</b>
+          <div className="bar-title"><b style={{ fontSize: 15.5 }}>成员能力明细</b></div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           {data.members.map((m) => (

@@ -1,51 +1,296 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1440" height="640" viewBox="0 0 1440 640" fill="none">
-  <!-- 左侧：AI 的规整世界（网格 + 电路） -->
-  <g stroke="#2E3A56" stroke-opacity="0.65">
-    <path d="M60 100 H 580 M60 200 H 580 M60 300 H 580 M60 400 H 580 M60 500 H 580"/>
-    <path d="M100 60 V 540 M220 60 V 540 M340 60 V 540 M460 60 V 540 M580 60 V 540"/>
-  </g>
-  <g fill="#3A4666">
-    <rect x="112" y="112" width="12" height="12" rx="2"/>
-    <rect x="352" y="212" width="12" height="12" rx="2"/>
-    <rect x="232" y="312" width="12" height="12" rx="2"/>
-    <rect x="472" y="412" width="12" height="12" rx="2"/>
-    <rect x="112" y="412" width="12" height="12" rx="2"/>
-    <rect x="352" y="512" width="12" height="12" rx="2"/>
-  </g>
-  <g stroke="#3A4666" stroke-opacity="0.8">
-    <path d="M124 118 H 352"/>
-    <path d="M358 224 V 312"/>
-    <path d="M244 318 H 465"/>
-    <path d="M118 418 H 226"/>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#101A30"/>
+      <stop offset="0.55" stop-color="#0C1324"/>
+      <stop offset="1" stop-color="#080D18"/>
+    </linearGradient>
+    <radialGradient id="gL" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#3F6FE4" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#3F6FE4" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="gR" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#F2A65A" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#F2A65A" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="gGap" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#FF6B5B" stop-opacity="0.32"/>
+      <stop offset="1" stop-color="#FF6B5B" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="vig" cx="0.5" cy="0.5" r="0.72">
+      <stop offset="0.55" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.30"/>
+    </radialGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#15213A"/>
+      <stop offset="1" stop-color="#0E1730"/>
+    </linearGradient>
+    <linearGradient id="chip" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#182544"/>
+      <stop offset="1" stop-color="#121C34"/>
+    </linearGradient>
+    <linearGradient id="barB" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#3B66CE"/>
+      <stop offset="1" stop-color="#7FA9FF"/>
+    </linearGradient>
+    <linearGradient id="areaA" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F2A65A" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#F2A65A" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="void" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#04060B"/>
+      <stop offset="0.6" stop-color="#090B12"/>
+      <stop offset="1" stop-color="#1A0E14"/>
+    </linearGradient>
+    <linearGradient id="cliffL" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#15213C"/>
+      <stop offset="1" stop-color="#0D1626"/>
+    </linearGradient>
+    <linearGradient id="cliffR" x1="1" y1="0" x2="0" y2="0">
+      <stop offset="0" stop-color="#15213C"/>
+      <stop offset="1" stop-color="#0D1626"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1440" height="640" fill="url(#bg)"/>
+  <ellipse cx="272" cy="322" rx="430" ry="315" fill="url(#gL)"/>
+  <ellipse cx="1168" cy="322" rx="440" ry="315" fill="url(#gR)"/>
+
+  <!-- ══════════ 左侧 · 课堂 ══════════ -->
+  <g stroke="#1C2A48" stroke-width="1" opacity="0.5">
+    <path d="M60 402 V600 M120 402 V600 M180 402 V600 M240 402 V600 M300 402 V600 M360 402 V600 M420 402 V600 M480 402 V600 M540 402 V600 M600 402 V600"/>
+    <path d="M48 402 H620 M48 452 H620 M48 508 H620 M48 568 H620 M48 624 H620"/>
   </g>
 
-  <!-- 中间：断层线 -->
-  <path d="M690 60 L 640 200 L 700 300 L 630 420 L 690 580" stroke="#E85C62" stroke-width="2" stroke-opacity="0.55"/>
-  <path d="M712 60 L 662 200 L 722 300 L 652 420 L 712 580" stroke="#E85C62" stroke-width="0.8" stroke-opacity="0.3"/>
+  <!-- 后排学员 -->
+  <g fill="#1D3158">
+    <rect x="80" y="508" width="40" height="5" rx="2.5"/><rect x="140" y="508" width="40" height="5" rx="2.5"/>
+    <rect x="200" y="508" width="40" height="5" rx="2.5"/><rect x="260" y="508" width="40" height="5" rx="2.5"/>
+    <rect x="320" y="508" width="40" height="5" rx="2.5"/><rect x="380" y="508" width="40" height="5" rx="2.5"/>
+    <rect x="440" y="508" width="40" height="5" rx="2.5"/><rect x="500" y="508" width="40" height="5" rx="2.5"/>
+  </g>
+  <g fill="#18274A" stroke="#2E4A7C" stroke-width="1">
+    <circle cx="100" cy="462" r="7"/><rect x="90" y="474" width="20" height="28" rx="8"/>
+    <circle cx="160" cy="462" r="7"/><rect x="150" y="474" width="20" height="28" rx="8"/>
+    <circle cx="220" cy="462" r="7"/><rect x="210" y="474" width="20" height="28" rx="8"/>
+    <circle cx="280" cy="462" r="7"/><rect x="270" y="474" width="20" height="28" rx="8"/>
+    <circle cx="340" cy="462" r="7"/><rect x="330" y="474" width="20" height="28" rx="8"/>
+    <circle cx="400" cy="462" r="7"/><rect x="390" y="474" width="20" height="28" rx="8"/>
+    <circle cx="460" cy="462" r="7"/><rect x="450" y="474" width="20" height="28" rx="8"/>
+    <circle cx="520" cy="462" r="7"/><rect x="510" y="474" width="20" height="28" rx="8"/>
+  </g>
 
-  <!-- 右侧：人的有机世界（头像轮廓 + 思维涟漪 + 人际网络） -->
-  <g stroke="#E85C62" stroke-opacity="0.5" stroke-width="2" stroke-linecap="round">
-    <circle cx="880" cy="220" r="46" fill="none"/>
-    <path d="M810 420 C 820 340, 850 300, 880 296 C 910 300, 940 340, 950 420"/>
+  <!-- 前排学员 -->
+  <g fill="#233B68">
+    <rect x="105" y="552" width="50" height="5" rx="2.5"/><rect x="165" y="552" width="50" height="5" rx="2.5"/>
+    <rect x="225" y="552" width="50" height="5" rx="2.5"/><rect x="285" y="552" width="50" height="5" rx="2.5"/>
+    <rect x="345" y="552" width="50" height="5" rx="2.5"/><rect x="405" y="552" width="50" height="5" rx="2.5"/>
+    <rect x="465" y="552" width="50" height="5" rx="2.5"/>
   </g>
-  <circle cx="880" cy="220" r="6" fill="#E85C62" fill-opacity="0.8"/>
-  <circle cx="880" cy="220" r="14" stroke="#E85C62" stroke-opacity="0.3" fill="none"/>
-  <g stroke="#E85C62" stroke-opacity="0.22" fill="none">
-    <circle cx="880" cy="220" r="70"/>
-    <circle cx="880" cy="220" r="100"/>
+  <g fill="#203055" stroke="#3A568C" stroke-width="1.2">
+    <circle cx="130" cy="500" r="9.5"/><rect x="117" y="512" width="26" height="34" rx="10"/>
+    <circle cx="190" cy="500" r="9.5"/><rect x="177" y="512" width="26" height="34" rx="10"/>
+    <circle cx="250" cy="500" r="9.5"/><rect x="237" y="512" width="26" height="34" rx="10"/>
+    <circle cx="310" cy="500" r="9.5"/><rect x="297" y="512" width="26" height="34" rx="10"/>
+    <circle cx="370" cy="500" r="9.5"/><rect x="357" y="512" width="26" height="34" rx="10"/>
+    <circle cx="430" cy="500" r="9.5"/><rect x="417" y="512" width="26" height="34" rx="10"/>
+    <circle cx="490" cy="500" r="9.5"/><rect x="477" y="512" width="26" height="34" rx="10"/>
   </g>
 
-  <!-- 人际博弈网络 -->
-  <g stroke="#E85C62" stroke-opacity="0.25" stroke-dasharray="4 6">
-    <path d="M1020 180 L 1090 280 L 1180 210 M1090 280 L 1250 330 L 1150 420"/>
+  <!-- 演示大屏 -->
+  <rect x="56" y="108" width="320" height="272" rx="22" fill="#3F6FE4" opacity="0.07"/>
+  <rect x="72" y="112" width="288" height="252" rx="16" fill="url(#panel)" stroke="#2B4576" stroke-width="1.5"/>
+  <rect x="92" y="132" width="92" height="11" rx="5.5" fill="#5B8AF2"/>
+  <rect x="194" y="132" width="44" height="11" rx="5.5" fill="#33509C"/>
+  <rect x="92" y="160" width="248" height="158" rx="10" fill="#0D1730" stroke="#243D6C"/>
+  <g stroke="#1C3159" stroke-width="0.75">
+    <path d="M98 190 H334 M98 220 H334 M98 250 H334 M98 280 H334"/>
   </g>
-  <g fill="#E85C62" fill-opacity="0.5">
-    <circle cx="1020" cy="180" r="3"/>
-    <circle cx="1090" cy="280" r="2.5"/>
-    <circle cx="1180" cy="210" r="2"/>
-    <circle cx="1250" cy="330" r="3"/>
-    <circle cx="1150" cy="420" r="2.5"/>
-    <circle cx="1300" cy="450" r="2"/>
-    <circle cx="1060" cy="480" r="2"/>
+  <g fill="url(#barB)">
+    <rect x="110" y="254" width="24" height="46" rx="3"/>
+    <rect x="146" y="232" width="24" height="68" rx="3"/>
+    <rect x="182" y="266" width="24" height="34" rx="3"/>
+    <rect x="218" y="214" width="24" height="86" rx="3"/>
+    <rect x="254" y="246" width="24" height="54" rx="3"/>
+    <rect x="290" y="222" width="24" height="78" rx="3"/>
   </g>
+  <path d="M98 300 H334" stroke="#2B4A80" stroke-width="1"/>
+  <circle cx="104" cy="340" r="5" fill="#7FA9FF"/>
+  <rect x="114" y="336" width="66" height="7" rx="3.5" fill="#2A416E"/>
+  <rect x="188" y="336" width="34" height="7" rx="3.5" fill="#20325A"/>
+  <circle cx="318" cy="340" r="11" fill="#132A4E" stroke="#3E6BC4" stroke-width="1.2"/>
+  <path d="M312 340 l4.5 4.5 l8 -9" stroke="#7FA9FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="100" y="364" width="8" height="32" rx="2" fill="#1A2A4C"/>
+  <rect x="332" y="364" width="8" height="32" rx="2" fill="#1A2A4C"/>
+
+  <!-- 悬浮标签 -->
+  <path d="M402 163 H372" stroke="#3A5588" stroke-width="1" stroke-dasharray="2 4" opacity="0.6"/>
+  <rect x="398" y="140" width="128" height="46" rx="13" fill="url(#chip)" stroke="#2E4A80" stroke-width="1.2"/>
+  <circle cx="417" cy="163" r="9" fill="#13264A" stroke="#5B8AF2" stroke-width="1.2"/>
+  <path d="M413 163 l3 3 l5.5 -6" stroke="#8FB2FF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="432" y="157" width="66" height="6" rx="3" fill="#2A4370"/>
+  <rect x="432" y="167" width="42" height="6" rx="3" fill="#21365E"/>
+  <rect x="430" y="216" width="116" height="42" rx="13" fill="url(#chip)" stroke="#2E4A80" stroke-width="1.2"/>
+  <rect x="446" y="226" width="16" height="20" rx="3" fill="#14264A" stroke="#5B8AF2" stroke-width="1.1"/>
+  <path d="M450 232 H458 M450 237 H458 M450 242 H455" stroke="#8FB2FF" stroke-width="1.6" stroke-linecap="round"/>
+  <rect x="470" y="231" width="60" height="6" rx="3" fill="#2A4370"/>
+  <rect x="470" y="241" width="38" height="6" rx="3" fill="#21365E"/>
+
+  <g fill="#41629E">
+    <circle cx="70" cy="74" r="1.6" opacity="0.5"/>
+    <circle cx="300" cy="58" r="1.4" opacity="0.4"/>
+    <circle cx="548" cy="84" r="1.6" opacity="0.5"/>
+    <circle cx="604" cy="300" r="1.5" opacity="0.45"/>
+    <circle cx="40" cy="360" r="1.5" opacity="0.4"/>
+  </g>
+  <g fill="#7FA9FF">
+    <circle cx="360" cy="80" r="1.3" opacity="0.35"/>
+    <circle cx="210" cy="340" r="1.3" opacity="0.3"/>
+    <circle cx="48" cy="208" r="1.4" opacity="0.35"/>
+  </g>
+
+  <!-- ══════════ 右侧 · 实战 ══════════ -->
+  <g stroke="#1C2A48" stroke-width="1" opacity="0.5">
+    <path d="M840 402 V600 M900 402 V600 M960 402 V600 M1020 402 V600 M1080 402 V600 M1140 402 V600 M1200 402 V600 M1260 402 V600 M1320 402 V600 M1380 402 V600"/>
+    <path d="M820 402 H1400 M820 452 H1400 M820 508 H1400 M820 568 H1400 M820 624 H1400"/>
+  </g>
+
+  <!-- 实时压力脉冲线 -->
+  <path d="M880 224 h38 l8 -30 l11 52 l8 -22 h36 l8 -30 l11 52 l8 -22 h36 l8 -30 l11 52 l8 -22 h36 l8 -30 l11 52 l8 -22 h36 l8 -30 l11 52 l8 -22 h120" stroke="#FF8A66" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity="0.15"/>
+  <path d="M880 224 h38 l8 -30 l11 52 l8 -22 h36 l8 -30 l11 52 l8 -22 h36 l8 -30 l11 52 l8 -22 h36 l8 -30 l11 52 l8 -22 h36 l8 -30 l11 52 l8 -22 h120" stroke="#FF8A66" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="1338" cy="224" r="15" stroke="#FF6B5B" stroke-width="1.5" opacity="0.12"/>
+  <circle cx="1338" cy="224" r="9" stroke="#FF6B5B" stroke-width="1.5" opacity="0.3"/>
+  <circle cx="1338" cy="224" r="4.5" fill="#FF6B5B"/>
+
+  <!-- 异议气泡 -->
+  <path d="M986 162 l-9 24 l28 -18 z" fill="#16223D"/>
+  <rect x="948" y="112" width="150" height="56" rx="16" fill="#16223D" stroke="#3D5A94" stroke-width="1.5"/>
+  <text x="1023" y="150" text-anchor="middle" font-family="Arial, 'Microsoft YaHei', sans-serif" font-size="28" font-weight="700" fill="#FFC584">?</text>
+  <rect x="1128" y="112" width="120" height="50" rx="15" fill="#131F38" stroke="#455089" stroke-width="1.5" transform="rotate(3 1188 137)"/>
+  <text x="1188" y="146" text-anchor="middle" font-family="Arial, 'Microsoft YaHei', sans-serif" font-size="21" font-weight="700" fill="#F2A65A" transform="rotate(3 1188 137)">贵</text>
+  <path d="M1312 158 l-8 22 l24 -15 z" fill="#141E35"/>
+  <rect x="1278" y="120" width="86" height="42" rx="13" fill="#141E35" stroke="#3B4C82" stroke-width="1.5"/>
+  <circle cx="1310" cy="141" r="2.6" fill="#8FA3D9"/>
+  <circle cx="1322" cy="141" r="2.6" fill="#8FA3D9"/>
+  <circle cx="1334" cy="141" r="2.6" fill="#8FA3D9"/>
+
+  <!-- 波动数据看板 -->
+  <rect x="900" y="280" width="480" height="220" rx="16" fill="url(#panel)" stroke="#2B4576" stroke-width="1.5"/>
+  <rect x="922" y="292" width="96" height="10" rx="5" fill="#D0924E"/>
+  <rect x="1030" y="294" width="58" height="6" rx="3" fill="#46578A"/>
+  <rect x="1098" y="294" width="28" height="6" rx="3" fill="#37477A"/>
+  <circle cx="1352" cy="297" r="4" fill="#FF6B5B"/>
+  <circle cx="1352" cy="297" r="8" stroke="#FF6B5B" stroke-width="1" opacity="0.35"/>
+  <g stroke="#1D3157" stroke-width="0.75">
+    <path d="M922 360 H1358 M922 405 H1358 M922 450 H1358"/>
+  </g>
+  <path d="M922 440 L958 412 L992 432 L1028 392 L1064 424 L1100 382 L1134 408 L1172 354 L1210 402 L1248 344 L1288 392 L1358 368 L1358 470 L922 470 Z" fill="url(#areaA)"/>
+  <path d="M922 440 L958 412 L992 432 L1028 392 L1064 424 L1100 382 L1134 408 L1172 354 L1210 402 L1248 344 L1288 392 L1358 368" stroke="#F2A65A" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+  <g fill="#FFC584">
+    <circle cx="958" cy="412" r="3"/><circle cx="992" cy="432" r="3"/><circle cx="1028" cy="392" r="3"/>
+    <circle cx="1064" cy="424" r="3"/><circle cx="1100" cy="382" r="3"/><circle cx="1134" cy="408" r="3"/>
+    <circle cx="1172" cy="354" r="3"/><circle cx="1210" cy="402" r="3"/><circle cx="1248" cy="344" r="3"/>
+    <circle cx="1288" cy="392" r="3"/><circle cx="1358" cy="368" r="3.5"/>
+  </g>
+  <path d="M922 470 H1358" stroke="#2B4A80" stroke-width="1"/>
+  <g fill="#223762">
+    <rect x="940" y="480" width="30" height="6" rx="3"/><rect x="1010" y="480" width="30" height="6" rx="3"/>
+    <rect x="1080" y="480" width="30" height="6" rx="3"/><rect x="1150" y="480" width="30" height="6" rx="3"/>
+    <rect x="1220" y="480" width="30" height="6" rx="3"/><rect x="1290" y="480" width="30" height="6" rx="3"/>
+  </g>
+
+  <!-- 博弈棋子 -->
+  <circle cx="962" cy="524" r="16" fill="#E8A04C" stroke="#FFCF99" stroke-width="1"/>
+  <path d="M962 540 C 948 548 944 566 950 580 L 940 592 L 984 592 L 974 580 C 980 566 976 548 962 540 Z" fill="#E8A04C" stroke="#FFCF99" stroke-width="1"/>
+  <rect x="938" y="592" width="48" height="9" rx="3.5" fill="#C9822F" stroke="#FFCF99" stroke-width="1"/>
+
+  <!-- 实时目标靶心 -->
+  <g stroke="#FF8A66" fill="none">
+    <circle cx="1330" cy="566" r="30" stroke-width="1.5" opacity="0.75"/>
+    <circle cx="1330" cy="566" r="19" stroke-width="1.5" opacity="0.45"/>
+    <circle cx="1330" cy="566" r="8" stroke-width="1.5" opacity="0.3"/>
+    <path d="M1296 566 H1364 M1330 532 V600" stroke-width="1" opacity="0.25"/>
+  </g>
+  <circle cx="1330" cy="566" r="3.5" fill="#FF8A66"/>
+
+  <g fill="#A87C4E">
+    <circle cx="1420" cy="140" r="1.5" opacity="0.5"/>
+    <circle cx="880" cy="120" r="1.4" opacity="0.45"/>
+    <circle cx="1418" cy="470" r="1.5" opacity="0.45"/>
+    <circle cx="884" cy="560" r="1.4" opacity="0.4"/>
+    <circle cx="1400" cy="606" r="1.4" opacity="0.4"/>
+  </g>
+  <g fill="#FFC584">
+    <circle cx="1360" cy="80" r="1.3" opacity="0.35"/>
+    <circle cx="960" cy="66" r="1.3" opacity="0.35"/>
+    <circle cx="1420" cy="60" r="1.4" opacity="0.3"/>
+  </g>
+
+  <!-- ══════════ 中央 · 断层 ══════════ -->
+  <rect x="630" y="0" width="180" height="640" fill="url(#void)"/>
+  <ellipse cx="720" cy="640" rx="150" ry="70" fill="url(#gGap)"/>
+  <g stroke="#141F36" stroke-width="1" opacity="0.7">
+    <path d="M655 120 C 690 116 740 124 785 118"/>
+    <path d="M655 235 C 690 231 740 239 785 233"/>
+    <path d="M655 350 C 690 346 740 354 785 348"/>
+    <path d="M655 465 C 690 461 740 469 785 463"/>
+    <path d="M655 560 C 690 556 740 564 785 558"/>
+    <path d="M655 610 C 690 606 740 614 785 608"/>
+  </g>
+
+  <!-- 悬崖两侧 -->
+  <path d="M590 0 H664 L650 70 L666 140 L646 215 L660 290 L642 365 L656 440 L640 515 L658 640 H590 Z" fill="url(#cliffL)"/>
+  <path d="M850 0 H776 L790 70 L774 140 L794 215 L780 290 L798 365 L784 440 L800 515 L782 640 H850 Z" fill="url(#cliffR)"/>
+  <path d="M664 0 L650 70 L666 140 L646 215 L660 290 L642 365 L656 440 L640 515 L658 640" stroke="#5A79B8" stroke-width="1.2" opacity="0.25" fill="none"/>
+  <path d="M776 0 L790 70 L774 140 L794 215 L780 290 L798 365 L784 440 L800 515 L782 640" stroke="#5A79B8" stroke-width="1.2" opacity="0.25" fill="none"/>
+
+  <!-- 断层裂隙光 -->
+  <g stroke="#FF6B5B" fill="none" stroke-linejoin="round">
+    <path d="M664 0 L650 70 L666 140 L646 215 L660 290 L642 365 L656 440 L640 515 L658 640" stroke-width="7" opacity="0.12"/>
+    <path d="M664 0 L650 70 L666 140 L646 215 L660 290 L642 365 L656 440 L640 515 L658 640" stroke-width="3.5" opacity="0.28"/>
+    <path d="M664 0 L650 70 L666 140 L646 215 L660 290 L642 365 L656 440 L640 515 L658 640" stroke-width="1.8" opacity="0.65"/>
+    <path d="M776 0 L790 70 L774 140 L794 215 L780 290 L798 365 L784 440 L800 515 L782 640" stroke-width="7" opacity="0.12"/>
+    <path d="M776 0 L790 70 L774 140 L794 215 L780 290 L798 365 L784 440 L800 515 L782 640" stroke-width="3.5" opacity="0.28"/>
+    <path d="M776 0 L790 70 L774 140 L794 215 L780 290 L798 365 L784 440 L800 515 L782 640" stroke-width="1.8" opacity="0.65"/>
+  </g>
+
+  <!-- 放射裂纹 -->
+  <g stroke="#3A5588" stroke-width="1.2" fill="none" opacity="0.4">
+    <path d="M650 70 L616 86 L604 105"/>
+    <path d="M646 215 L608 226 L596 248"/>
+    <path d="M642 365 L610 378 L598 402"/>
+    <path d="M640 515 L612 528 L600 552"/>
+    <path d="M790 70 L824 86 L836 105"/>
+    <path d="M794 215 L832 226 L844 248"/>
+    <path d="M798 365 L830 378 L842 402"/>
+    <path d="M800 515 L828 528 L840 552"/>
+  </g>
+
+  <!-- 崩落碎屑 -->
+  <g fill="#3A5588">
+    <path d="M672 136 l7 4 l-4 7 z" opacity="0.5"/>
+    <rect x="700" y="260" width="4" height="4" opacity="0.4" transform="rotate(20 702 262)"/>
+    <circle cx="690" cy="480" r="2" opacity="0.45"/>
+    <rect x="758" y="320" width="5" height="5" opacity="0.4" transform="rotate(-15 760 322)"/>
+    <circle cx="748" cy="180" r="1.8" opacity="0.4"/>
+    <path d="M742 556 l6 4 l-3 6 z" opacity="0.4"/>
+  </g>
+
+  <!-- 坠入深渊的疑问 -->
+  <text x="706" y="238" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#FF6B5B" opacity="0.35" transform="rotate(-10 706 238)">?</text>
+  <text x="732" y="452" text-anchor="middle" font-family="Arial, sans-serif" font-size="17" font-weight="700" fill="#FF6B5B" opacity="0.3" transform="rotate(8 732 452)">?</text>
+
+  <rect width="1440" height="640" fill="url(#vig)"/>
+
+  <!-- 角落标注(烘焙进画面,随图整体缩放) -->
+  <rect x="40" y="34" width="146" height="38" rx="19" fill="#FFFFFF" fill-opacity="0.12"/>
+  <text x="113" y="61" text-anchor="middle" font-family="Arial, 'Microsoft YaHei', 'PingFang SC', sans-serif" font-size="20" font-weight="700" fill="#FFFFFF">课堂训练</text>
+  <text x="40" y="100" font-family="Arial, 'Microsoft YaHei', 'PingFang SC', sans-serif" font-size="17" fill="#FFFFFF" fill-opacity="0.72">内容规整 · 答案标准 · 节奏可控</text>
+  <rect x="1254" y="34" width="146" height="38" rx="19" fill="#FFFFFF" fill-opacity="0.12"/>
+  <text x="1327" y="61" text-anchor="middle" font-family="Arial, 'Microsoft YaHei', 'PingFang SC', sans-serif" font-size="20" font-weight="700" fill="#FFFFFF">真实销售</text>
+  <text x="1400" y="100" text-anchor="end" font-family="Arial, 'Microsoft YaHei', 'PingFang SC', sans-serif" font-size="17" fill="#FFFFFF" fill-opacity="0.72">节奏多变 · 博弈复杂 · 压力实时</text>
+
+  <!-- 断层徽标 -->
+  <rect x="598" y="312" width="244" height="42" rx="21" fill="#000000" fill-opacity="0.32" stroke="#FFFFFF" stroke-opacity="0.25"/>
+  <text x="720" y="340" text-anchor="middle" font-family="Arial, 'Microsoft YaHei', 'PingFang SC', sans-serif" font-size="18" font-weight="600" fill="#FFFFFF" fill-opacity="0.92">课堂与实战之间的「断层」</text>
 </svg>

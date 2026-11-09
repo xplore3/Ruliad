@@ -14,6 +14,41 @@ export interface OpenAICompatibleConfig {
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 
+interface StreamAccumulation {
+  content: string;
+  model?: string;
+  usage?: { promptTokens: number; completionTokens: number };
+}
+
+/** 解析 OpenAI 兼容 SSE；忽略 reasoning_content，只把正式回复增量交给调用方 */
+function applySseBlock(block: string, state: StreamAccumulation, onDelta?: (delta: string, content: string) => void): boolean {
+  for (const line of block.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('data:')) continue;
+    const payload = trimmed.slice(5).trim();
+    if (payload === '[DONE]') return true;
+    let json: any;
+    try {
+      json = JSON.parse(payload);
+    } catch {
+      continue;
+    }
+    if (typeof json.model === 'string') state.model = json.model;
+    if (json.usage) {
+      state.usage = {
+        promptTokens: json.usage.prompt_tokens ?? 0,
+        completionTokens: json.usage.completion_tokens ?? 0,
+      };
+    }
+    const delta = json.choices?.[0]?.delta?.content;
+    if (typeof delta === 'string' && delta.length > 0) {
+      state.content += delta;
+      onDelta?.(delta, state.content);
+    }
+  }
+  return false;
+}
+
 /** OpenAI 兼容协议 provider（千问/火山/DeepSeek 等同协议厂商均可接入） */
 export class OpenAICompatibleProvider implements LLMProvider {
   name = 'openai-compatible';
@@ -149,6 +184,98 @@ export class OpenAICompatibleProvider implements LLMProvider {
             completionTokens: json.usage.completion_tokens ?? 0,
           }
         : undefined,
+    };
+  }
+
+  async chatStream(
+    messages: ChatMessage[],
+    options?: ChatOptions,
+    onDelta?: (delta: string, content: string) => void
+  ): Promise<ChatResult> {
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await this.chatStreamOnce(messages, options, onDelta);
+      } catch (err) {
+        lastErr = err;
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!msg.includes('LLM 返回空内容')) throw err;
+      }
+    }
+    throw lastErr;
+  }
+
+  private async chatStreamOnce(
+    messages: ChatMessage[],
+    options?: ChatOptions,
+    onDelta?: (delta: string, content: string) => void
+  ): Promise<ChatResult> {
+    const f = this.fetchFn ?? fetch;
+    const timeoutMs = this.config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const body: Record<string, unknown> = {
+      model: this.config.model,
+      messages,
+      stream: true,
+    };
+    if (options?.jsonMode) body.response_format = { type: 'json_object' };
+    if (options?.temperature !== undefined) body.temperature = options.temperature;
+    if (options?.maxTokens !== undefined) body.max_tokens = options.maxTokens;
+
+    const url = `${this.config.baseUrl.replace(/\/$/, '')}/chat/completions`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const state: StreamAccumulation = { content: '' };
+    try {
+      const res = await f(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.config.apiKey}`,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`LLM stream request failed: ${res.status} ${text}`);
+      }
+      if (!res.body) throw new Error('LLM stream response has no body');
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let done = false;
+      while (!done) {
+        const read = await reader.read();
+        if (read.done) break;
+        buffer += decoder.decode(read.value, { stream: true });
+        let boundary = buffer.indexOf('\n\n');
+        while (boundary >= 0) {
+          done = applySseBlock(buffer.slice(0, boundary), state, onDelta) || done;
+          buffer = buffer.slice(boundary + 2);
+          boundary = buffer.indexOf('\n\n');
+        }
+      }
+      buffer += decoder.decode();
+      if (buffer.trim()) applySseBlock(buffer, state, onDelta);
+    } catch (err) {
+      if (controller.signal.aborted) {
+        throw new Error(
+          `LLM 流式请求超时（${timeoutMs}ms）：model=${this.config.model} url=${url}，可用 LLM_TIMEOUT_MS 调整超时`
+        );
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (!state.content.trim()) {
+      throw new Error(`LLM 返回空内容：model=${state.model ?? this.config.model}, completionTokens=${state.usage?.completionTokens ?? 0}`);
+    }
+    return {
+      content: state.content,
+      model: state.model ?? this.config.model,
+      usage: state.usage,
     };
   }
 }

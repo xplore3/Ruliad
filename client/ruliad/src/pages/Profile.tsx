@@ -58,9 +58,7 @@ export default function Profile() {
       {/* 所属机构（由系统管理员统一分配，用户端只读展示） */}
       <section className="section" style={{ paddingBottom: 0 }}>
         <div className="card" style={{ padding: '18px 22px', display: 'flex', alignItems: 'center', gap: 14 }}>
-          <div className="avatar av2" style={{ width: 44, height: 44, fontSize: 18 }}>
-            🏢
-          </div>
+          <div className="org-mark" />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className="small muted">所属机构</div>
             <b style={{ fontSize: 16 }}>{orgName ?? '尚未加入机构'}</b>
@@ -84,34 +82,34 @@ export default function Profile() {
       <section className="section" style={{ paddingTop: 0 }}>
         <div className="card me-list">
           <a href="#" onClick={(e) => { e.preventDefault(); navigate('/practice-records'); }}>
-            <span className="ic">📒</span>练习记录<span className="arrow">›</span>
+            <i className="me-dot" />练习记录<span className="arrow">›</span>
           </a>
           <a href="#" onClick={(e) => { e.preventDefault(); navigate('/ability'); }}>
-            <span className="ic">📈</span>能力进阶图<span className="arrow">›</span>
+            <i className="me-dot" />能力进阶图<span className="arrow">›</span>
           </a>
           {isManager && (
             <a href="#" onClick={(e) => { e.preventDefault(); navigate('/management'); }}>
-              <span className="ic">🛠️</span>团队能力管理<span className="arrow">›</span>
+              <i className="me-dot" />团队能力管理<span className="arrow">›</span>
             </a>
           )}
           {(user?.role === 'admin' || user?.role === 'platform') && (
             <a href="#" onClick={(e) => { e.preventDefault(); navigate('/recordings'); }}>
-              <span className="ic">🎙️</span>录音管理<span className="arrow">›</span>
+              <i className="me-dot" />录音管理<span className="arrow">›</span>
             </a>
           )}
           {user?.role === 'admin' && (
             <a href="#" onClick={(e) => { e.preventDefault(); navigate('/admin/organizations'); }}>
-              <span className="ic">🏢</span>机构管理<span className="arrow">›</span>
+              <i className="me-dot" />机构管理<span className="arrow">›</span>
             </a>
           )}
           <a href="#" onClick={(e) => { e.preventDefault(); navigate('/build'); }}>
-            <span className="ic">⭐</span>我的场景<span className="arrow">›</span>
+            <i className="me-dot" />我的场景<span className="arrow">›</span>
           </a>
           <a href="#" onClick={(e) => { e.preventDefault(); navigate('/settings'); }}>
-            <span className="ic">⚙️</span>设置<span className="arrow">›</span>
+            <i className="me-dot" />设置<span className="arrow">›</span>
           </a>
           <a href="#" onClick={(e) => { e.preventDefault(); navigate('/settings', { state: { scrollTo: 'about' } }); }}>
-            <span className="ic">ℹ️</span>关于<span className="arrow">›</span>
+            <i className="me-dot" />关于<span className="arrow">›</span>
           </a>
         </div>
       </section>

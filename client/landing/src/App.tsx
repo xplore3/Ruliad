@@ -160,6 +160,191 @@ function IconCompass({ color = 'currentColor' }: { color?: string }) {
   );
 }
 
+/* ════════════════════════════════════════════════════ */
+/* 屏二/三/四：图表与数据组件 */
+
+/* 培训转化漏斗 */
+function ConversionFunnel() {
+  const data = [
+    { label: '听懂', pct: 100 },
+    { label: '记住', pct: 55 },
+    { label: '会用', pct: 25 },
+    { label: '稳定迁移', pct: 10 },
+  ];
+  const W = 300;
+  const topW = 190;
+  const cx = W / 2;
+  const rowH = 46;
+  const gap = 12;
+  const H = data.length * (rowH + gap) + 6;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
+      {data.map((d, i) => {
+        const y = 3 + i * (rowH + gap);
+        const prevW = i === 0 ? topW : (topW * data[i - 1].pct) / 100;
+        const currW = (topW * d.pct) / 100;
+        const inside = currW >= 76;
+        return (
+          <g key={d.label}>
+            <path
+              d={`M ${(cx - prevW / 2).toFixed(1)} ${y} L ${(cx + prevW / 2).toFixed(1)} ${y} L ${(cx + currW / 2).toFixed(1)} ${y + rowH} L ${(cx - currW / 2).toFixed(1)} ${y + rowH} Z`}
+              fill={C.coral}
+              fillOpacity={1 - i * 0.16}
+            />
+            {inside ? (
+              <text x={cx} y={y + rowH / 2} textAnchor="middle" dominantBaseline="middle" fontSize="12" fontWeight="600" fill="#fff">
+                {d.label} · {d.pct}%
+              </text>
+            ) : (
+              <text x={cx + currW / 2 + 8} y={y + rowH / 2} dominantBaseline="middle" fontSize="12" fontWeight="600" fill={C.coral}>
+                {d.label} · {d.pct}%
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+/* 训练前后维度对比（横向双条） */
+function BeforeAfterBars() {
+  const dims = [
+    { label: '异议处理', before: 52, after: 78 },
+    { label: '价值表达', before: 45, after: 81 },
+    { label: '节奏把控', before: 58, after: 74 },
+  ];
+  return (
+    <div className="space-y-6">
+      {dims.map((d) => (
+        <div key={d.label}>
+          <div className="mb-2.5 text-sm font-bold" style={{ color: C.text }}>{d.label}</div>
+          <div className="mb-2 flex items-center gap-3">
+            <div className="h-2 flex-1 rounded-full" style={{ backgroundColor: C.warm }}>
+              <div className="h-full rounded-full" style={{ width: `${d.before}%`, backgroundColor: '#D8DAE0' }} />
+            </div>
+            <span className="w-12 text-right text-xs" style={{ color: C.textDim }}>{d.before} 分</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="h-2 flex-1 rounded-full" style={{ backgroundColor: C.warm }}>
+              <div className="h-full rounded-full" style={{ width: `${d.after}%`, backgroundColor: C.coral }} />
+            </div>
+            <span className="w-12 text-right text-xs font-bold" style={{ color: C.coral }}>{d.after} 分</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* 同一场景三轮训练得分趋势 */
+function MiniTrendChart() {
+  const scores = [62, 71, 84];
+  const labels = ['第 1 轮', '第 2 轮', '第 3 轮'];
+  const W = 320, H = 132, padL = 28, padR = 16, padT = 26, padB = 26;
+  const x = (i: number) => padL + ((W - padL - padR) * i) / (scores.length - 1);
+  const y = (v: number) => padT + (H - padT - padB) * (1 - v / 100);
+  const pts = scores.map((s, i) => `${x(i)},${y(s)}`).join(' ');
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
+      {[0, 50, 100].map((g) => (
+        <line key={g} x1={padL} x2={W - padR} y1={y(g)} y2={y(g)} stroke="#EBEBEF" strokeWidth="1" />
+      ))}
+      <polyline points={pts} fill="none" stroke={C.coral} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+      {scores.map((s, i) => (
+        <g key={i}>
+          <circle cx={x(i)} cy={y(s)} r="4.5" fill={C.coral} stroke="#fff" strokeWidth="2" />
+          <text x={x(i)} y={y(s) - 10} textAnchor="middle" fontSize="11" fontWeight="700" fill={C.text}>{s}</text>
+          <text x={x(i)} y={H - 6} textAnchor="middle" fontSize="10" fill={C.textDim}>{labels[i]}</text>
+        </g>
+      ))}
+      <text x={padL - 6} y={y(100) + 3} textAnchor="end" fontSize="9" fill={C.textDim}>100</text>
+      <text x={padL - 6} y={y(50) + 3} textAnchor="end" fontSize="9" fill={C.textDim}>50</text>
+    </svg>
+  );
+}
+
+/* 训练闭环图（四步环形） */
+function LoopDiagram() {
+  const cx = 170, cy = 170, r = 90;
+  const steps = [
+    { label: '模拟客户', angle: -90 },
+    { label: '分析短板', angle: 0 },
+    { label: '给出任务', angle: 90 },
+    { label: '再次练习', angle: 180 },
+  ];
+  const rad = (deg: number) => (deg * Math.PI) / 180;
+  const polar = (deg: number, radius = r) => ({
+    x: cx + radius * Math.cos(rad(deg)),
+    y: cy + radius * Math.sin(rad(deg)),
+  });
+  const arc = (a1: number, a2: number) => {
+    const p1 = polar(a1);
+    const p2 = polar(a2);
+    return `M ${p1.x.toFixed(1)} ${p1.y.toFixed(1)} A ${r} ${r} 0 0 1 ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+  };
+  const skip = 24;
+  return (
+    <svg viewBox="0 0 340 340" className="w-full max-w-[340px]">
+      <defs>
+        <marker id="loop-arrow" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+          <path d="M 0 1 L 9 5 L 0 9 z" fill={C.coral} />
+        </marker>
+      </defs>
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke={C.line} strokeWidth="1.5" strokeDasharray="3 6" />
+      {steps.map((s, i) => {
+        const next = steps[(i + 1) % steps.length];
+        const a2 = next.angle > s.angle ? next.angle : next.angle + 360;
+        return (
+          <path
+            key={i}
+            d={arc(s.angle + skip, a2 - skip)}
+            fill="none"
+            stroke={C.coral}
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            markerEnd="url(#loop-arrow)"
+          />
+        );
+      })}
+      {steps.map((s, i) => {
+        const p = polar(s.angle);
+        const lp = polar(s.angle, r + 54);
+        return (
+          <g key={s.label}>
+            <circle cx={p.x} cy={p.y} r="26" fill="#fff" stroke={C.coral} strokeWidth="2" />
+            <text x={p.x} y={p.y} textAnchor="middle" dominantBaseline="middle" fontSize="13" fontWeight="700" fill={C.coral}>
+              0{i + 1}
+            </text>
+            <text x={lp.x} y={lp.y} textAnchor="middle" dominantBaseline="middle" fontSize="12.5" fontWeight="600" fill={C.text}>
+              {s.label}
+            </text>
+          </g>
+        );
+      })}
+      <text x={cx} y={cy - 6} textAnchor="middle" fontSize="13" fontWeight="700" fill={C.text}>训练闭环</text>
+      <text x={cx} y={cy + 12} textAnchor="middle" fontSize="10" fill={C.textDim}>自动运转</text>
+    </svg>
+  );
+}
+
+/* 五大培训痛点 */
+const PAIN_POINTS = [
+  { title: '听懂 ≠ 接得住', desc: '培训以知识讲授为主，听懂之后缺少真实场景中的反复运用，客户一追问，还是接不住。', tag: '知识 → 能力断层' },
+  { title: '知道产品 ≠ 会沟通', desc: '产品卖点背得再熟，不等于能在客户压力下把价值讲清楚、讲到位。', tag: '背得熟 ≠ 讲得好' },
+  { title: '同样的异议反复卡壳', desc: '没有针对性的重复训练与即时反馈，同一类问题会在不同客户身上反复出现。', tag: '重复犯同样的错' },
+  { title: '带教时间无法保证', desc: '「师傅带徒弟」受限于时间与人力：覆盖慢、反馈滞后，新人长期在试错中自己摸索。', tag: '覆盖慢 · 反馈滞后' },
+  { title: '短板与进步看不见', desc: '哪里没练好、怎么改、改到什么程度，缺少可度量的依据，培训效果说不清、道不明。', tag: '效果无据可查' },
+];
+
+/* 日常训练闭环四步 */
+const LOOP_STEPS = [
+  { num: '01', title: '模拟客户', icon: <IconScene />, desc: 'AI扮演贴近真实业务的客户角色：性格、诉求、压价习惯均可设定，在高压对话中发起挑战。', output: '实景演练记录' },
+  { num: '02', title: '分析短板', icon: <IconSearch />, desc: '从场景应对、异议处理、需求挖掘、信任建立等维度定位薄弱环节，输出可解释的能力指标。', output: '能力诊断报告' },
+  { num: '03', title: '给出任务', icon: <IconDoc />, desc: '基于诊断结果生成下一轮训练任务：练哪个场景、练到什么程度、重点是什么，一目了然。', output: '针对性训练任务书' },
+  { num: '04', title: '再次练习', icon: <IconArrows />, desc: '聚焦弱项重复训练，用新一轮指标验证改善效果，形成可对比、可复盘的改善证据。', output: '前后对比证据' },
+];
+
 function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState<string | null>(null);
@@ -395,13 +580,13 @@ export default function App() {
               指导 · 示范 · 陪练 · 模拟 · 预测
             </div>
             <h1 className="mt-8 text-3xl font-black leading-tight tracking-tight md:text-5xl lg:text-[3.4rem]">
-              实景训练，指标复盘，<br />改善可证，专家辅助。
+              AI辅助的销售能力训练
             </h1>
-            <p className="mt-6 max-w-xl text-base leading-relaxed md:text-lg" style={{ color: C.text }}>
-              基于真实业务场景、可解释指标与专家辅助，构建销售能力可度量、可追溯、可持续改善的训练闭环。
+            <p className="mt-6 max-w-xl text-xl font-semibold leading-relaxed md:text-2xl" style={{ color: C.coral }}>
+              借助AI，实现销售能力的可见提升
             </p>
-            <p className="mt-4 max-w-xl text-sm leading-relaxed italic" style={{ color: C.textDim }}>
-              不止于陪练的销售能力训练。从"练过"走向"练成"，从经验判断走向数据验证。
+            <p className="mt-4 max-w-xl text-base leading-relaxed md:text-lg" style={{ color: C.textSub }}>
+              基于真实业务场景、可解释指标与专家辅助，构建销售能力可度量、可追溯、可持续改善的训练闭环。
             </p>
             <div className="mt-10 flex flex-wrap items-center gap-4">
               <a href="mailto:bd@grasp.chat?subject=预约演示"
@@ -441,7 +626,281 @@ export default function App() {
         </div>
       </section>
 
-      {/* ════════ 二、AI时代的机会陈述 ════════ */}
+      {/* ════════ 二、销售培训痛点 ════════ */}
+      <section className="px-6 py-24" style={{ backgroundColor: '#fff' }}>
+        <div className="mx-auto max-w-6xl">
+          <SectionTitle
+            title="销售培训的几个痛点"
+            subtitle="从「听懂」到「做到」，能力转化层层流失——传统培训模式难以跨越课堂与实战之间的这道断层。"
+          />
+
+          {/* 课堂与实战的「断层」示意(标注已烘焙进画面,随图缩放) */}
+          <div className="relative mx-auto mt-14 max-w-[780px] overflow-hidden rounded-3xl" style={{ backgroundColor: '#141B2E' }}>
+            <img src="/images/gap-bg.svg" alt="课堂训练与真实销售之间的断层" className="block h-auto w-full" />
+            <div className="flex flex-col gap-3 border-t border-white/10 px-6 py-5 md:flex-row md:items-center md:justify-between md:px-8">
+              <p className="text-sm leading-relaxed text-white/60">
+                听得懂 ≠ 接得住。听懂的内容需要在真实场景中被反复运用，才能转化为稳定能力。
+              </p>
+              <a href="#loop" className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-white/90 transition-all hover:gap-2.5 hover:text-white">
+                看看 Graspit 如何解决
+                <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4">
+                  <path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </a>
+            </div>
+          </div>
+
+          {/* 五大痛点 + 转化漏斗 */}
+          <div className="mt-12 grid gap-6 lg:grid-cols-[1fr_340px]">
+            <div className="grid content-start gap-4 sm:grid-cols-2">
+              {PAIN_POINTS.map((pain, i) => (
+                <div
+                  key={pain.title}
+                  className={`rounded-2xl border border-[var(--color-line)] p-6 transition hover:-translate-y-1 hover:shadow-[var(--shadow-card)] ${i === 4 ? 'sm:col-span-2' : ''}`}
+                  style={{ backgroundColor: C.card }}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold" style={{ backgroundColor: C.coralSoft, color: C.coral }}>
+                      {String(i + 1).padStart(2, '0')}
+                    </div>
+                    <span className="rounded-full px-3 py-1 text-[11px] font-semibold" style={{ backgroundColor: C.warm, color: C.textSub }}>
+                      {pain.tag}
+                    </span>
+                  </div>
+                  <h3 className="mt-5 text-lg font-bold" style={{ color: C.text }}>{pain.title}</h3>
+                  <p className="mt-2 text-sm leading-relaxed" style={{ color: C.textSub }}>{pain.desc}</p>
+                </div>
+              ))}
+            </div>
+            <div className="flex flex-col rounded-2xl border border-[var(--color-line)] p-7" style={{ backgroundColor: C.card }}>
+              <div className="text-base font-bold" style={{ color: C.text }}>能力转化漏斗</div>
+              <div className="mt-1 text-xs leading-relaxed" style={{ color: C.textDim }}>
+                传统培训模式下，能力从「听懂」到「稳定迁移」的层层流失（示例数据）
+              </div>
+              <div className="mt-6 flex-1">
+                <ConversionFunnel />
+              </div>
+              <p className="mt-6 border-t pt-4 text-xs leading-relaxed" style={{ borderColor: C.line, color: C.textSub }}>
+                每跨越一步，能力都在流失。要跨越这道断层，需要一套能把「听懂」推进到「做到」的训练机制——这正是 Graspit 训练闭环要解决的问题。
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ════════ 三、从一次卡壳到一个改进动作 ════════ */}
+      <section className="px-6 py-24">
+        <div className="mx-auto max-w-6xl">
+          <SectionTitle
+            title="以「客户嫌贵」为例：从一次卡壳，到一个明确的改进动作"
+            subtitle="AI不只是陪练，更是诊断者——它把「卡壳」翻译成「可执行的改进动作」。"
+          />
+
+          <div className="mt-14 grid gap-6 lg:grid-cols-5">
+            {/* 左：实景对练，一次卡壳 */}
+            <div className="flex flex-col rounded-3xl border border-[var(--color-line)] p-7 lg:col-span-2" style={{ backgroundColor: C.card }}>
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-bold tracking-widest" style={{ color: C.coral }}>01</span>
+                <div>
+                  <h3 className="text-lg font-bold" style={{ color: C.text }}>实景对练 · 一次卡壳</h3>
+                  <p className="text-xs" style={{ color: C.textDim }}>场景：向谨慎的采购总监报价</p>
+                </div>
+              </div>
+              <img src="/images/layer-practice.svg" alt="AI客户施压与学员应对示意" className="mt-5 w-full rounded-2xl" style={{ backgroundColor: C.warm }} />
+              <div className="mt-6 flex-1 space-y-3">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold" style={{ backgroundColor: '#232E48', color: '#fff' }}>客</div>
+                  <div className="rounded-2xl rounded-tl-sm border px-4 py-3 text-sm leading-relaxed" style={{ borderColor: C.line, color: C.text, backgroundColor: '#fff' }}>
+                    「你们比隔壁贵 30%，预算就这么多。不降价，我们就先这样。」
+                  </div>
+                </div>
+                <div className="flex flex-row-reverse items-start gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold" style={{ backgroundColor: C.coral, color: '#fff' }}>我</div>
+                  <div className="rounded-2xl rounded-tr-sm px-4 py-3 text-sm leading-relaxed" style={{ backgroundColor: C.coralSoft, color: C.text }}>
+                    「这个价格……其实已经是最优惠的了……」
+                  </div>
+                </div>
+              </div>
+              <div className="mt-6 rounded-xl p-4" style={{ backgroundColor: C.warm }}>
+                <span className="text-xs font-semibold" style={{ color: C.textSub }}>卡壳点：</span>
+                <span className="text-sm leading-relaxed" style={{ color: C.text }}>直接跟随对方节奏解释价格，被「不降价就结束」牵制，没有引导对方说清真实的比较对象。</span>
+              </div>
+            </div>
+
+            {/* 右：诊断定位与改进动作 */}
+            <div className="flex flex-col rounded-3xl border border-[var(--color-line)] p-7 lg:col-span-3" style={{ backgroundColor: C.card }}>
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-bold tracking-widest" style={{ color: C.coral }}>02</span>
+                <div>
+                  <h3 className="text-lg font-bold" style={{ color: C.text }}>AI诊断 · 问题定位</h3>
+                  <p className="text-xs" style={{ color: C.textDim }}>不是笼统地打分，而是指出「卡在哪里、为什么卡」</p>
+                </div>
+              </div>
+              <div className="mt-6 space-y-4">
+                {[
+                  { t: '未识别客户的真实比较对象', d: '客户说「隔壁便宜 30%」，但真正在比较什么（总价？账期？服务？）并不清楚。' },
+                  { t: '直接跟随了对方的节奏', d: '被「不降价就结束」牵制，进入了对方的议程，缺少主动引导。' },
+                  { t: '缺少价值重构', d: '没有在价格之外建立新的价值锚点，对话始终被压在「贵不贵」上。' },
+                ].map((item) => (
+                  <div key={item.t} className="flex items-start gap-3">
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold" style={{ backgroundColor: C.coralSoft, color: C.coral }}>✕</span>
+                    <div>
+                      <div className="text-sm font-bold" style={{ color: C.text }}>{item.t}</div>
+                      <div className="mt-0.5 text-xs leading-relaxed" style={{ color: C.textDim }}>{item.d}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="my-6 flex items-center gap-3 pl-2">
+                <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" style={{ color: C.coral }}>
+                  <path d="M12 5v14m-6-6 6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <span className="text-xs font-semibold tracking-wide" style={{ color: C.textDim }}>把「卡壳」翻译成「动作」</span>
+              </div>
+              <div className="rounded-2xl p-6" style={{ backgroundColor: C.coralSoft }}>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-bold tracking-widest" style={{ color: C.coral }}>03</span>
+                  <h3 className="text-lg font-bold" style={{ color: C.text }}>明确改进动作</h3>
+                </div>
+                <div className="mt-5 space-y-4">
+                  {[
+                    { t: '先弄清他在比较什么', d: '「您比较的是首年价格，还是三年的总成本？」——把模糊的「贵」，还原成具体的比较维度。' },
+                    { t: '再重构价值', d: '围绕客户真正的关注点表达差异化价值，而不是被动解释价格。' },
+                    { t: '下一轮训练任务', d: '系统在「异议处理」维度自动生成 2 轮针对性演练任务，并设定达成标准。' },
+                  ].map((item) => (
+                    <div key={item.t} className="flex items-start gap-3">
+                      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold" style={{ backgroundColor: C.coral, color: '#fff' }}>✓</span>
+                      <div>
+                        <div className="text-sm font-bold" style={{ color: C.text }}>{item.t}</div>
+                        <div className="mt-0.5 text-xs leading-relaxed" style={{ color: C.textSub }}>{item.d}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 训练前后对比 */}
+          <div className="mt-6 rounded-3xl border border-[var(--color-line)] p-7 md:p-10" style={{ backgroundColor: C.card }}>
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h3 className="text-xl font-bold" style={{ color: C.text }}>训练前后，能力维度对比</h3>
+                <p className="mt-2 text-sm" style={{ color: C.textSub }}>
+                  同一场景三轮训练后的维度得分变化（示例数据）——每一个改进动作，都对应看得见的指标变化。
+                </p>
+              </div>
+              <div className="flex items-center gap-5 text-xs" style={{ color: C.textSub }}>
+                <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: '#D8DAE0' }} />训练前</span>
+                <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: C.coral }} />训练后</span>
+              </div>
+            </div>
+            <div className="mt-10 grid items-center gap-10 lg:grid-cols-2">
+              <BeforeAfterBars />
+              <div className="space-y-4">
+                <p className="text-sm leading-relaxed" style={{ color: C.textSub }}>
+                  训练不是「再练一遍」，而是「针对弱项再练一遍」。AI依据可解释指标定位薄弱维度，生成下一轮训练任务；每一个卡壳点，都对应一个明确的改进动作。
+                </p>
+                <div className="grid grid-cols-3 gap-3 pt-2">
+                  {[
+                    { num: '2.3', unit: '轮', label: '平均达成训练目标' },
+                    { num: '6', unit: '大', label: '能力维度全程覆盖' },
+                    { num: '100', unit: '%', label: '卡壳点对应改进动作' },
+                  ].map((s) => (
+                    <div key={s.label} className="rounded-2xl p-4 text-center" style={{ backgroundColor: C.warm }}>
+                      <div className="text-2xl font-black" style={{ color: C.coral }}>
+                        {s.num}<span className="text-sm font-bold">{s.unit}</span>
+                      </div>
+                      <div className="mt-1.5 text-xs leading-snug" style={{ color: C.textSub }}>{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs" style={{ color: C.textDim }}>注：以上为示例数据，用于说明训练机制的运作方式。</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ════════ 四、日常训练闭环 ════════ */}
+      <section className="px-6 py-24" style={{ backgroundColor: '#fff' }}>
+        <div className="mx-auto max-w-6xl">
+          <SectionTitle
+            title="每次练完，都知道下一步练什么"
+            subtitle="模拟客户 → 分析短板 → 给出任务 → 再次练习：四步闭环自动运转，无需逐次人工带教。"
+          />
+
+          {/* 闭环运转方式 */}
+          <div className="mt-14 grid items-center gap-10 rounded-3xl border border-[var(--color-line)] p-8 md:p-12 lg:grid-cols-[340px_1fr]" style={{ backgroundColor: C.card }}>
+            <div className="mx-auto w-full max-w-[340px]">
+              <LoopDiagram />
+              <p className="mt-2 text-center text-xs" style={{ color: C.textDim }}>四步闭环 · 每一轮自动运转</p>
+            </div>
+            <div>
+              <h3 className="text-xl font-bold" style={{ color: C.text }}>闭环如何运转？</h3>
+              <p className="mt-3 max-w-2xl text-sm leading-relaxed" style={{ color: C.textSub }}>
+                每一轮训练都从「模拟客户」开始，到「再次练习」结束。一轮结束后，AI自动完成诊断与任务生成——把「下一步练什么」变成明确指令，无需老师逐次介入。
+              </p>
+              <ul className="mt-6 space-y-3.5">
+                {[
+                  '自动诊断：练完即出可解释指标与短板定位',
+                  '自动生成任务：下一轮练什么，系统给出明确安排',
+                  '无需人工介入：日常训练不再依赖逐次人工带教',
+                ].map((t) => (
+                  <li key={t} className="flex items-start gap-2.5 text-sm" style={{ color: C.text }}>
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold" style={{ backgroundColor: C.coralSoft, color: C.coral }}>✓</span>
+                    {t}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          {/* 四步详述 */}
+          <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            {LOOP_STEPS.map((step, i) => (
+              <div
+                key={step.title}
+                className="flex flex-col rounded-2xl border border-[var(--color-line)] px-6 py-8 transition hover:-translate-y-1 hover:shadow-[var(--shadow-card)]"
+                style={{ backgroundColor: C.card }}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl" style={{ backgroundColor: i % 2 === 0 ? C.coralSoft : 'rgba(47,174,123,0.12)', color: i % 2 === 0 ? C.coral : C.green }}>
+                    {step.icon}
+                  </div>
+                  <span className="text-xs font-bold tracking-widest" style={{ color: C.textDim }}>{step.num}</span>
+                </div>
+                <h3 className="mt-5 text-lg font-bold" style={{ color: C.text }}>{step.title}</h3>
+                <p className="mt-2 flex-1 text-sm leading-relaxed" style={{ color: C.textSub }}>{step.desc}</p>
+                <div className="mt-5 border-t pt-4" style={{ borderColor: C.line }}>
+                  <span className="text-[11px] font-semibold tracking-wide" style={{ color: C.textDim }}>产出 · </span>
+                  <span className="text-sm font-semibold" style={{ color: C.coral }}>{step.output}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* 改善证据 */}
+          <div className="mt-6 grid gap-6 rounded-3xl border border-[var(--color-line)] p-7 md:p-10 lg:grid-cols-2" style={{ backgroundColor: C.card }}>
+            <div>
+              <h4 className="text-base font-bold" style={{ color: C.text }}>同一场景，三轮训练后的得分变化</h4>
+              <p className="mt-1.5 text-xs" style={{ color: C.textDim }}>示例数据：聚焦弱项的重复训练带来可验证的改善</p>
+              <div className="mt-4">
+                <MiniTrendChart />
+              </div>
+            </div>
+            <div>
+              <h4 className="text-base font-bold" style={{ color: C.text }}>训练前后，能力雷达对比</h4>
+              <p className="mt-1.5 text-xs" style={{ color: C.textDim }}>示例：某学员经一个训练周期后的能力变化</p>
+              <div className="mt-4 overflow-hidden rounded-2xl" style={{ backgroundColor: C.warm }}>
+                <img src="/images/layer-coaching.svg" alt="训练前后能力雷达对比" className="block h-auto w-full" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ════════ 五、AI时代的机会陈述 ════════ */}
       <section className="px-6 py-24" style={{ backgroundColor: '#fff' }}>
         <div className="mx-auto max-w-6xl">
           <SectionTitle
@@ -476,7 +935,7 @@ export default function App() {
         </div>
       </section>
 
-      {/* ════════ 三、主张与训练闭环 ════════ */}
+      {/* ════════ 六、主张与训练闭环 ════════ */}
       <section className="px-6 py-24" id="loop">
         <div className="mx-auto max-w-5xl">
           <SectionTitle
@@ -527,9 +986,9 @@ export default function App() {
         </div>
       </section>
 
-      {/* ════════ 四、四个支撑 ════════ */}
+      {/* ════════ 七、四个支撑 ════════ */}
 
-      {/* ════════ 五、技术底座 ════════ */}
+      {/* ════════ 八、技术底座 ════════ */}
       <section className="px-6 py-24" id="tech">
         <div className="mx-auto max-w-6xl">
           <SectionTitle
@@ -560,7 +1019,7 @@ export default function App() {
         </div>
       </section>
 
-      {/* ════════ 六、交付与证据 ════════ */}
+      {/* ════════ 九、交付与证据 ════════ */}
       <section className="px-6 py-24" style={{ backgroundColor: '#fff' }} id="deliverables">
         <div className="mx-auto max-w-5xl">
           <SectionTitle
@@ -595,7 +1054,7 @@ export default function App() {
         </div>
       </section>
 
-      {/* ════════ 七、适用对象 ════════ */}
+      {/* ════════ 十、适用对象 ════════ */}
       <section className="px-6 py-24">
         <div className="mx-auto max-w-5xl">
           <SectionTitle
@@ -642,7 +1101,7 @@ export default function App() {
         </div>
       </section>
 
-      {/* ════════ 八、落地场景与案例 ════════ */}
+      {/* ════════ 十一、落地场景与案例 ════════ */}
       <section className="px-6 py-24" style={{ backgroundColor: '#fff' }}>
         <div className="mx-auto max-w-6xl">
           <SectionTitle
@@ -730,7 +1189,7 @@ export default function App() {
         </div>
       </section>
 
-      {/* ════════ 九、最终 CTA ════════ */}
+      {/* ════════ 十二、最终 CTA ════════ */}
       <section className="px-6 py-24">
         <div className="mx-auto max-w-3xl text-center">
           <h2 className="text-3xl font-black leading-tight md:text-4xl" style={{ color: C.text }}>
@@ -754,7 +1213,7 @@ export default function App() {
         </div>
       </section>
 
-      {/* ════════ 十、页脚 ════════ */}
+      {/* ════════ 十三、页脚 ════════ */}
       <footer id="about" className="border-t px-6 py-16" style={{ borderColor: C.line, backgroundColor: '#fff' }}>
         <div className="mx-auto max-w-6xl">
           <div className="grid gap-10 md:grid-cols-2 lg:grid-cols-5">
