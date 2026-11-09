@@ -130,7 +130,7 @@ export default function ManagementSessionDetail() {
           {/* 教练总结 */}
           {report.summary && (
             <div className="card" style={{ padding: '16px 22px', marginBottom: 18 }}>
-              <b style={{ fontSize: 15.5 }}>📝 教练总结</b>
+              <div className="bar-title"><b style={{ fontSize: 15.5 }}>教练总结</b></div>
               <p className="small" style={{ marginTop: 10, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{report.summary}</p>
             </div>
           )}
@@ -138,7 +138,7 @@ export default function ManagementSessionDetail() {
           {/* 改进目标 */}
           {report.improvementGoal && (
             <div className="card" style={{ padding: '14px 22px', marginBottom: 18, borderLeft: '3px solid #FF6B5B' }}>
-              <b style={{ fontSize: 14.5 }}>🎯 优先改进：{report.improvementGoal.title}</b>
+              <div className="bar-title"><b style={{ fontSize: 14.5 }}>优先改进：{report.improvementGoal.title}</b></div>
               <div className="small" style={{ marginTop: 8, lineHeight: 1.7 }}>
                 <div>{report.improvementGoal.rationale}</div>
                 {report.improvementGoal.suggestion && <div style={{ marginTop: 6 }}>建议：{report.improvementGoal.suggestion}</div>}
@@ -148,7 +148,7 @@ export default function ManagementSessionDetail() {
 
           {/* 技能维度得分 */}
           <div className="card" style={{ padding: '18px 22px', marginBottom: 18 }}>
-            <b style={{ fontSize: 15.5 }}>📊 技能维度</b>
+            <div className="bar-title"><b style={{ fontSize: 15.5 }}>技能维度</b></div>
             {skillScores.length === 0 ? (
               <p className="small muted" style={{ marginTop: 10 }}>暂无技能维度得分</p>
             ) : (
@@ -174,7 +174,7 @@ export default function ManagementSessionDetail() {
 
           {/* 评分项明细 */}
           <div className="card" style={{ padding: '18px 22px', marginBottom: 18 }}>
-            <b style={{ fontSize: 15.5 }}>🧩 评分项明细</b>
+            <div className="bar-title"><b style={{ fontSize: 15.5 }}>评分项明细</b></div>
             {items.length === 0 ? (
               <p className="small muted" style={{ marginTop: 10 }}>暂无明细</p>
             ) : (
@@ -210,7 +210,7 @@ export default function ManagementSessionDetail() {
           {/* 规则层统计 */}
           {stats && (
             <div className="card" style={{ padding: '18px 22px', marginBottom: 18 }}>
-              <b style={{ fontSize: 15.5 }}>📏 规则层统计</b>
+              <div className="bar-title"><b style={{ fontSize: 15.5 }}>规则层统计</b></div>
               <div className="stats" style={{ marginTop: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))' }}>
                 <div className="stat"><div className="lb">打断次数</div><div className="vl sm">{stats.interruptions ?? 0}</div></div>
                 <div className="stat"><div className="lb">学员占比</div><div className="vl sm">{fmtPct(stats.talkRatio)}</div></div>
@@ -239,7 +239,7 @@ export default function ManagementSessionDetail() {
           {/* 违规 */}
           {violations.length > 0 && (
             <div className="card" style={{ padding: '18px 22px', marginBottom: 18 }}>
-              <b style={{ fontSize: 15.5 }}>🚨 违规记录</b>
+              <div className="bar-title"><b style={{ fontSize: 15.5 }}>违规记录</b></div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
                 {violations.map((v, i) => (
                   <div key={`${v.ruleId}-${i}`} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
@@ -260,7 +260,7 @@ export default function ManagementSessionDetail() {
 
       {/* 录音回放 */}
       <div className="card" style={{ padding: '18px 22px' }}>
-        <b style={{ fontSize: 15.5 }}>🎙️ 练习录音（{recordings.length} 轮）</b>
+        <div className="bar-title"><b style={{ fontSize: 15.5 }}>练习录音（{recordings.length} 轮）</b></div>
         {recordings.length === 0 ? (
           <p className="small muted" style={{ marginTop: 10 }}>该场会话没有留存录音（学员使用文字对练或无语音上行）</p>
         ) : (

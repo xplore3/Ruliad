@@ -1,6 +1,7 @@
 import type {
   BehaviorBand,
   ChatMessage,
+  ChatResult,
   LLMProvider,
   PersonaRuntimeBundle,
   TranscriptTurn,
@@ -120,11 +121,32 @@ export class PersonaActor {
     bundle: PersonaRuntimeBundle,
     band: BehaviorBand,
     transcript: TranscriptTurn[],
-    coachIntensity?: 'low' | 'medium' | 'high'
+    coachIntensity?: 'low' | 'medium' | 'high',
+    onFirstSentence?: (sentence: string) => void
   ): Promise<{ text: string; shouldClose: boolean; asksChild: boolean; questionIndex?: number }> {
     const messages = buildActorMessages(bundle, band, transcript, coachIntensity);
     messages[0] = { role: 'system', content: `${messages[0].content}\n\n${CLOSE_CONTROL_INSTRUCTION}\n${CHILD_CONTROL_INSTRUCTION}` };
-    const result = await this.llm.chat(messages);
+    let firstSentenceSent = false;
+    const emitFirstSentence = (content: string) => {
+      if (firstSentenceSent) return;
+      const match = content.match(/^[^。？！；!?\n]+[。？！；!?]/);
+      if (!match || match[0].includes('[[')) return;
+      firstSentenceSent = true;
+      onFirstSentence?.(match[0]);
+    };
+
+    let result;
+    if (this.llm.chatStream) {
+      try {
+        result = await this.llm.chatStream(messages, undefined, (_delta, content) => emitFirstSentence(content));
+      } catch {
+        result = await this.llm.chat(messages);
+      }
+    } else {
+      result = await this.llm.chat(messages);
+    }
+    emitFirstSentence(result.content);
+
     const shouldClose = CLOSE_MARKER.test(result.content);
     const asksChild = CHILD_MARKER.test(result.content);
     const questionMatch = result.content.match(RECEPTION_QUESTION_MARKER);

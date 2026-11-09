@@ -206,7 +206,7 @@ function Panel({ title, onClose, children }: { title: string; onClose: () => voi
     <div className="lib-overlay" onClick={onClose}>
       <div className="card lib-panel" onClick={(e) => e.stopPropagation()}>
         <div className="lib-panel-head">
-          <h3>{title}</h3>
+          <h3 className="bar-title">{title}</h3>
           <button className="act-btn" onClick={onClose}>✕</button>
         </div>
         {children}
@@ -227,7 +227,7 @@ function DetailModal({ title, saving, onSave, onClose, children }: {
     <div className="lib-overlay" onClick={onClose}>
       <div className="card lib-panel lib-panel-wide" onClick={(e) => e.stopPropagation()}>
         <div className="lib-panel-head">
-          <h3>{title}</h3>
+          <h3 className="bar-title">{title}</h3>
           <button className="act-btn" onClick={onClose}>✕</button>
         </div>
         <div className="lib-form">{children}</div>
@@ -661,7 +661,7 @@ export default function Library() {
   return (
     <div className="section" style={{ paddingTop: 16 }}>
       <div className="sec-head">
-        <h2><span>🗂</span> 资源库管理</h2>
+        <h2 className="bar-title">资源库管理</h2>
         <button className="btn btn-ghost btn-sm" onClick={() => navigate('/build')}>← 返回构建</button>
       </div>
 
@@ -938,7 +938,7 @@ function ExtractPanel({ target, onClose, onRows }: {
   };
 
   return (
-    <Panel title="🤖 AI 提炼：整段文字 → 表格行" onClose={onClose}>
+    <Panel title="AI 提炼：整段文字 → 表格行" onClose={onClose}>
       <p style={{ fontSize: 13, color: '#6B7280', margin: '0 0 8px' }}>
         粘贴培训材料、会议纪要、话术文档等整段文字，AI 会提炼为结构化条目加入表格（草稿状态，确认后才入库）。
       </p>
@@ -975,7 +975,7 @@ function PastePanel({ headers, example, onClose, onRows }: {
   };
 
   return (
-    <Panel title="📋 粘贴表格（Excel / TSV / CSV）" onClose={onClose}>
+    <Panel title="粘贴表格（Excel / TSV / CSV）" onClose={onClose}>
       <p style={{ fontSize: 13, color: '#6B7280', margin: '0 0 8px' }}>
         从 Excel 复制后直接粘贴（Tab 分隔），或用逗号/分号分隔。列顺序：{headers.join(' / ')}。首行是表头会自动跳过。
       </p>
@@ -2311,7 +2311,7 @@ function GoldenPastePanel({ onClose, onRows, onAdd }: {
     onClose();
   };
   return (
-    <Panel title="📋 粘贴案例文本" onClose={onClose}>
+    <Panel title="粘贴案例文本" onClose={onClose}>
       <p style={{ fontSize: 13, color: '#6B7280', margin: '0 0 8px' }}>
         格式：「# 案例名」起一个新案例；对话行用「学员：…」/「客户：…」。可粘贴多个案例。
       </p>

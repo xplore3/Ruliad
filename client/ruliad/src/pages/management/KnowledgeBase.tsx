@@ -160,7 +160,7 @@ export default function ManagementKnowledgeBase() {
       {/* 页头 */}
       <div className="card" style={{ padding: '16px 22px', marginBottom: 18 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <b style={{ fontSize: 15.5 }}>📚 知识库管理</b>
+          <div className="bar-title"><b style={{ fontSize: 15.5 }}>知识库管理</b></div>
           <span className="chip chip-gray">v{version}</span>
           {effectiveAt && <span className="small muted">生效于 {fmtDate(effectiveAt)}</span>}
           <div style={{ flex: 1 }} />

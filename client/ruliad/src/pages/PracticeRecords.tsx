@@ -116,7 +116,7 @@ export default function PracticeRecords() {
       {/* 页头 + 汇总 */}
       <section className="section" style={{ paddingBottom: 4 }}>
         <div className="sec-head">
-          <h2>📒 练习记录</h2>
+          <h2 className="bar-title">练习记录</h2>
           <span className="more">共 {records.length} 场</span>
         </div>
 

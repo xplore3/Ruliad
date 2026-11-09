@@ -3,7 +3,7 @@ import type { Session } from '@grasp-mvp/core';
 import type { ASRStream, TTSOptions } from '@grasp-mvp/speech-gateway';
 import type { RouteContext } from '../ctx.js';
 import { tokenFailReason, verifyToken } from '../auth.js';
-import { runTurn } from '../services/turn.js';
+import { preparePersonaReply, runTurn } from '../services/turn.js';
 import { analyzePcm16, wavToPcm } from '../services/voice-features.js';
 import { saveTurnRecording } from '../services/recording.js';
 
@@ -32,8 +32,11 @@ function pcmRMS(buf: Buffer): number {
 }
 
 /** VAD 配置 */
-const VAD_SILENCE_MS = 1200; // 保留基本换气停顿，同时避免说完后固定等待数秒
+const VAD_SILENCE_MS = 2500; // 允许说话中的自然停顿，避免 1 秒静音就把本轮截断
 const VAD_CHUNK_MS = 100; // 每 100ms 检测一次
+/** ASR 文本稳定后的预测生成参数：短输入不预测，避免把口头禅误判为完整发言 */
+const PREDICTION_STABLE_MS = 800;
+const PREDICTION_MIN_CHARS = 8;
 
 /** VAD 自适应阈值范围与噪声倍率：AGC 关闭后不同麦克风的原始电平差异大，
  * 固定阈值会把轻声说话误判为静音（话说到一半被切断）。按近期静音块估计噪声底并随之浮动。 */
@@ -355,6 +358,42 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
       /** 客户端已点「结束本轮」：等 ASR 收尾后统一落回合，说话中不做自动断句 */
       let clientFinish = false;
       let finishing = false;
+      /** 最新稳定识别文本触发的预测回复；最终文本不匹配或轮次过期时丢弃 */
+      let replyPrediction: {
+        inputText: string;
+        promise: Promise<{ transcriptLength: number; reply: Awaited<ReturnType<typeof preparePersonaReply>> } | null>;
+      } | null = null;
+      let predictionTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const clearPredictionTimer = () => {
+        if (predictionTimer) clearTimeout(predictionTimer);
+        predictionTimer = null;
+      };
+
+      const startReplyPrediction = (myRound: number, text: string) => {
+        const inputText = text.trim();
+        if (inputText.length < PREDICTION_MIN_CHARS || processing || !speaking) return;
+        if (replyPrediction?.inputText === inputText) return;
+        console.log(`[VoiceCall][trace] speculative reply start: sessionId=${sessionId} input="${inputText.slice(0, 40)}"`);
+        const promise = (async () => {
+          try {
+            const session = await store.getSession(sessionId);
+            if (!session || session.status !== 'active' || session.pausedAt || myRound !== round) return null;
+            const scenario = await store.getScenario(session.scenarioId);
+            if (!scenario || myRound !== round) return null;
+            const warmupProfile = await personaVoice(store, scenario.id, scenario.personaConfigId, req.log);
+            const reply = await preparePersonaReply(ctx, session, scenario, inputText, (draftText) => {
+              const first = splitSentences(draftText)[0];
+              return first ? speech.tts.synthesize(first, warmupProfile) : Promise.resolve(null);
+            });
+            return myRound === round ? { transcriptLength: session.transcript.length, reply } : null;
+          } catch (err) {
+            req.log.warn({ sessionId, err: err instanceof Error ? err.message : String(err) }, 'voice 预测回复失败，最终回合重新生成');
+            return null;
+          }
+        })();
+        replyPrediction = { inputText, promise };
+      };
 
       const send = (msg: Record<string, unknown>) => {
         if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(msg));
@@ -372,6 +411,8 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
         audioChunks = [];
         clientFinish = false;
         finishing = false;
+        replyPrediction = null;
+        clearPredictionTimer();
         if (asrStream) {
           asrStream.close();
           asrStream = null;
@@ -387,6 +428,9 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
           send({ type: 'error', message: '未识别到有效语音' });
           return;
         }
+        const prediction = replyPrediction;
+        replyPrediction = null;
+        clearPredictionTimer();
         processing = true;
         const fail = (message: string) => {
           processing = false;
@@ -407,10 +451,15 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
           const voiceFeatures = uplink ? analyzePcm16(uplink) ?? undefined : undefined;
           // 首句 TTS 预合成与 runTurn 内的语义一致性审查并行（warmup 只服务家长主应答轮）
           const warmupProfile = await personaVoice(store, scenario.id, scenario.personaConfigId, req.log);
+          const predicted = await (prediction?.promise ?? Promise.resolve(null));
+          const precomputedReply = prediction?.inputText === userText && predicted?.transcriptLength === session.transcript.length
+            ? predicted.reply
+            : null;
+          console.log(`[VoiceCall][trace] speculative reply ${precomputedReply ? 'reused' : 'discarded/missing'}: sessionId=${sessionId}`);
           const result = await runTurn(ctx, session, scenario, userText, voiceFeatures, (text) => {
             const first = splitSentences(text)[0];
             return first ? speech.tts.synthesize(first, warmupProfile) : Promise.resolve(null);
-          });
+          }, precomputedReply);
           console.log(`[VoiceCall][trace] runTurn returned: ${result ? `ok reply="${(result.personaTurn ?? result.childTurn)?.text.slice(0, 40)}..."` : 'NULL'}`);
           if (!result) return fail('场景对应的 persona 配置缺失');
           if (myRound !== round) {
@@ -521,6 +570,12 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
             latestText = text;
             latestIsFinal = false;
             send({ type: 'asr_partial', text });
+            clearPredictionTimer();
+            predictionTimer = setTimeout(() => {
+              predictionTimer = null;
+              if (myRound === round && speaking && !clientFinish) startReplyPrediction(myRound, latestText);
+            }, PREDICTION_STABLE_MS);
+            predictionTimer.unref();
           },
           // paraformer 句末会多次回调（累计文本）：用户一直说话时不自动断句、不收尾，
           // 只刷新字幕；只有客户端点了「结束本轮」（clientFinish）才真正落回合
@@ -529,6 +584,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
             latestText = text;
             latestIsFinal = true;
             send({ type: 'asr_partial', text });
+            startReplyPrediction(myRound, text);
             if (clientFinish) doFinish(myRound);
           },
           onFinished: () => {

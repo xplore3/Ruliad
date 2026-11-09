@@ -42,6 +42,17 @@ export class MockLLMProvider implements LLMProvider {
       : defaultHandler(messages, options);
     return { content, model: 'mock-model', usage: { promptTokens: 0, completionTokens: 0 } };
   }
+
+  async chatStream(messages: ChatMessage[], options?: ChatOptions, onDelta?: (delta: string, content: string) => void): Promise<ChatResult> {
+    const result = await this.chat(messages, options);
+    let content = '';
+    for (let i = 0; i < result.content.length; i += 4) {
+      const delta = result.content.slice(i, i + 4);
+      content += delta;
+      onDelta?.(delta, content);
+    }
+    return result;
+  }
 }
 
 function defaultHandler(messages: ChatMessage[], options?: ChatOptions): string {

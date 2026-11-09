@@ -213,6 +213,56 @@ if (hit) pending.push(q);
 return pending;
 }
 
+export interface PrecomputedPersonaReply {
+  text: string;
+  shouldClose: boolean;
+  asksChild: boolean;
+  questionIndex?: number;
+  warmupAudio?: Buffer;
+  warmupFormat?: string;
+}
+
+/** ASR 稳定句后的预测性回复：只生成草稿与首句音频，不写会话；最终文本匹配时才复用 */
+export async function preparePersonaReply(
+  ctx: RouteContext,
+  session: Session,
+  scenario: Scenario,
+  text: string,
+  ttsWarmup?: (text: string) => Promise<{ audio: Buffer; format: string } | null>
+): Promise<PrecomputedPersonaReply | null> {
+  try {
+    if (!text.trim() || session.childMode || scenario.category === '咨询接待') return null;
+    const runtime = await loadRuntime(ctx, scenario, session.difficulty, session.customerArchetype, session.receptionQuestions, session.receptionTrialDisposition);
+    const lastTrace = session.emotionTrace[session.emotionTrace.length - 1];
+    const tracker = new EmotionTracker(runtime.bundle.dynamics, runtime.bundle.behaviorBands, lastTrace?.arousal);
+    const snapshot = tracker.update(text);
+    const band = bandFor(snapshot.arousal, runtime.bundle.behaviorBands);
+    const actor = new PersonaActor(ctx.gateway.forTask('actor'));
+    let warmupPromise: Promise<{ audio: Buffer; format: string } | null> | undefined;
+    const reply = await actor.replyWithSignal(
+      runtime.bundle,
+      band,
+      [...session.transcript, { seq: session.transcript.length + 1, speaker: 'trainee', text, at: new Date().toISOString() }],
+      session.coachIntensity,
+      (sentence) => {
+        if (!warmupPromise && ttsWarmup) warmupPromise = ttsWarmup(sentence).catch(() => null);
+      }
+    );
+    const warm = await warmupPromise;
+    return {
+      text: reply.text,
+      shouldClose: reply.shouldClose,
+      asksChild: reply.asksChild,
+      questionIndex: reply.questionIndex,
+      warmupAudio: warm?.audio,
+      warmupFormat: warm?.format,
+    };
+  } catch (err) {
+    console.warn('[preparePersonaReply] 预测回复失败，最终回合将重新生成:', err instanceof Error ? err.message : String(err));
+    return null;
+  }
+}
+
 /**
  * 学员发言一轮：情绪更新 + persona 回复（含超时收口与一致性校验），落库 transcript/emotionTrace。
  * POST /sessions/:id/turns 与语音链路（voice-turn / WS voice）共用，行为与原 turns 端点一致。
@@ -225,7 +275,9 @@ export async function runTurn(
   text: string,
   voiceFeatures?: VoiceFeatures,
   /** 首句 TTS 预合成：与语义一致性审查并行执行，响应延迟取两者最大值而非相加 */
-  ttsWarmup?: (text: string) => Promise<{ audio: Buffer; format: string } | null>
+  ttsWarmup?: (text: string) => Promise<{ audio: Buffer; format: string } | null>,
+  /** ASR 稳定句提前生成的草稿；仅在最终识别文本与预测输入一致时传入 */
+  precomputedReply?: PrecomputedPersonaReply | null
 ): Promise<TurnResult | null> {
   const { store, gateway } = ctx;
   const isSystemGreeting = text === SYSTEM_GREETING_TOKEN;
@@ -427,8 +479,19 @@ export async function runTurn(
     // 快速通道：不再调用 LLM 生成客户回复与一致性校验
     replyText = '（客户摆了摆手，快步走远了）';
   } else {
-    // 主回复同时判断剧情结束与地推客户离场，不再串行调用独立耐心判定器
-    const reply = await actor.replyWithSignal(bundle, band, transcriptSoFar, session.coachIntensity);
+    // 主回复同时判断剧情结束与地推客户离场；流式生成时第一个完整短句立即预合成
+    let streamedFirstWarmup: { sentence: string; promise: Promise<{ audio: Buffer; format: string } | null> } | undefined;
+    const reply = precomputedReply ?? await actor.replyWithSignal(
+      bundle,
+      band,
+      transcriptSoFar,
+      session.coachIntensity,
+      (sentence) => {
+        if (!streamedFirstWarmup && ttsWarmup) {
+          streamedFirstWarmup = { sentence, promise: ttsWarmup(sentence).catch(() => null) };
+        }
+      }
+    );
     replyText = reply.text;
     shouldClose = reply.shouldClose;
     asksChild = reply.asksChild;
@@ -452,7 +515,16 @@ export async function runTurn(
         asksChild = false;
       }
     }
-    const warmupPromise = (ttsWarmup ? ttsWarmup(replyText) : Promise.resolve(null)).catch(() => null);
+    const firstSentence = replyText.match(/^[^。？！；!?\n]+[。？！；!?]/)?.[0];
+    const precomputedWarmup = precomputedReply?.text === replyText && precomputedReply.warmupAudio && precomputedReply.warmupFormat
+      ? { audio: precomputedReply.warmupAudio, format: precomputedReply.warmupFormat }
+      : null;
+    const streamedWarmup = firstSentence && streamedFirstWarmup?.sentence === firstSentence
+      ? streamedFirstWarmup.promise
+      : undefined;
+    const warmupPromise = precomputedWarmup
+      ? Promise.resolve(precomputedWarmup)
+      : (streamedWarmup ?? (ttsWarmup ? ttsWarmup(replyText) : Promise.resolve(null))).catch(() => null);
     const audit = await checkConsistency(gateway.forTask('judge_realtime'), bundle, replyText).catch(() => ({ pass: true, reasons: [] as string[] }));
     if (!audit.pass) {
       const retryBand = { ...band, instruction: band.instruction + CONSISTENCY_CORRECTION };

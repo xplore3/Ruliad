@@ -312,7 +312,7 @@ export default function Review() {
         {/* ===== 过程阶段拆解 ===== */}
         {report.items.length > 0 && (
           <>
-            <div className="sec-t"><span>📈</span> 过程阶段拆解</div>
+            <div className="sec-t bar-title">过程阶段拆解</div>
             <div className="card stage sec">
               {report.items.map((item) => (
                 <StageRow
@@ -327,7 +327,7 @@ export default function Review() {
         )}
 
         {/* ===== 状态维度 ===== */}
-        <div className="sec-t"><span>🎙</span> 状态维度</div>
+        <div className="sec-t bar-title">状态维度</div>
         <div className="metrics sec">
           {metrics.map((m) => (
             <div key={m.label} className="card metric">
@@ -344,7 +344,7 @@ export default function Review() {
         {/* ===== 表现维度 ===== */}
         {radarDims.length > 0 && (
           <>
-            <div className="sec-t"><span>🕸</span> 表现维度</div>
+            <div className="sec-t bar-title">表现维度</div>
             <div className="card radar-wrap sec">
               {radarDims.length >= 3 && <ReviewRadar items={radarDims} />}
               <div className="dim-list">
@@ -363,7 +363,7 @@ export default function Review() {
         {/* ===== 教练总结 ===== */}
         {report.summary && (
           <>
-            <div className="sec-t"><span>🧑‍🏫</span> 教练总结</div>
+            <div className="sec-t bar-title">教练总结</div>
             <div className="card sec" style={{ padding: '20px 24px' }}>
               <p style={{ fontSize: '14px', lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>{report.summary}</p>
             </div>
@@ -373,7 +373,7 @@ export default function Review() {
         {/* ===== 改进目标和建议 ===== */}
         {report.improvementGoal && (
           <>
-            <div className="sec-t"><span>🎯</span> 改进目标和建议</div>
+            <div className="sec-t bar-title">改进目标和建议</div>
             <div className="card sec" style={{ padding: '20px 24px', borderLeft: '4px solid #FF6B5B' }}>
               <h3 style={{ fontSize: '18px', marginBottom: '10px' }}>{report.improvementGoal.title}</h3>
               <p style={{ fontSize: '14px', lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>{report.improvementGoal.rationale}</p>
@@ -385,7 +385,7 @@ export default function Review() {
         )}
 
         {/* ===== 下一步 ===== */}
-        <div className="sec-t"><span>🚀</span> 下一步</div>
+        <div className="sec-t bar-title">下一步</div>
         <div className="card" style={{ padding: '20px 24px' }}>
           <div className="next-actions">
             <button className="btn btn-ghost btn-sm" onClick={() => setShowTranscript((v) => !v)}>
