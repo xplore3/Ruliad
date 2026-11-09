@@ -94,3 +94,21 @@ it('提前解决孩子兴趣后向客户注入六连问末题替换规则', asyn
   expect(result?.personaTurn?.text).toBe('嗯，您接着说。');
   expect(prompts.some((prompt) => prompt.includes('六连问末题替换') && prompt.includes('孩子学的太多了') && prompt.includes('不得重复'))).toBe(true);
 });
+
+it('讲故事征求意见不算封闭式问题，孩子固定回答不想学', async () => {
+  const { store, session, ctx } = await setup({ effective: false });
+  const result = await runTurn(ctx, session, scenario, '小朋友，我给你讲个故事好不好啊？');
+  expect(result?.childTurn?.text).toBe('我不想学。');
+  expect(result?.traineeTurn.groundChildClosedQuestion).toBeUndefined();
+  expect((await store.getSession(session.id))?.childStoryOffered).toBe(true);
+});
+
+it('讲故事征求意见后第二次仍无效时触发家长离开', async () => {
+  const { store, session, ctx } = await setup({ effective: false, attempt: 1 });
+  await runTurn(ctx, session, scenario, '小朋友，我给你讲个故事好不好啊？');
+  const result = await runTurn(ctx, session, scenario, '那你到底想不想学？');
+  expect(result?.timeUp).toBe(true);
+  const saved = await store.getSession(session.id);
+  expect(saved?.completionStatus).toBe('incomplete');
+  expect(saved?.completionReason).toContain('卖邀请函失败');
+});

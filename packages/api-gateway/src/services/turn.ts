@@ -6,7 +6,7 @@ import { drillScriptPrompt, institutionKnowledgePrompt, archetypePrompt, resolve
 import { receptionQuestionPrompt } from './reception-questions.js';
 import { receptionTrialFollowup } from './reception-followup.js';
 import { assessGroundPushProgress } from './ground-push-progress.js';
-import { assessChildStrategy, isChildClosedQuestion } from './child-strategy.js';
+import { assessChildStrategy, isChildClosedQuestion, isStoryOfferQuestion } from './child-strategy.js';
 import { preScoreSession } from './scoring.js';
 
 /** 一致性校验重试仍失败时的兜底角色化文案 */
@@ -275,12 +275,15 @@ export async function runTurn(
     const target = await classifyAddressTarget(gateway.forTask('actor'), session.transcript, text);
     if (target === 'child') {
       traineeTurn.addressedToChild = true;
-      const closedQuestion = scenario.category === '地推' && isChildClosedQuestion(text);
-      const strategy = scenario.category === '地推'
+      const storyOffer = scenario.category === '地推' && isStoryOfferQuestion(text);
+      const closedQuestion = scenario.category === '地推' && !storyOffer && isChildClosedQuestion(text);
+      const strategy = scenario.category === '地推' && !storyOffer
         ? await assessChildStrategy(gateway.forTask('actor'), [...session.transcript, traineeTurn])
         : { effective: null, reason: '' };
       let childReply: { text: string; resistant: boolean };
-      if (strategy.effective === true) {
+      if (storyOffer) {
+        childReply = { text: '我不想学。', resistant: true };
+      } else if (strategy.effective === true) {
         childReply = { text: closedQuestion ? '我喜欢！' : '哈哈，真好玩！', resistant: false };
       } else if (strategy.effective === false) {
         childReply = { text: closedQuestion ? '我不喜欢。' : '我不想玩。', resistant: true };
@@ -290,6 +293,7 @@ export async function runTurn(
           .catch(() => ({ text: '', resistant: true }));
       }
       const childInterestResolved = session.childInterestResolved || (closedQuestion && strategy.effective === true);
+      const childStoryOffered = session.childStoryOffered || storyOffer;
       const childReplyTurn: TranscriptTurn = {
         seq: traineeTurn.seq + 1,
         speaker: 'child',
@@ -312,6 +316,7 @@ export async function runTurn(
           childMode: false,
           childAttemptCount,
           childInterestResolved,
+          childStoryOffered,
           completionStatus: 'incomplete',
           completionReason: `卖邀请函失败：销售未能用合理策略说服孩子。${strategy.reason}`,
         });
@@ -332,6 +337,7 @@ export async function runTurn(
         childMode: true,
         childAttemptCount,
         childInterestResolved,
+        childStoryOffered,
       });
       analyzeIntentInBackground();
       void store.appendEvent(

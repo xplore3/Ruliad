@@ -164,6 +164,8 @@ export interface Session {
   childAttemptCount?: number;
   /** 销售已提前说服孩子，六连问末题需换成其他未问过的问题 */
   childInterestResolved?: boolean;
+  /** 销售已问过"我给你讲个故事好不好"并被孩子拒绝；之后必须用情感支持+讲故事完整策略才能说服 */
+  childStoryOffered?: boolean;
   /** 地推客户已给过一次“我回去琢磨琢磨”的最后推进机会 */
   groundPushLastChance?: boolean;
   /** 演练是否因未达到场景目标而提前终止；有报告但不计为完成 */

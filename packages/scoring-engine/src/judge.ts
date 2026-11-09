@@ -16,6 +16,7 @@ import { analyzeReceptionTrialInvitation } from './trial-invitation.js';
 import { judgeReceptionTrialInitiative } from './trial-initiative.js';
 import { analyzeReceptionKnowledgeHonesty } from './knowledge-honesty.js';
 import { analyzeGroundChildClosedQuestions } from './ground-child-closed.js';
+import { analyzeClosedAdvanceQuestions } from './closed-question.js';
 
 /** 定量 metric 的中文名与单位（用于评语与计分明细） */
 const METRIC_LABELS: Record<string, { label: string; unit: string }> = {
@@ -463,6 +464,7 @@ export async function judgeItem(
     const fluency = usesSharedTabooRules ? analyzeReceptionFluency(session) : undefined;
     const repetition = usesSharedTabooRules ? analyzeReceptionRepetition(session) : undefined;
     const trialInvitation = usesSharedTabooRules ? await analyzeReceptionTrialInvitation(session, gateway) : undefined;
+    const closedAdvanceQuestions = usesSharedTabooRules ? await analyzeClosedAdvanceQuestions(session, gateway) : undefined;
     const knowledgeHonesty = isReceptionTaboo
       ? await analyzeReceptionKnowledgeHonesty(session, gateway, institutionKB)
       : undefined;
@@ -473,19 +475,21 @@ export async function judgeItem(
         ? repetition.quoteTurnSeq
         : trialInvitation?.triggered
           ? trialInvitation.quoteTurnSeq
-          : childClosedQuestions?.triggered
-            ? childClosedQuestions.quoteTurnSeq
-            : knowledgeHonesty?.triggered
-              ? knowledgeHonesty.quoteTurnSeq
-              : primary.quoteTurnSeq;
+          : closedAdvanceQuestions?.triggered
+            ? closedAdvanceQuestions.quoteTurnSeq
+            : childClosedQuestions?.triggered
+              ? childClosedQuestions.quoteTurnSeq
+              : knowledgeHonesty?.triggered
+                ? knowledgeHonesty.quoteTurnSeq
+                : primary.quoteTurnSeq;
     return {
       itemId: def.id,
       itemName: def.name,
       skillPointId: def.skillPointId,
       levelKey: 'score',
       levelLabel: '得分',
-      score: Math.min(100, baseScore + (fluency?.deduction ?? 0) + (repetition?.deduction ?? 0) + (trialInvitation?.deduction ?? 0) + (childClosedQuestions?.deduction ?? 0) + (knowledgeHonesty?.deduction ?? 0)),
-      quote: fluency?.triggered || repetition?.triggered || trialInvitation?.triggered || childClosedQuestions?.triggered || knowledgeHonesty?.triggered
+      score: Math.min(100, baseScore + (fluency?.deduction ?? 0) + (repetition?.deduction ?? 0) + (trialInvitation?.deduction ?? 0) + (closedAdvanceQuestions?.deduction ?? 0) + (childClosedQuestions?.deduction ?? 0) + (knowledgeHonesty?.deduction ?? 0)),
+      quote: fluency?.triggered || repetition?.triggered || trialInvitation?.triggered || closedAdvanceQuestions?.triggered || childClosedQuestions?.triggered || knowledgeHonesty?.triggered
         ? session.transcript.find((turn) => turn.seq === quoteTurnSeq)?.text ?? primary.quote
         : primary.quote,
       quoteTurnSeq,
@@ -494,6 +498,7 @@ export async function judgeItem(
         fluency ? `语声语调：${fluency.rationale}` : '',
         repetition ? `简洁沟通：${repetition.rationale}` : '',
         trialInvitation ? `邀约提问：${trialInvitation.rationale}` : '',
+        closedAdvanceQuestions ? `推进提问：${closedAdvanceQuestions.rationale}` : '',
         childClosedQuestions ? `孩子沟通：${childClosedQuestions.rationale}` : '',
         knowledgeHonesty ? `资料真实性：${knowledgeHonesty.rationale}` : '',
       ].filter(Boolean).join('\n'),
@@ -502,6 +507,7 @@ export async function judgeItem(
         fluency?.triggered ? '放慢语速，先组织好语言再完整表达，减少嗯、啊和重复断句。' : '',
         repetition?.triggered ? '直接回应客户当前的问题，同一意思表达一次即可，把新信息讲简洁、讲全面。' : '',
         trialInvitation?.triggered ? '您什么时候方便参加？我给您安排。' : '',
+        closedAdvanceQuestions?.triggered ? '我直接给您介绍一下我们课程的核心优势，您听听看是否适合孩子。' : '',
         childClosedQuestions?.triggered ? '先尊重和鼓励孩子，再讲一个有趣的故事或做个小游戏，孩子开心后再问他喜不喜欢。' : '',
         knowledgeHonesty?.triggered ? '我是新来的，对您问的问题确实不清楚，我马上了解清楚再回复您。' : '',
       ].filter(Boolean).join('；') || undefined,
@@ -539,6 +545,13 @@ export async function judgeItem(
           rationale: trialInvitation.rationale,
           suggestion: '您什么时候方便参加？我给您安排。',
           quoteTurnSeq: trialInvitation.quoteTurnSeq,
+        }] : []),
+        ...(closedAdvanceQuestions?.triggered ? [{
+          title: '避免封闭式推进提问',
+          impact: closedAdvanceQuestions.deduction,
+          rationale: closedAdvanceQuestions.rationale,
+          suggestion: '我直接给您介绍一下我们课程的核心优势，您听听看是否适合孩子。',
+          quoteTurnSeq: closedAdvanceQuestions.quoteTurnSeq,
         }] : []),
         ...(childClosedQuestions?.triggered ? [{
           title: '先铺垫再询问孩子兴趣',
