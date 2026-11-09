@@ -42,7 +42,7 @@ async function computeScoreReport(
     : undefined;
   const trainee = await store.getUser(session.userId);
   const voiceBaseline = trainee?.preferences?.voiceBaseline as VoiceBaseline | undefined;
-  const institutionKB = scenario.category === '咨询接待' ? await store.getProductKB(session.tenantId) : undefined;
+  const institutionKB = (scenario.flowType ? scenario.flowType === 'reception' : scenario.category === '咨询接待') ? await store.getProductKB(session.tenantId) : undefined;
   const persona = await store.getPersonaConfig(scenario.personaConfigId);
   const personaRate = typeof persona?.voiceProfile?.rate === 'number' ? persona.voiceProfile.rate : undefined;
   const customerRateMultiplier = guidance?.voiceProfile?.rate ?? personaRate ?? 1;

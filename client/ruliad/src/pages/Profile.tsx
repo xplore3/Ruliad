@@ -87,6 +87,9 @@ export default function Profile() {
           <a href="#" onClick={(e) => { e.preventDefault(); navigate('/ability'); }}>
             <i className="me-dot" />能力进阶图<span className="arrow">›</span>
           </a>
+          <a href="#" onClick={(e) => { e.preventDefault(); navigate('/feedback'); }}>
+            <i className="me-dot" />意见反馈<span className="arrow">›</span>
+          </a>
           {isManager && (
             <a href="#" onClick={(e) => { e.preventDefault(); navigate('/management'); }}>
               <i className="me-dot" />团队能力管理<span className="arrow">›</span>
@@ -95,6 +98,11 @@ export default function Profile() {
           {(user?.role === 'admin' || user?.role === 'platform') && (
             <a href="#" onClick={(e) => { e.preventDefault(); navigate('/recordings'); }}>
               <i className="me-dot" />录音管理<span className="arrow">›</span>
+            </a>
+          )}
+          {(user?.role === 'admin' || user?.role === 'platform') && (
+            <a href="#" onClick={(e) => { e.preventDefault(); navigate('/admin/feedback'); }}>
+              <i className="me-dot" />反馈管理<span className="arrow">›</span>
             </a>
           )}
           {user?.role === 'admin' && (

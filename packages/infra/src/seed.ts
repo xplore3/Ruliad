@@ -915,6 +915,7 @@ export function buildSeedData(): SeedData {
     goldenCases: [
       {
         id: 'golden-case-1',
+        tenantId: TENANT,
         name: '首访破冰标准示范（张伟）',
         transcript: [
           { seq: 1, speaker: 'persona', text: '你有什么事快说，我一会儿还要去接送孩子。' },

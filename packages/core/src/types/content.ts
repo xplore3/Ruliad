@@ -59,6 +59,8 @@ export interface DataConsent {
 /** 回归测试用例（评分回归对话） */
 export interface GoldenCase {
   id: string;
+  /** 空值兼容历史全局共享案例；新案例必须有租户归属 */
+  tenantId?: string;
   name: string;
   transcript: Array<{ seq: number; speaker: 'trainee' | 'persona'; text: string }>;
   /** 人工标注的期望判定 */

@@ -72,12 +72,24 @@ export interface Scenario {
   productKBId?: string;
   /** 场景类型（缺省视为 practical） */
   sceneType?: SceneType;
-  /** 评分分类：决定评分时选用评分标准库中的哪一类标准 */
+  /** 统一业务分类 */
   category?: ScoreCategory;
+  flowType?: 'generic' | 'ground_push' | 'reception';
+  drillScriptId?: string;
+  scoreItemIds?: string[];
   /** 剧本（实用场景） */
   script?: ScenarioScript;
   /** 参与者设定 */
   participants?: ScenarioParticipant[];
+  conversation?: {
+    speechRate: 1 | 2 | 3;
+    challenge: number;
+    interruptLevel: 'off' | 'weak' | 'strong';
+  };
+  version?: number;
+  status?: 'draft' | 'published';
+  createdBy?: string;
+  updatedBy?: string;
 }
 
 export interface PersonaConfig {
@@ -87,12 +99,22 @@ export interface PersonaConfig {
   background: string;
   age?: number;
   occupation?: string;
+  industry?: string;
+  personalityTags?: string[];
+  decisionStyle?: string;
+  objections?: string[];
+  hiddenInfo?: string[];
   avatar?: string;
   version: number;
   elementIds: string[];
   behaviorBands: BehaviorBand[];
+  knowledgeBoundary?: { mustNotKnow: string[]; loadedKnowledge: string[] };
+  productKBId?: string;
   voiceProfile?: Record<string, unknown>;
   sourceMeta?: { practiceCount?: number };
+  createdBy?: string;
+  updatedBy?: string;
+  usageCount?: number;
 }
 
 export interface BehaviorBand {
@@ -201,10 +223,104 @@ export interface ScoreItem {
 
 export interface SkillPoint {
   id: string;
+  tenantId?: string;
   name: string;
+  description?: string;
   assetName?: string;
   practiceCount?: number;
   locked?: boolean;
+}
+
+export interface Element {
+  id: string;
+  tenantId?: string;
+  name: string;
+  type: 'C' | 'E' | 'B' | 'S';
+  layer: 'platform' | 'industry' | 'tenant';
+  content: string;
+  version: number;
+  dynamics?: {
+    triggers: Array<{ id: string; keywords: string[]; escalation: number; description: string }>;
+    decayPerTurn: number;
+    baseArousal: number;
+  };
+}
+
+/** 处理策略：直接修改 / 复制后修改（copy-on-write）/ 通用建议 */
+export type VoiceConfigScope = 'direct' | 'copy-on-write' | 'general';
+
+/** 单条执行计划操作 */
+export interface VoiceConfigOperation {
+  key?: string;
+  kind:
+    | 'create-persona'
+    | 'update-persona'
+    | 'copy-persona'
+    | 'create-scenario'
+    | 'update-scenario'
+    | 'create-resource'
+    | 'update-resource'
+    | 'copy-resource';
+  target?: string;
+  id?: string;
+  name?: string;
+  patch: Record<string, unknown>;
+  expectedVersion?: number;
+  rebind?: { field: string; mode: 'single' | 'list'; oldId: string; ref: string };
+  general?: boolean;
+  generalReason?: string;
+}
+
+/** 命令执行计划：一次语音命令可能同时创建资源、修改资源、绑定场景 */
+export interface VoiceConfigPlan {
+  scope: VoiceConfigScope;
+  reason?: string;
+  operations: VoiceConfigOperation[];
+}
+
+/** 通用建议拆分：混合命令中提炼到「AI自动提炼」的部分 */
+export interface VoiceCommandSuggestion {
+  target: string;
+  action: 'create' | 'update';
+  subject: string;
+  resourceName?: string;
+  patch: Record<string, unknown>;
+  reason: string;
+}
+
+export interface VoiceEditCommand {
+  id: string;
+  tenantId: string;
+  userId: string;
+  source: 'scenario-builder' | 'resource-ai' | 'voice-config';
+  target: string;
+  resourceId?: string;
+  action: 'create' | 'update';
+  text: string;
+  transcript?: string;
+  patch: Record<string, unknown>;
+  general: boolean;
+  generalReason?: string;
+  affectedScenarioIds: string[];
+  status: 'previewed' | 'applied' | 'pending_review' | 'in_review' | 'resolved' | 'rejected';
+  reviewNote?: string;
+  reviewedBy?: string;
+  createdAt: string;
+  updatedAt: string;
+
+  // ===== 统一语音流程（voice-config）扩展字段 =====
+  subject?: string;
+  resourceName?: string;
+  resolvedResourceId?: string;
+  plan?: VoiceConfigPlan;
+  scope?: VoiceConfigScope;
+  scopeReason?: string;
+  impactScenarios?: Array<{ id: string; name: string }>;
+  personaPatch?: Record<string, unknown>;
+  skillPointNames?: string[];
+  scoreItemNames?: string[];
+  drillScriptName?: string;
+  suggestions?: VoiceCommandSuggestion[];
 }
 
 /** ===== 资源库管理 ===== */
@@ -258,10 +374,13 @@ export interface ScoreItemDef {
   scoringMode?: 'levels' | 'score';
   /** 信心指数调整项：score 为扣减参数，用于换算全局信心指数，不参与基础分加权平均 */
   deductionOnly?: boolean;
+  quantitativeRule?: unknown;
+  voiceChannel?: 'child';
 }
 
 export interface GoldenCase {
   id: string;
+  tenantId?: string;
   name: string;
   transcript: { seq: number; speaker: 'trainee' | 'persona'; text: string }[];
   expected: { itemId: string; levelKey: string }[];
@@ -610,3 +729,58 @@ export interface ManagementKb {
   kindCounts: Record<string, number>;
   entries: KbEntry[];
 }
+
+/** ===== 用户反馈 ===== */
+
+/** 反馈类型：功能建议 / 问题反馈 / 其他 */
+export type FeedbackType = 'suggestion' | 'bug' | 'other';
+
+/** 反馈状态：待处理 / 处理中 / 已解决 / 已关闭 */
+export type FeedbackStatus = 'pending' | 'processing' | 'resolved' | 'closed';
+
+/** 反馈回复（管理员回复） */
+export interface FeedbackReply {
+  id: string;
+  feedbackId: string;
+  userId: string;
+  userName: string;
+  content: string;
+  isAdmin: boolean;
+  createdAt: string;
+}
+
+export interface Feedback {
+  id: string;
+  tenantId: string;
+  userId: string;
+  userName: string;
+  type: FeedbackType;
+  content: string;
+  /** 关联的功能/页面（可选） */
+  source?: string;
+  status: FeedbackStatus;
+  replies: FeedbackReply[];
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export const FEEDBACK_TYPE_LABELS: Record<FeedbackType, string> = {
+  suggestion: '功能建议',
+  bug: '问题反馈',
+  other: '其他',
+};
+
+export const FEEDBACK_STATUS_LABELS: Record<FeedbackStatus, string> = {
+  pending: '待处理',
+  processing: '处理中',
+  resolved: '已解决',
+  closed: '已关闭',
+};
+
+/** 状态对应的主题色（用于 chip 样式） */
+export const FEEDBACK_STATUS_CHIP: Record<FeedbackStatus, string> = {
+  pending: 'chip-amber',
+  processing: 'chip-blue',
+  resolved: 'chip-green',
+  closed: 'chip-gray',
+};

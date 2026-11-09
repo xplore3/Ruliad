@@ -11,6 +11,8 @@ import type {
   Element,
   ExamWindow,
   ExtractionProject,
+  Feedback,
+  FeedbackReply,
   GoldenCase,
   LearningPath,
   MethodologyConfig,
@@ -32,8 +34,9 @@ import type {
   User,
   UserRole,
   UserSkillState,
+  VoiceEditCommand,
 } from '@grasp-mvp/core';
-import type { AppealFilter, CertFilter, RecordingFilter, SeedData, SessionFilter, Store } from './store.js';
+import type { AppealFilter, CertFilter, FeedbackFilter, RecordingFilter, SeedData, SessionFilter, Store } from './store.js';
 
 /**
  * 内存仓储：本地无 SQLite 数据库时的降级实现，同时用于单元/集成测试。
@@ -62,6 +65,7 @@ export class MemoryStore implements Store {
   private briefingStandards = new Map<string, BriefingStandard>();
   private realismStandards = new Map<string, RealismStandard>();
   private appeals = new Map<string, Appeal>();
+  private feedbacks = new Map<string, Feedback>();
   private examWindows = new Map<string, ExamWindow>();
   private certRecords: CertRecord[] = [];
   private userSkillStates = new Map<string, UserSkillState>();
@@ -69,6 +73,7 @@ export class MemoryStore implements Store {
   private extractionProjects = new Map<string, ExtractionProject>();
   private dataConsents = new Map<string, DataConsent>();
   private goldenCases = new Map<string, GoldenCase>();
+  private voiceEditCommands = new Map<string, VoiceEditCommand>();
 private regressionRuns: RegressionRun[] = [];
 private quizQuestions = new Map<string, QuizQuestion>();
 private events: DomainEvent[] = [];
@@ -133,6 +138,12 @@ private events: DomainEvent[] = [];
         (filter.tenantId === undefined || e.tenantId === filter.tenantId)
     );
   }
+  async saveElement(element: Element) {
+    this.elements.set(element.id, element);
+  }
+  async deleteElement(id: string) {
+    this.elements.delete(id);
+  }
   async saveCalibrationEvent(event: CalibrationEvent) {
     this.calibrationEvents.push(event);
   }
@@ -150,11 +161,20 @@ private events: DomainEvent[] = [];
   async savePersonaConfig(config: PersonaConfig) {
     this.personaConfigs.set(config.id, config);
   }
+  async deletePersonaConfig(id: string) {
+    this.personaConfigs.delete(id);
+  }
   async getSkillPoint(id: string) {
     return this.skillPoints.get(id);
   }
   async listSkillPoints(tenantId: string) {
     return [...this.skillPoints.values()].filter((s) => s.tenantId === tenantId);
+  }
+  async saveSkillPoint(skillPoint: SkillPoint) {
+    this.skillPoints.set(skillPoint.id, skillPoint);
+  }
+  async deleteSkillPoint(id: string) {
+    this.skillPoints.delete(id);
   }
   async getScenario(id: string) {
     return this.scenarios.get(id);
@@ -354,6 +374,38 @@ private events: DomainEvent[] = [];
     );
   }
 
+  // ---- 用户反馈 ----
+  async createFeedback(feedback: Feedback) {
+    this.feedbacks.set(feedback.id, feedback);
+  }
+  async getFeedback(id: string) {
+    return this.feedbacks.get(id);
+  }
+  async updateFeedback(id: string, patch: Partial<Feedback>) {
+    const f = this.feedbacks.get(id);
+    if (f) this.feedbacks.set(id, { ...f, ...patch, updatedAt: new Date().toISOString() });
+  }
+  async deleteFeedback(id: string) {
+    this.feedbacks.delete(id);
+  }
+  async listFeedback(filter: FeedbackFilter) {
+    return [...this.feedbacks.values()].filter(
+      (f) =>
+        (!filter.tenantId || f.tenantId === filter.tenantId) &&
+        (!filter.userId || f.userId === filter.userId) &&
+        (!filter.status || f.status === filter.status) &&
+        (!filter.type || f.type === filter.type)
+    );
+  }
+  async addFeedbackReply(reply: FeedbackReply) {
+    const f = this.feedbacks.get(reply.feedbackId);
+    if (f) {
+      f.replies.push(reply);
+      f.updatedAt = new Date().toISOString();
+      this.feedbacks.set(f.id, { ...f });
+    }
+  }
+
   // ---- 考核认证 ----
   async getExamWindow(id: string) {
     return this.examWindows.get(id);
@@ -406,8 +458,8 @@ return this.productKBs.get(id);
   async listDataConsents(tenantId: string) {
     return [...this.dataConsents.values()].filter((c) => c.tenantId === tenantId);
   }
-  async listGoldenCases() {
-    return [...this.goldenCases.values()];
+  async listGoldenCases(tenantId: string) {
+    return [...this.goldenCases.values()].filter((item) => !item.tenantId || item.tenantId === tenantId);
   }
   async saveGoldenCase(goldenCase: GoldenCase) {
     this.goldenCases.set(goldenCase.id, goldenCase);
@@ -460,6 +512,21 @@ this.quizQuestions.delete(id);
     this.events = this.events.filter(
       (e) => e.userId !== userId && !(e.sessionId && sessionIds.has(e.sessionId))
     );
+  }
+
+  // ---- 语音编辑命令 ----
+  async saveVoiceEditCommand(command: VoiceEditCommand) {
+    this.voiceEditCommands.set(command.id, command);
+  }
+  async getVoiceEditCommand(id: string) {
+    return this.voiceEditCommands.get(id);
+  }
+  async listVoiceEditCommands(filter: { tenantId: string; userId?: string; general?: boolean }) {
+    return [...this.voiceEditCommands.values()]
+      .filter((command) => command.tenantId === filter.tenantId)
+      .filter((command) => !filter.userId || command.userId === filter.userId)
+      .filter((command) => filter.general === undefined || command.general === filter.general)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
   // ---- 事件流 ----

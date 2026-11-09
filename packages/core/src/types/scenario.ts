@@ -61,6 +61,23 @@ export interface ScenarioParticipant {
   goal?: string;
 }
 
+export type ScenarioStatus = 'draft' | 'published';
+export type ScenarioFlowType = 'generic' | 'ground_push' | 'reception';
+export type InterruptLevel = 'off' | 'weak' | 'strong';
+
+export function effectiveScenarioFlow(scenario: Pick<Scenario, 'category' | 'flowType'>): ScenarioFlowType {
+  if (scenario.flowType) return scenario.flowType;
+  if (scenario.category === '地推') return 'ground_push';
+  if (scenario.category === '咨询接待') return 'reception';
+  return 'generic';
+}
+
+export interface ConversationSettings {
+  speechRate: 1 | 2 | 3;
+  challenge: number;
+  interruptLevel: InterruptLevel;
+}
+
 export interface Scenario {
   id: string;
   tenantId: string;
@@ -68,9 +85,13 @@ export interface Scenario {
   personaConfigId: string;
   /** 场景级产品知识库 id（可选；优先于 PersonaConfig.productKBId） */
   productKBId?: string;
+  /** 场景级演练剧本引用；不再按分类隐式选择剧本 */
+  drillScriptId?: string;
+  /** 场景级评分标准引用；定义后评分只使用这些标准 */
+  scoreItemIds?: string[];
   skillPointIds: string[];
   successCriteria: SuccessCriteria;
-  /** 硬上限分钟数（8-15） */
+  /** 预计时长分钟数；指引倒计时存在时由指引覆盖 */
   durationMinutes: number;
   difficulty: number;
   /** 要求学员覆盖的话题点（规则层 coverage 检查） */
@@ -85,12 +106,21 @@ export interface Scenario {
   source?: string;
   /** 场景类型（缺省视为 practical，兼容存量数据） */
   sceneType?: SceneType;
-  /** 评分分类：决定评分时选用评分标准库中的哪一类标准；缺省兼容存量数据（不按分类过滤） */
+  /** 统一业务分类，同时用于展示、剧本和评分资源筛选 */
   category?: ScoreCategory;
+  /** 执行策略；缺省按历史分类兼容，新场景应显式保存 generic 或专项策略 */
+  flowType?: ScenarioFlowType;
   /** 剧本（实用场景） */
   script?: ScenarioScript;
   /** 参与者设定 */
   participants?: ScenarioParticipant[];
+  /** 对话参数的结构化真相源，供编辑器无损反填 */
+  conversation?: ConversationSettings;
+  /** 场景版本与发布状态；缺省按已发布 v1 兼容存量数据 */
+  version?: number;
+  status?: ScenarioStatus;
+  createdBy?: string;
+  updatedBy?: string;
   /** 累计练习次数（展示口径，由后台维护或种子数据预置） */
   practiceCount?: number;
 }

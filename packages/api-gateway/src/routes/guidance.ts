@@ -65,20 +65,23 @@ export async function guidanceRoutes(app: FastifyInstance, ctx: RouteContext): P
   const qualifyJudgments = new Map<string, Promise<boolean>[]>();
 
   // 新手指引流程配置查询
-  app.get<{ Params: { id: string } }>('/scenarios/:id/guidance', async (request) => ({
-    guidance: (await getGuidance(store, request.params.id)) ?? null,
-  }));
+  app.get<{ Params: { id: string } }>('/scenarios/:id/guidance', async (request, reply) => {
+    const scenario = await store.getScenario(request.params.id);
+    if (!scenario || scenario.tenantId !== request.tenantId) return reply.code(404).send({ error: '场景不存在' });
+    const guidance = await getGuidance(store, scenario.id);
+    return { guidance: guidance?.tenantId === request.tenantId ? guidance : null };
+  });
 
   // 资格提问回答：raw PCM → ASR → judgeExperience。非最后一题只记录不结论（experienced=null），最后一题给结论并落库
   app.post<{ Params: { id: string }; Querystring: { q?: string } }>(
     '/sessions/:id/qualify-answer',
     async (request, reply) => {
       const session = await store.getSession(request.params.id);
-      if (!session) return reply.code(404).send({ error: '会话不存在' });
+      if (!session || session.userId !== request.userId) return reply.code(404).send({ error: '会话不存在' });
       if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
 
       // 问题从指引配置取；无配置时仅地推类场景回退默认两问，其他场景无资格提问
-      const guidance = await getGuidance(store, session.scenarioId);
+      const guidance = await getGuidance(store, session.scenarioId, session.tenantId);
       const scenario = await store.getScenario(session.scenarioId);
       const questions = resolveQualifyQuestions(guidance, scenario);
       if (questions.length === 0) {
@@ -126,13 +129,13 @@ export async function guidanceRoutes(app: FastifyInstance, ctx: RouteContext): P
   // （无引用或剧本已被删除 → 声明无示范，前端跳过该步骤；version>1 表示"再听一版"，LLM 换风格演绎）
   app.post<{ Params: { id: string }; Body: { version?: number } }>('/sessions/:id/demo', async (request, reply) => {
     const session = await store.getSession(request.params.id);
-    if (!session) return reply.code(404).send({ error: '会话不存在' });
+    if (!session || session.userId !== request.userId) return reply.code(404).send({ error: '会话不存在' });
     if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
 
-    const guidance = await getGuidance(store, session.scenarioId);
-    if (!guidance?.demoScriptId) return { lines: [], hasDemo: false };
+    const guidance = await getGuidance(store, session.scenarioId, session.tenantId);
+    if (!guidance?.demoScriptId || guidance.tenantId !== session.tenantId) return { lines: [], hasDemo: false };
     const script = await store.getDemoScript(guidance.demoScriptId);
-    if (!script) return { lines: [], hasDemo: false };
+    if (!script || script.tenantId !== session.tenantId) return { lines: [], hasDemo: false };
     const pool = await resolveFaqPool(store, session.tenantId, script.faqPoolRef, script.faqPick ?? 0);
     const version = Math.max(1, Math.floor(Number(request.body?.version ?? 1)) || 1);
     return { lines: await performDemoScript(gateway, script, pool, version), hasDemo: true };
@@ -142,10 +145,10 @@ export async function guidanceRoutes(app: FastifyInstance, ctx: RouteContext): P
   // （不照念资源库原文；LLM 失败回退参照稿）；无资源返回空口播
   app.post<{ Params: { id: string } }>('/sessions/:id/briefing', async (request, reply) => {
     const session = await store.getSession(request.params.id);
-    if (!session) return reply.code(404).send({ error: '会话不存在' });
+    if (!session || session.userId !== request.userId) return reply.code(404).send({ error: '会话不存在' });
     if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
 
-    const guidance = await getGuidance(store, session.scenarioId);
+    const guidance = await getGuidance(store, session.scenarioId, session.tenantId);
     if (!guidance) return { lines: [] };
 
     const standards = await store.listBriefingStandards(session.tenantId);
@@ -155,7 +158,7 @@ export async function guidanceRoutes(app: FastifyInstance, ctx: RouteContext): P
   // 示范后的选择：raw PCM → ASR → judgeDemoChoice；choice='practice' 即进入第4步演练，响应附带 liveIntro（旁白+目标，无资源为 null）
   app.post<{ Params: { id: string } }>('/sessions/:id/demo-choice', async (request, reply) => {
     const session = await store.getSession(request.params.id);
-    if (!session) return reply.code(404).send({ error: '会话不存在' });
+    if (!session || session.userId !== request.userId) return reply.code(404).send({ error: '会话不存在' });
     if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
 
     const directText = textFromBody(request);
@@ -170,7 +173,7 @@ export async function guidanceRoutes(app: FastifyInstance, ctx: RouteContext): P
     if (!text) return reply.code(422).send({ error: '未识别到有效语音' });
 
     const choice = await judgeDemoChoice(gateway, text);
-    const guidance = await getGuidance(store, session.scenarioId);
+    const guidance = await getGuidance(store, session.scenarioId, session.tenantId);
     return { text, choice, liveIntro: guidance?.liveIntro ?? null };
   });
 
@@ -180,7 +183,7 @@ export async function guidanceRoutes(app: FastifyInstance, ctx: RouteContext): P
   app.get<{ Params: { id: string }; Querystring: { token?: string } }>(
     '/sessions/:id/asr-stream',
     { websocket: true },
-    (socket, req) => {
+    async (socket, req) => {
       const token = req.query.token;
       const payload = token ? verifyToken(token) : null;
       if (!payload) {
@@ -196,6 +199,11 @@ export async function guidanceRoutes(app: FastifyInstance, ctx: RouteContext): P
         return;
       }
       const sessionId = req.params.id;
+      const session = await store.getSession(sessionId);
+      if (!session || session.userId !== payload.userId || session.tenantId !== payload.tenantId) {
+        socket.close(4404, '会话不存在');
+        return;
+      }
       req.log.info({ sessionId, userId: payload.userId, provider: speech.asr.name }, 'asr-stream WS 已建立');
 
       // 每连接只允许一轮未完成的识别：round 单调递增，过期轮次的异步回调一律丢弃

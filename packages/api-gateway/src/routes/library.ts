@@ -184,6 +184,10 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     const body = request.body ?? {};
     const error = validateDemoScriptBody(body);
     if (error) return reply.code(400).send({ error });
+    if (body.id) {
+      const current = await store.getDemoScript(body.id);
+      if (!current || current.tenantId !== request.tenantId) return reply.code(404).send({ error: '示范剧本不存在' });
+    }
     const script: DemoScript = {
       id: body.id ?? randomUUID(),
       tenantId: request.tenantId,
@@ -227,6 +231,8 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     if (!existing || existing.tenantId !== request.tenantId) {
       return reply.code(404).send({ error: '示范剧本不存在' });
     }
+    const usedBy = (await store.listScenarioGuidances(request.tenantId)).filter((guidance) => guidance.demoScriptId === existing.id);
+    if (usedBy.length) return reply.code(409).send({ error: `示范剧本仍被 ${usedBy.length} 个场景指引引用，请先解除绑定` });
     await store.deleteDemoScript(request.params.id);
     return { ok: true };
   });
@@ -242,6 +248,10 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     if (!body.content?.trim()) return reply.code(400).send({ error: 'content 必填' });
     if (!body.category || !SCORE_CATEGORIES.includes(body.category)) {
       return reply.code(400).send({ error: `category 仅支持 ${SCORE_CATEGORIES.map((c) => `'${c}'`).join(' | ')}` });
+    }
+    if (body.id) {
+      const current = await store.getDrillScript(body.id);
+      if (!current || current.tenantId !== request.tenantId) return reply.code(404).send({ error: '演练剧本不存在' });
     }
     const script: DrillScript = {
       id: body.id ?? randomUUID(),
@@ -282,6 +292,8 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     if (!existing || existing.tenantId !== request.tenantId) {
       return reply.code(404).send({ error: '演练剧本不存在' });
     }
+    const usedBy = (await store.listScenarios(request.tenantId)).filter((scenario) => scenario.drillScriptId === existing.id);
+    if (usedBy.length) return reply.code(409).send({ error: `演练剧本仍被 ${usedBy.length} 个场景引用，请先解除绑定` });
     await store.deleteDrillScript(request.params.id);
     return { ok: true };
   });
@@ -297,8 +309,9 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     const body = request.body ?? {};
     const error = validateScoreItemBody(body);
     if (error) return reply.code(400).send({ error });
-    if (!(await store.getSkillPoint(body.skillPointId!))) {
-      return reply.code(400).send({ error: `技能点不存在: ${body.skillPointId}` });
+    const skillPoint = await store.getSkillPoint(body.skillPointId!);
+    if (!skillPoint || skillPoint.tenantId !== request.tenantId) {
+      return reply.code(400).send({ error: `技能点不存在或不属于本租户: ${body.skillPointId}` });
     }
     const def: ScoreItemDef = {
       id: randomUUID(),
@@ -314,6 +327,8 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
       category: body.category,
       scoringMode: body.scoringMode,
       deductionOnly: body.deductionOnly,
+      quantitativeRule: body.quantitativeRule,
+      voiceChannel: body.voiceChannel,
     };
     await store.upsertScoreItemDef(def);
     return reply.code(201).send(def);
@@ -339,9 +354,13 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
         category: body.category ?? existing.category,
         scoringMode: body.scoringMode ?? existing.scoringMode,
         deductionOnly: body.deductionOnly ?? existing.deductionOnly,
+        quantitativeRule: body.quantitativeRule ?? existing.quantitativeRule,
+        voiceChannel: body.voiceChannel ?? existing.voiceChannel,
       };
       const error = validateScoreItemBody(merged);
       if (error) return reply.code(400).send({ error });
+      const skillPoint = await store.getSkillPoint(merged.skillPointId);
+      if (!skillPoint || skillPoint.tenantId !== request.tenantId) return reply.code(400).send({ error: '技能点不存在或不属于本租户' });
       await store.upsertScoreItemDef(merged);
       return merged;
     }
@@ -352,13 +371,15 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     if (!defs.some((d) => d.id === request.params.id)) {
       return reply.code(404).send({ error: '评分标准不存在' });
     }
+    const usedBy = (await store.listScenarios(request.tenantId)).filter((scenario) => scenario.scoreItemIds?.includes(request.params.id));
+    if (usedBy.length) return reply.code(409).send({ error: `评分标准仍被 ${usedBy.length} 个场景引用，请先解除绑定` });
     await store.deleteScoreItemDef(request.params.id);
     return { ok: true };
   });
 
   /** 评分回归案例库 —— 评分引擎回归测试用，不参与实时执行 */
-  app.get('/library/golden-cases', async () => ({
-    cases: await store.listGoldenCases(),
+  app.get('/library/golden-cases', async (request) => ({
+    cases: await store.listGoldenCases(request.tenantId),
   }));
 
   app.post<{ Body: Partial<GoldenCase> }>('/library/golden-cases', async (request, reply) => {
@@ -366,7 +387,7 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     if (!body.name?.trim() || !body.transcript?.length || !body.expected?.length) {
       return reply.code(400).send({ error: 'name / transcript / expected 必填' });
     }
-    const goldenCase: GoldenCase = { ...body, id: randomUUID() } as GoldenCase;
+    const goldenCase: GoldenCase = { ...body, id: randomUUID(), tenantId: request.tenantId } as GoldenCase;
     await store.saveGoldenCase(goldenCase);
     return reply.code(201).send(goldenCase);
   });
@@ -374,7 +395,7 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
   app.put<{ Params: { id: string }; Body: Partial<GoldenCase> }>(
     '/library/golden-cases/:id',
     async (request, reply) => {
-      const cases = await store.listGoldenCases();
+      const cases = await store.listGoldenCases(request.tenantId);
       const existing = cases.find((c) => c.id === request.params.id);
       if (!existing) return reply.code(404).send({ error: '评分回归案例不存在' });
       const body = request.body ?? {};
@@ -393,7 +414,7 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
   );
 
   app.delete<{ Params: { id: string } }>('/library/golden-cases/:id', async (request, reply) => {
-    const cases = await store.listGoldenCases();
+    const cases = await store.listGoldenCases(request.tenantId);
     if (!cases.some((c) => c.id === request.params.id)) {
       return reply.code(404).send({ error: '评分回归案例不存在' });
     }
@@ -411,6 +432,9 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     if (!body.name?.trim()) return reply.code(400).send({ error: 'name 必填' });
     if (!body.category?.trim()) return reply.code(400).send({ error: 'category 必填' });
     if (!body.description?.trim()) return reply.code(400).send({ error: 'description 必填' });
+    if (body.id && !(await store.listBriefingStandards(request.tenantId)).some((item) => item.id === body.id)) {
+      return reply.code(404).send({ error: '讲解标准不存在' });
+    }
     const standard: BriefingStandard = {
       id: body.id ?? randomUUID(),
       tenantId: request.tenantId,
@@ -428,6 +452,8 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     if (!items.some((s) => s.id === request.params.id)) {
       return reply.code(404).send({ error: '讲解标准不存在' });
     }
+    const usedBy = (await store.listScenarioGuidances(request.tenantId)).filter((guidance) => guidance.briefingStandardIds.includes(request.params.id));
+    if (usedBy.length) return reply.code(409).send({ error: `讲解标准仍被 ${usedBy.length} 个场景指引引用，请先解除绑定` });
     await store.deleteBriefingStandard(request.params.id);
     return { ok: true };
   });
@@ -442,6 +468,9 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     if (!body.name?.trim()) return reply.code(400).send({ error: 'name 必填' });
     if (!body.category?.trim()) return reply.code(400).send({ error: 'category 必填' });
     if (!body.description?.trim()) return reply.code(400).send({ error: 'description 必填' });
+    if (body.id && !(await store.listRealismStandards(request.tenantId)).some((item) => item.id === body.id)) {
+      return reply.code(404).send({ error: '真实度标准不存在' });
+    }
     const standard: RealismStandard = {
       id: body.id ?? randomUUID(),
       tenantId: request.tenantId,
@@ -458,6 +487,8 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     if (!items.some((s) => s.id === request.params.id)) {
       return reply.code(404).send({ error: '演练真实度标准不存在' });
     }
+    const usedBy = (await store.listScenarioGuidances(request.tenantId)).filter((guidance) => guidance.realismStandardIds.includes(request.params.id));
+    if (usedBy.length) return reply.code(409).send({ error: `真实度标准仍被 ${usedBy.length} 个场景指引引用，请先解除绑定` });
     await store.deleteRealismStandard(request.params.id);
     return { ok: true };
   });
@@ -471,8 +502,24 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     const body = request.body ?? {};
     if (!body.scenarioId?.trim()) return reply.code(400).send({ error: 'scenarioId 必填' });
     if (!body.name?.trim()) return reply.code(400).send({ error: 'name 必填' });
-    if (!Array.isArray(body.qualifyQuestions) || body.qualifyQuestions.length === 0) {
-      return reply.code(400).send({ error: 'qualifyQuestions 至少一题' });
+    if (!Array.isArray(body.qualifyQuestions)) return reply.code(400).send({ error: 'qualifyQuestions 必须为数组' });
+    const scenario = await store.getScenario(body.scenarioId);
+    if (!scenario || scenario.tenantId !== request.tenantId) return reply.code(404).send({ error: '绑定场景不存在或不属于本租户' });
+    if (body.id) {
+      const current = await store.getScenarioGuidanceById(body.id);
+      if (!current || current.tenantId !== request.tenantId) return reply.code(404).send({ error: '指引配置不存在' });
+    }
+    if (body.demoScriptId) {
+      const script = await store.getDemoScript(body.demoScriptId);
+      if (!script || script.tenantId !== request.tenantId) return reply.code(400).send({ error: '示范剧本不存在或不属于本租户' });
+    }
+    const briefingStandards = await store.listBriefingStandards(request.tenantId);
+    const realismStandards = await store.listRealismStandards(request.tenantId);
+    if ((body.briefingStandardIds ?? []).some((id) => !briefingStandards.some((item) => item.id === id))) {
+      return reply.code(400).send({ error: '讲解标准包含不存在或跨租户引用' });
+    }
+    if ((body.realismStandardIds ?? []).some((id) => !realismStandards.some((item) => item.id === id))) {
+      return reply.code(400).send({ error: '真实度标准包含不存在或跨租户引用' });
     }
     const guidance = {
       ...body,
@@ -486,7 +533,6 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
       defaultDifficulty: body.defaultDifficulty ?? 1,
       scoringFocus: body.scoringFocus ?? [],
     } as ScenarioGuidance;
-    // 每场景只允许一条指引配置（getScenarioGuidance 按 scenarioId 单条取值）
     const existing = await store.getScenarioGuidance(guidance.scenarioId);
     if (existing && existing.id !== guidance.id) {
       return reply.code(409).send({ error: '该场景已有指引配置，请编辑现有记录', existingId: existing.id });

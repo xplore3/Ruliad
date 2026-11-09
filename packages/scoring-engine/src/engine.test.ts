@@ -183,6 +183,21 @@ describe('scoreSession', () => {
     ]);
   });
 
+  it('显式 scoreItemIds 优先于分类与技能点，只评场景绑定的标准', async () => {
+    const categorized: ScoreItemDef[] = [
+      { ...defs[0], id: 'item-selected', category: '地推' },
+      { ...defs[0], id: 'item-same-category', category: '地推' },
+      { ...defs[0], id: 'item-generic' },
+    ];
+    const report = await scoreSession(
+      session,
+      { ...scenario, category: '地推', scoreItemIds: ['item-selected'] },
+      categorized,
+      gateway
+    );
+    expect(report.items.map((item) => item.itemId)).toEqual(['item-selected']);
+  });
+
   it('skillPointNames 选项把技能点 id 映射为名称', async () => {
     const report = await scoreSession(session, scenario, defs, gateway, {
       skillPointNames: { 'sp-objection': '异议处理' },

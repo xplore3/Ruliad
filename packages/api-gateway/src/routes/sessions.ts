@@ -280,13 +280,15 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
       // 本场客户类型：剧本声明了概率化原则（如"10次应该有5次客户表现出不感兴趣"）时采用双场制——
       // 第一场必定"不感兴趣"（最多 3 轮后旁白切场），第二场必定"潜在意向"，不再随机
       const drillScriptForRoll = await resolveDrillScript(store, scenario).catch(() => undefined);
-      const customerArchetype = scenario.category === '咨询接待'
+      const customerArchetype = (scenario.flowType ? scenario.flowType === 'reception' : scenario.category === '咨询接待')
         ? 'interested'
-        : drillScriptForRoll
-          ? initialCustomerArchetype(drillScriptForRoll.content, scenario.category)
-          : undefined;
+        : scenario.flowType === 'generic'
+          ? undefined
+          : drillScriptForRoll
+            ? initialCustomerArchetype(drillScriptForRoll.content, scenario.category)
+            : undefined;
 
-      const receptionPlan = scenario.category === '咨询接待' ? createReceptionPlan() : undefined;
+      const receptionPlan = (scenario.flowType ? scenario.flowType === 'reception' : scenario.category === '咨询接待') ? createReceptionPlan() : undefined;
       const receptionQuestions = receptionPlan?.questions;
       const receptionTrialDisposition = receptionPlan?.receptionTrialDisposition;
       const runtime = await loadRuntime(ctx, scenario, undefined, customerArchetype, receptionQuestions, receptionTrialDisposition);

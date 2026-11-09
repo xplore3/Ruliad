@@ -63,8 +63,8 @@ export interface ScoreLogger {
 
 /**
  * 评分主流程：规则层 + 双 judge 评分标准 + 汇总报告。
- * 评分标准选取：场景有 category 时评该分类库里的全部标准（未分类标准视为通用，一并纳入）；
- * 场景无 category 的存量数据回退为只评 scenario.skillPointIds 覆盖的项。观察项进 items 但不计分。
+ * 评分标准选取：优先使用场景显式绑定的 scoreItemIds；存量数据未绑定时，
+ * 有 category 则评该分类及通用标准，无 category 则按 skillPointIds 过滤。观察项进 items 但不计分。
  * options.videoFrames 存在时附带视频表现评审（videoReview，独立维度不计总分）。
  */
 export async function scoreSession(
@@ -80,9 +80,11 @@ export async function scoreSession(
   const violations = scenario.category ? [] : ruleViolations;
 
   const trialDeclined = isReceptionTrialDeclined(session);
-  const relevantDefs = (scenario.category
-    ? defs.filter((d) => !d.category || d.category === scenario.category)
-    : defs.filter((d) => scenario.skillPointIds.includes(d.skillPointId))
+  const relevantDefs = (scenario.scoreItemIds !== undefined
+    ? defs.filter((d) => scenario.scoreItemIds!.includes(d.id))
+    : scenario.category
+      ? defs.filter((d) => !d.category || d.category === scenario.category)
+      : defs.filter((d) => scenario.skillPointIds.includes(d.skillPointId))
   ).filter((d) => !(trialDeclined && d.name === '主动性确定试听时间'));
 
   const startedAt = Date.now();

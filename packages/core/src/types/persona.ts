@@ -37,6 +37,12 @@ export interface PersonaConfig {
   voiceProfile?: Record<string, unknown>;
   /** 角色头像 URL */
   avatar?: string;
+  /** 编辑器结构化画像字段；background 仍是运行时展示与提示词背景 */
+  industry?: string;
+  personalityTags?: string[];
+  decisionStyle?: string;
+  objections?: string[];
+  hiddenInfo?: string[];
   /** 客户认知来源信息（资产中心客户角色卡口径） */
   sourceMeta?: {
     /** 细分人群卡标题（如「三甲医院 · 学术型主任」） */
@@ -55,6 +61,8 @@ export interface PersonaConfig {
     calibrationStatus?: string;
   };
   version: number;
+  createdBy?: string;
+  updatedBy?: string;
 }
 
 /** 编译产物：运行时包 */

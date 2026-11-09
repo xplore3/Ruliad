@@ -114,14 +114,15 @@ export async function sandboxRoutes(app: FastifyInstance, ctx: RouteContext): Pr
 
     // 获取场景与陪练员信息
     const scenario = await store.getScenario(body.scenarioId);
-    if (!scenario) return reply.code(404).send({ error: '场景不存在' });
+    if (!scenario || scenario.tenantId !== request.tenantId) return reply.code(404).send({ error: '场景不存在' });
 
-    const persona = await store.getPersonaConfig(scenario.personaConfigId);
-    const productKB = scenario.productKBId
-      ? await store.getProductKBById(scenario.productKBId)
-      : persona?.productKBId
-        ? await store.getProductKBById(persona.productKBId)
-        : await store.getProductKB(request.tenantId);
+    const referencedPersona = await store.getPersonaConfig(scenario.personaConfigId);
+    const persona = referencedPersona?.tenantId === request.tenantId ? referencedPersona : undefined;
+    const kbId = scenario.productKBId ?? persona?.productKBId;
+    const referencedKB = kbId ? await store.getProductKBById(kbId) : undefined;
+    const productKB = referencedKB?.tenantId === request.tenantId
+      ? referencedKB
+      : await store.getProductKB(request.tenantId);
 
     // 构建上下文
     const personaInfo = persona

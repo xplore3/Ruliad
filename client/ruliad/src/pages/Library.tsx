@@ -20,6 +20,7 @@ import {
   deleteScenarioGuidance,
   deleteScoreItem,
   extractLibraryRows,
+  fetchManagementKnowledgeBase,
   fetchPersonaConfigs,
   fetchScenarios,
   fetchSkillPoints,
@@ -50,6 +51,7 @@ import type {
   PersonaConfig,
   Scenario,
   ScenarioParticipant,
+  ScoreCategory,
   ScoreItemDef,
   ScoreLevel,
   SkillPoint,
@@ -63,6 +65,12 @@ import type {
   RealismStandard,
   ScenarioGuidance,
 } from '../lib/guidance';
+import { ElementLibrary, PersonaLibrary, ProductKBLibrary, SkillPointLibrary } from './AssetLibrary';
+import VoiceResourceEditor from './VoiceResourceEditor';
+import Pagination from '../components/Pagination';
+
+/** 各资源库列表的分页大小 */
+const LIB_PAGE_SIZE = 10;
 
 /** ===== 通用行模型：clean=已入库未改 / dirty=已改 / draft=新草稿 / deleted=待删除 ===== */
 
@@ -250,6 +258,19 @@ function Field({ label, wide, children }: { label: string; wide?: boolean; child
       {children}
     </label>
   );
+}
+
+function JsonInput({ value, onChange }: { value: unknown; onChange: (value: unknown) => void }) {
+  const [text, setText] = useState(JSON.stringify(value ?? null, null, 2));
+  const [invalid, setInvalid] = useState(false);
+  useEffect(() => { setText(JSON.stringify(value ?? null, null, 2)); setInvalid(false); }, [value]);
+  return <>
+    <MTextarea rows={8} value={text} onChange={(next) => {
+      setText(next);
+      try { onChange(JSON.parse(next)); setInvalid(false); } catch { setInvalid(true); }
+    }} />
+    {invalid && <span className="lib-err">JSON 格式不完整，修正后才会应用</span>}
+  </>;
 }
 
 function CellInput({ value, onChange, placeholder, type }: {
@@ -584,10 +605,14 @@ function ParticipantsEditor({ participants, onChange }: {
 
 /** ===== 页面 ===== */
 
-type TabKey = 'scenarios' | 'questions' | 'demo-scripts' | 'drill-scripts' | 'score-items' | 'golden-cases' | 'analysis-standards' | 'realism-standards' | 'guidance';
+type TabKey = 'voice-editor' | 'scenarios' | 'personas' | 'skill-points' | 'elements' | 'product-kb' | 'questions' | 'demo-scripts' | 'drill-scripts' | 'score-items' | 'golden-cases' | 'analysis-standards' | 'realism-standards' | 'guidance';
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'scenarios', label: '对练场景库' },
+  { key: 'personas', label: '陪练角色库' },
+  { key: 'skill-points', label: '技能点库' },
+  { key: 'elements', label: '角色要素库' },
+  { key: 'product-kb', label: '产品知识库' },
   { key: 'questions', label: '示范问答库' },
   { key: 'demo-scripts', label: '示范剧本库' },
   { key: 'drill-scripts', label: '演练剧本库' },
@@ -662,27 +687,49 @@ export default function Library() {
     <div className="section" style={{ paddingTop: 16 }}>
       <div className="sec-head">
         <h2 className="bar-title">资源库管理</h2>
-        <button className="btn btn-ghost btn-sm" onClick={() => navigate('/build')}>← 返回构建</button>
+        {tab === 'voice-editor' ? (
+          <button className="btn btn-ghost btn-sm" onClick={() => setTab('scenarios')}>← 返回资源库</button>
+        ) : (
+          <button className="btn btn-ghost btn-sm" onClick={() => navigate('/build')}>← 返回构建</button>
+        )}
       </div>
 
-      <div className="seg seg-lg" style={{ marginBottom: 16 }}>
-        {TABS.map((t) => (
-          <button key={t.key} className={tab === t.key ? 'on' : ''} onClick={() => { setTab(t.key); setNotice(null); }}>
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {tab !== 'voice-editor' && (
+        <button type="button" className="voice-entry card" onClick={() => { setTab('voice-editor'); setNotice(null); }}>
+          <span className="voice-entry-badge">功能</span>
+          <span className="voice-entry-main">
+            <strong>语音全域编辑</strong>
+            <span className="hint">语音指令批量修改场景、角色与各类资源库，先预览差异、确认后再保存</span>
+          </span>
+          <span className="voice-entry-go">进入 →</span>
+        </button>
+      )}
 
-      {notice && (
+      {tab !== 'voice-editor' && (
+        <div className="seg seg-lg" style={{ marginBottom: 16 }}>
+          {TABS.map((t) => (
+            <button key={t.key} className={tab === t.key ? 'on' : ''} onClick={() => { setTab(t.key); setNotice(null); }}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {tab !== 'voice-editor' && notice && (
         <div className="card" style={{ padding: '10px 16px', marginBottom: 12, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>{notice}</span>
           <button className="act-btn" onClick={() => setNotice(null)}>✕</button>
         </div>
       )}
 
+      {tab === 'voice-editor' && <VoiceResourceEditor />}
       {tab === 'scenarios' && (
-        <ScenarioTab skillPoints={skillPoints} personas={personas} guidances={guidances} onConfigureGuidance={configureGuidance} setNotice={setNotice} />
+        <ScenarioTab skillPoints={skillPoints} personas={personas} scoreItems={scoreItems} guidances={guidances} onConfigureGuidance={configureGuidance} setNotice={setNotice} />
       )}
+      {tab === 'personas' && <PersonaLibrary onChanged={() => fetchPersonaConfigs().then((r) => setPersonas(r.personaConfigs)).catch(() => {})} />}
+      {tab === 'skill-points' && <SkillPointLibrary onChanged={() => fetchSkillPoints().then((r) => setSkillPoints(r.skillPoints)).catch(() => {})} />}
+      {tab === 'elements' && <ElementLibrary />}
+      {tab === 'product-kb' && <ProductKBLibrary />}
       {tab === 'questions' && <DemoFaqTab skillPoints={skillPoints} setNotice={setNotice} />}
       {tab === 'demo-scripts' && <DemoScriptTab setNotice={setNotice} />}
       {tab === 'drill-scripts' && <DrillScriptTab setNotice={setNotice} />}
@@ -769,6 +816,10 @@ function StandardTab({ categoryOptions, hasExample, emptyDraft, extractTarget, p
   const [panel, setPanel] = useState<'extract' | 'paste' | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [page, setPage] = useState(0);
+  const totalPages = Math.max(1, Math.ceil(rows.length / LIB_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages - 1);
+  const pageRows = rows.slice(currentPage * LIB_PAGE_SIZE, (currentPage + 1) * LIB_PAGE_SIZE);
 
   const reload = () => {
     setLoading(true);
@@ -864,7 +915,7 @@ function StandardTab({ categoryOptions, hasExample, emptyDraft, extractTarget, p
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {pageRows.map((row) => (
                 <tr key={row.key} className={`lib-row-${row.status}`}>
                   <td><RowStatusChip row={row} />{row.error && <div className="lib-err">{row.error}</div>}</td>
                   <td><CellInput value={row.data.name} onChange={(v) => updateRow(row.key, { name: v })} /></td>
@@ -889,6 +940,7 @@ function StandardTab({ categoryOptions, hasExample, emptyDraft, extractTarget, p
               ))}
             </tbody>
           </table>
+          <Pagination page={currentPage} totalPages={totalPages} total={rows.length} onChange={setPage} />
         </div>
       )}
       {panel === 'extract' && (
@@ -995,17 +1047,23 @@ interface ScenarioRowData {
   id?: string;
   name: string;
   sceneType: 'drill' | 'practical';
+  category: ScoreCategory;
+  description?: string;
   difficulty: number;
   durationMinutes: number;
   passScore: number;
   personaConfigId: string;
   skillPointIds: string[];
+  scoreItemIds: string[];
+  drillScriptId?: string;
   methodology?: string;
   source?: string;
   coverageTopics?: string[];
   productKBId?: string;
   script?: NonNullable<Scenario['script']>;
   participants?: ScenarioParticipant[];
+  version: number;
+  status: 'draft' | 'published';
 }
 
 const SCENARIO_HEADERS = ['名称', '类型', '难度', '时长', '及格分', '角色', '技能点', '方法论', '话题'];
@@ -1015,41 +1073,41 @@ function toScenarioRow(s: Scenario): ScenarioRowData {
     id: s.id,
     name: s.name,
     sceneType: s.sceneType ?? 'practical',
+    category: s.category ?? '电销',
+    description: s.description,
     difficulty: s.difficulty ?? 1,
     durationMinutes: s.durationMinutes,
     passScore: s.successCriteria?.passScore ?? 70,
     personaConfigId: s.personaConfigId,
     skillPointIds: s.skillPointIds ?? [],
+    scoreItemIds: s.scoreItemIds ?? [],
+    drillScriptId: s.drillScriptId,
     methodology: s.methodology,
     source: s.source,
     coverageTopics: s.coverageTopics,
     productKBId: s.productKBId,
     script: s.script,
     participants: s.participants,
+    version: s.version ?? 1,
+    status: s.status ?? 'published',
   };
 }
 
 function toScenarioPayload(d: ScenarioRowData) {
   return {
-    name: d.name.trim(),
-    personaConfigId: d.personaConfigId,
-    skillPointIds: d.skillPointIds,
-    passScore: d.passScore,
-    durationMinutes: d.durationMinutes,
-    difficulty: d.difficulty,
-    coverageTopics: d.coverageTopics,
-    methodology: d.methodology,
-    source: d.source,
-    sceneType: d.sceneType,
-    productKBId: d.productKBId,
-    script: d.script ?? null,
-    participants: d.participants ?? null,
+    name: d.name.trim(), personaConfigId: d.personaConfigId, skillPointIds: d.skillPointIds,
+    scoreItemIds: d.scoreItemIds, drillScriptId: d.drillScriptId || null, passScore: d.passScore,
+    durationMinutes: d.durationMinutes, difficulty: d.difficulty, coverageTopics: d.coverageTopics,
+    description: d.description || null, methodology: d.methodology, source: d.source, sceneType: d.sceneType,
+    category: d.category, productKBId: d.productKBId || null, script: d.script ?? null,
+    participants: d.participants ?? null, status: d.status, expectedVersion: d.version,
   };
 }
 
-function ScenarioTab({ skillPoints, personas, guidances, onConfigureGuidance, setNotice }: {
+function ScenarioTab({ skillPoints, personas, scoreItems, guidances, onConfigureGuidance, setNotice }: {
   skillPoints: SkillPoint[];
   personas: PersonaConfig[];
+  scoreItems: ScoreItemDef[];
   guidances: ScenarioGuidance[];
   onConfigureGuidance: (focus: GuidanceFocus) => void;
   setNotice: (s: string | null) => void;
@@ -1060,6 +1118,12 @@ function ScenarioTab({ skillPoints, personas, guidances, onConfigureGuidance, se
   const [savingOne, setSavingOne] = useState(false);
   const [panel, setPanel] = useState<'extract' | 'paste' | null>(null);
   const [detailKey, setDetailKey] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const totalPages = Math.max(1, Math.ceil(rows.length / LIB_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages - 1);
+  const pageRows = rows.slice(currentPage * LIB_PAGE_SIZE, (currentPage + 1) * LIB_PAGE_SIZE);
+  const [drillScripts, setDrillScripts] = useState<DrillScript[]>([]);
+  const [productKB, setProductKB] = useState<{ id: string; name: string } | null>(null);
 
   const reload = () => {
     setLoading(true);
@@ -1069,13 +1133,19 @@ function ScenarioTab({ skillPoints, personas, guidances, onConfigureGuidance, se
       .finally(() => setLoading(false));
   };
   useEffect(reload, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    listDrillScripts().then((r) => setDrillScripts(r.items)).catch(() => {});
+    fetchManagementKnowledgeBase().then((r) => setProductKB(r.kb ? { id: r.kb.id, name: r.kb.name } : null)).catch(() => {});
+  }, []);
 
   const handlers: SaveHandlers<ScenarioRowData> = {
     validate: (d) => {
       if (!d.name?.trim()) return '名称必填';
       if (!d.personaConfigId) return '请选择陪练角色';
       if (!d.skillPointIds.length) return '请至少选择一个技能点';
-      if (!Number.isFinite(d.passScore) || !Number.isFinite(d.durationMinutes)) return '及格分/时长必须为数字';
+      if (d.status === 'published' && !d.scoreItemIds.length) return '发布场景至少绑定一条评分标准';
+      if (!Number.isFinite(d.passScore) || d.passScore < 0 || d.passScore > 100) return '及格分必须为 0-100';
+      if (!Number.isFinite(d.durationMinutes) || d.durationMinutes < 1 || d.durationMinutes > 60) return '时长必须为 1-60 分钟';
       return null;
     },
     create: async (d) => toScenarioRow(await createScenario(toScenarioPayload(d))),
@@ -1110,6 +1180,11 @@ function ScenarioTab({ skillPoints, personas, guidances, onConfigureGuidance, se
     }
   };
 
+  const emptyScenario = (): ScenarioRowData => ({
+    name: '', sceneType: 'practical', category: '电销', difficulty: 1, durationMinutes: 10,
+    passScore: 70, personaConfigId: '', skillPointIds: [], scoreItemIds: [], version: 1, status: 'draft',
+  });
+
   const mapExtracted = (r: Record<string, unknown>): { data: ScenarioRowData; warn?: string[] } => {
     const warn: string[] = [];
     if (r.unresolvedPersona) warn.push(`角色「${String(r.unresolvedPersona)}」未匹配，请手动选择`);
@@ -1119,6 +1194,7 @@ function ScenarioTab({ skillPoints, personas, guidances, onConfigureGuidance, se
     const sceneType = r.sceneType === 'drill' ? 'drill' : 'practical';
     return {
       data: {
+        ...emptyScenario(),
         name: String(r.name ?? ''),
         sceneType,
         difficulty: Number(r.difficulty) || 1,
@@ -1152,6 +1228,7 @@ function ScenarioTab({ skillPoints, personas, guidances, onConfigureGuidance, se
       const sceneType = /实战|自由/.test(typeText) || typeText === 'drill' ? 'drill' as const : 'practical' as const;
       return {
         data: {
+          ...emptyScenario(),
           name: c[0] ?? '',
           sceneType,
           difficulty: num(c[2]) ?? 1,
@@ -1173,7 +1250,7 @@ function ScenarioTab({ skillPoints, personas, guidances, onConfigureGuidance, se
       <Toolbar
         pendingCount={pendingCount}
         saving={saving}
-        onAdd={() => addDrafts([{ data: { name: '', sceneType: 'practical', difficulty: 1, durationMinutes: 10, passScore: 70, personaConfigId: '', skillPointIds: [] } }])}
+        onAdd={() => addDrafts([{ data: emptyScenario() }])}
         onExtract={() => setPanel('extract')}
         onPaste={() => setPanel('paste')}
         onReload={reload}
@@ -1191,7 +1268,7 @@ function ScenarioTab({ skillPoints, personas, guidances, onConfigureGuidance, se
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {pageRows.map((row) => (
                 <tr key={row.key} className={`lib-row-${row.status}`}>
                   <td><RowStatusChip row={row} />{row.error && <div className="lib-err">{row.error}</div>}
                     {row.warn?.map((w) => <div key={w} className="lib-warn">{w}</div>)}
@@ -1241,6 +1318,7 @@ function ScenarioTab({ skillPoints, personas, guidances, onConfigureGuidance, se
               ))}
             </tbody>
           </table>
+          <Pagination page={currentPage} totalPages={totalPages} total={rows.length} onChange={setPage} />
         </div>
       )}
       {panel === 'extract' && <ExtractPanel target="scenario" onClose={() => setPanel(null)} onRows={(rs) => addDrafts(rs.map(mapExtracted))} />}
@@ -1266,6 +1344,24 @@ function ScenarioTab({ skillPoints, personas, guidances, onConfigureGuidance, se
               <option value="drill">实战训练（自由对练）</option>
             </select>
           </Field>
+          <Field label="分类">
+            <select className="input" value={detailRow.data.category} onChange={(e) => {
+              const category = e.target.value as ScoreCategory;
+              updateRow(detailRow.key, {
+                category,
+                drillScriptId: drillScripts.some((s) => s.id === detailRow.data.drillScriptId && s.category === category) ? detailRow.data.drillScriptId : undefined,
+                scoreItemIds: scoreItems.filter((item) => detailRow.data.scoreItemIds.includes(item.id) && (!item.category || item.category === category)).map((item) => item.id),
+              });
+            }}>
+              {SCORE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </Field>
+          <Field label="发布状态">
+            <select className="input" value={detailRow.data.status} onChange={(e) => updateRow(detailRow.key, { status: e.target.value as 'draft' | 'published' })}>
+              <option value="draft">草稿</option><option value="published">已发布</option>
+            </select>
+          </Field>
+          <Field label="场景描述" wide><MTextarea value={detailRow.data.description} onChange={(v) => updateRow(detailRow.key, { description: v || undefined })} /></Field>
           <Field label="难度">
             <select className="input" value={detailRow.data.difficulty} onChange={(e) => updateRow(detailRow.key, { difficulty: Number(e.target.value) })}>
               {[1, 2, 3].map((d) => <option key={d} value={d}>{DIFF_LABELS[d]}</option>)}
@@ -1281,9 +1377,27 @@ function ScenarioTab({ skillPoints, personas, guidances, onConfigureGuidance, se
           </Field>
           <Field label="方法论标签"><MInput value={detailRow.data.methodology} onChange={(v) => updateRow(detailRow.key, { methodology: v || undefined })} placeholder="如「张伟三步破冰法 · L2」" /></Field>
           <Field label="来源"><MInput value={detailRow.data.source} onChange={(v) => updateRow(detailRow.key, { source: v || undefined })} placeholder="官方 / 企业定制 / 自建" /></Field>
-          <Field label="产品知识库 ID"><MInput value={detailRow.data.productKBId} onChange={(v) => updateRow(detailRow.key, { productKBId: v || undefined })} placeholder="可选，优先于角色默认知识库" /></Field>
+          <Field label="产品知识库">
+            <select className="input" value={detailRow.data.productKBId ?? ''} onChange={(e) => updateRow(detailRow.key, { productKBId: e.target.value || undefined })}>
+              <option value="">使用角色默认或机构知识库</option>
+              {productKB && <option value={productKB.id}>{productKB.name}</option>}
+            </select>
+          </Field>
+          <Field label="演练剧本">
+            <select className="input" value={detailRow.data.drillScriptId ?? ''} onChange={(e) => updateRow(detailRow.key, { drillScriptId: e.target.value || undefined })}>
+              <option value="">不引用演练剧本</option>
+              {drillScripts.filter((s) => s.category === detailRow.data.category).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </Field>
           <Field label="考核技能点" wide>
             <SkillPointChecks value={detailRow.data.skillPointIds} options={skillPoints} onChange={(ids) => updateRow(detailRow.key, { skillPointIds: ids })} />
+          </Field>
+          <Field label="评分标准（场景显式绑定）" wide>
+            <IdNameChecks
+              value={detailRow.data.scoreItemIds}
+              options={scoreItems.filter((item) => !item.category || item.category === detailRow.data.category)}
+              onChange={(ids) => updateRow(detailRow.key, { scoreItemIds: ids })}
+            />
           </Field>
           <Field label="覆盖话题" wide>
             <LinesTextarea value={detailRow.data.coverageTopics} onChange={(v) => updateRow(detailRow.key, { coverageTopics: v })} placeholder="学员需覆盖的话题点，每行一条" />
@@ -1336,6 +1450,10 @@ function DemoFaqTab({ skillPoints, setNotice }: { skillPoints: SkillPoint[]; set
   const [savingOne, setSavingOne] = useState(false);
   const [panel, setPanel] = useState<'extract' | 'paste' | null>(null);
   const [detailKey, setDetailKey] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const totalPages = Math.max(1, Math.ceil(rows.length / LIB_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages - 1);
+  const pageRows = rows.slice(currentPage * LIB_PAGE_SIZE, (currentPage + 1) * LIB_PAGE_SIZE);
 
   const reload = () => {
     setLoading(true);
@@ -1467,7 +1585,7 @@ function DemoFaqTab({ skillPoints, setNotice }: { skillPoints: SkillPoint[]; set
               <tr><th>状态</th><th>分类</th><th>示范问答</th><th>参考应答</th><th>难度</th><th>频率%</th><th>技能点</th><th>操作</th></tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {pageRows.map((row) => (
                 <tr key={row.key} className={`lib-row-${row.status}`}>
                   <td><RowStatusChip row={row} />{row.error && <div className="lib-err">{row.error}</div>}
                     {row.warn?.map((w) => <div key={w} className="lib-warn">{w}</div>)}
@@ -1495,6 +1613,7 @@ function DemoFaqTab({ skillPoints, setNotice }: { skillPoints: SkillPoint[]; set
               ))}
             </tbody>
           </table>
+          <Pagination page={currentPage} totalPages={totalPages} total={rows.length} onChange={setPage} />
         </div>
       )}
       {panel === 'extract' && <ExtractPanel target="demo-faq" onClose={() => setPanel(null)} onRows={(rs) => addDrafts(rs.map(mapExtracted))} />}
@@ -1630,6 +1749,7 @@ function DemoScriptTab({ setNotice }: { setNotice: (s: string | null) => void })
   const [savingOne, setSavingOne] = useState(false);
   const [detailKey, setDetailKey] = useState<string | null>(null);
   const [branch, setBranch] = useState('全部');
+  const [page, setPage] = useState(0);
   /** 示范问答库的去重分类列表（faqPoolRef 提示用） */
   const [faqCategories, setFaqCategories] = useState<string[]>([]);
 
@@ -1696,6 +1816,9 @@ function DemoScriptTab({ setNotice }: { setNotice: (s: string | null) => void })
     if (branch === '其他') return !isKnownBranch(r.data.category);
     return r.data.category === branch;
   });
+  const totalPages = Math.max(1, Math.ceil(visibleRows.length / LIB_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages - 1);
+  const pageRows = visibleRows.slice(currentPage * LIB_PAGE_SIZE, (currentPage + 1) * LIB_PAGE_SIZE);
 
   const detailRow = rows.find((r) => r.key === detailKey);
 
@@ -1710,7 +1833,7 @@ function DemoScriptTab({ setNotice }: { setNotice: (s: string | null) => void })
       />
       <div className="pick" style={{ padding: '0 16px 12px' }}>
         {['全部', ...DEMO_SCRIPT_CATEGORIES, '其他'].map((c) => (
-          <button key={c} className={`chip${branch === c ? ' on' : ''}`} onClick={() => setBranch(c)}>{c}</button>
+          <button key={c} className={`chip${branch === c ? ' on' : ''}`} onClick={() => { setBranch(c); setPage(0); }}>{c}</button>
         ))}
       </div>
       {loading ? (
@@ -1726,7 +1849,7 @@ function DemoScriptTab({ setNotice }: { setNotice: (s: string | null) => void })
               <tr><th>状态</th><th>分支</th><th>名称</th><th>台词</th><th>FAQ 抽取</th><th>操作</th></tr>
             </thead>
             <tbody>
-              {visibleRows.map((row) => (
+              {pageRows.map((row) => (
                 <tr key={row.key} className={`lib-row-${row.status}`}>
                   <td><RowStatusChip row={row} />{row.error && <div className="lib-err">{row.error}</div>}</td>
                   <td>
@@ -1752,6 +1875,7 @@ function DemoScriptTab({ setNotice }: { setNotice: (s: string | null) => void })
               ))}
             </tbody>
           </table>
+          <Pagination page={currentPage} totalPages={totalPages} total={visibleRows.length} onChange={setPage} />
         </div>
       )}
       {detailRow && (
@@ -1824,6 +1948,7 @@ function ScoreItemTab({ skillPoints, setNotice, onChanged }: {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [detailKey, setDetailKey] = useState<string | null>(null);
   const [branch, setBranch] = useState<string>('全部');
+  const [page, setPage] = useState(0);
 
   const reload = () => {
     setLoading(true);
@@ -1940,6 +2065,9 @@ function ScoreItemTab({ skillPoints, setNotice, onChanged }: {
     if (branch === '未分类') return !r.data.category;
     return r.data.category === branch;
   });
+  const totalPages = Math.max(1, Math.ceil(visibleRows.length / LIB_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages - 1);
+  const pageRows = visibleRows.slice(currentPage * LIB_PAGE_SIZE, (currentPage + 1) * LIB_PAGE_SIZE);
 
   return (
     <div className="card lib-card">
@@ -1954,7 +2082,7 @@ function ScoreItemTab({ skillPoints, setNotice, onChanged }: {
       />
       <div className="pick" style={{ padding: '0 16px 12px' }}>
         {['全部', ...SCORE_CATEGORIES, '未分类'].map((c) => (
-          <button key={c} className={`chip${branch === c ? ' on' : ''}`} onClick={() => setBranch(c)}>
+          <button key={c} className={`chip${branch === c ? ' on' : ''}`} onClick={() => { setBranch(c); setPage(0); }}>
             {c === '全部' || c === '未分类' ? c : `${c}评分`}
           </button>
         ))}
@@ -1968,7 +2096,7 @@ function ScoreItemTab({ skillPoints, setNotice, onChanged }: {
               <tr><th>状态</th><th>名称</th><th>分类</th><th>技能点</th><th>层级</th><th>权重</th><th>观察项</th><th>行为锚定</th><th>判定 Prompt</th><th>档位</th><th>操作</th></tr>
             </thead>
             <tbody>
-              {visibleRows.map((row) => (
+              {pageRows.map((row) => (
                 <Fragment key={row.key}>
                   <tr className={`lib-row-${row.status}`}>
                     <td><RowStatusChip row={row} />{row.error && <div className="lib-err">{row.error}</div>}
@@ -2025,6 +2153,7 @@ function ScoreItemTab({ skillPoints, setNotice, onChanged }: {
               ))}
             </tbody>
           </table>
+          <Pagination page={currentPage} totalPages={totalPages} total={visibleRows.length} onChange={setPage} />
         </div>
       )}
       {panel === 'extract' && <ExtractPanel target="score-item" onClose={() => setPanel(null)} onRows={(rs) => addDrafts(rs.map(mapExtracted))} />}
@@ -2074,12 +2203,25 @@ function ScoreItemTab({ skillPoints, setNotice, onChanged }: {
               <option value="score">直接打分（0-100，维度与分值写在行为锚定里）</option>
             </select>
           </Field>
+          <Field label="信心指数扣减项">
+            <input type="checkbox" checked={detailRow.data.deductionOnly ?? false} onChange={(e) => updateRow(detailRow.key, { deductionOnly: e.target.checked })} />
+          </Field>
+          <Field label="语音统计通道">
+            <select className="input" value={detailRow.data.voiceChannel ?? ''} onChange={(e) => updateRow(detailRow.key, { voiceChannel: e.target.value === 'child' ? 'child' : undefined })}>
+              <option value="">对家长/客户的学员轮次</option><option value="child">只统计对孩子说的轮次</option>
+            </select>
+          </Field>
           <Field label="行为锚定描述" wide>
             <MTextarea rows={3} value={detailRow.data.behaviorAnchor} onChange={(v) => updateRow(detailRow.key, { behaviorAnchor: v })} />
           </Field>
           <Field label="判定 Prompt 模板" wide>
             <MTextarea rows={4} value={detailRow.data.judgePrompt} onChange={(v) => updateRow(detailRow.key, { judgePrompt: v })} />
           </Field>
+          {detailRow.data.scoringMode === 'score' && (
+            <Field label="定量计分规则（JSON；null 表示由 LLM 直接打分）" wide>
+              <JsonInput value={detailRow.data.quantitativeRule ?? null} onChange={(value) => updateRow(detailRow.key, { quantitativeRule: value ?? undefined })} />
+            </Field>
+          )}
           {detailRow.data.scoringMode !== 'score' && (
             <div className="lib-fieldset">
               <h4>档位（levels）</h4>
@@ -2104,6 +2246,10 @@ function GoldenCaseTab({ scoreItems, setNotice }: { scoreItems: ScoreItemDef[]; 
   const [panel, setPanel] = useState<'extract' | 'paste' | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [detailKey, setDetailKey] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const totalPages = Math.max(1, Math.ceil(rows.length / LIB_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages - 1);
+  const pageRows = rows.slice(currentPage * LIB_PAGE_SIZE, (currentPage + 1) * LIB_PAGE_SIZE);
 
   const reload = () => {
     setLoading(true);
@@ -2227,7 +2373,7 @@ function GoldenCaseTab({ scoreItems, setNotice }: { scoreItems: ScoreItemDef[]; 
               <tr><th>状态</th><th>案例名称</th><th>对话轮数</th><th>期望判定数</th><th>编辑</th><th>操作</th></tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {pageRows.map((row) => (
                 <Fragment key={row.key}>
                   <tr className={`lib-row-${row.status}`}>
                     <td><RowStatusChip row={row} />{row.error && <div className="lib-err">{row.error}</div>}
@@ -2266,6 +2412,7 @@ function GoldenCaseTab({ scoreItems, setNotice }: { scoreItems: ScoreItemDef[]; 
               ))}
             </tbody>
           </table>
+          <Pagination page={currentPage} totalPages={totalPages} total={rows.length} onChange={setPage} />
         </div>
       )}
       {panel === 'extract' && <ExtractPanel target="golden-case" onClose={() => setPanel(null)} onRows={(rs) => addDrafts(rs.map(mapExtracted))} />}
@@ -2447,6 +2594,10 @@ function GuidanceTab({ focus, onFocusHandled, onChanged, setNotice }: {
   const [saving, setSaving] = useState(false);
   const [savingOne, setSavingOne] = useState(false);
   const [detailKey, setDetailKey] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const totalPages = Math.max(1, Math.ceil(rows.length / LIB_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages - 1);
+  const pageRows = rows.slice(currentPage * LIB_PAGE_SIZE, (currentPage + 1) * LIB_PAGE_SIZE);
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [briefingStandards, setBriefingStandards] = useState<BriefingStandard[]>([]);
   const [realismStandards, setRealismStandards] = useState<RealismStandard[]>([]);
@@ -2491,12 +2642,8 @@ function GuidanceTab({ focus, onFocusHandled, onChanged, setNotice }: {
   const validate = (d: GuidanceRowData) => {
     if (!d.scenarioId) return '请选择绑定场景';
     if (!d.name?.trim()) return '名称必填';
-    if (!d.qualifyQuestions?.length) return '资格问题至少一题（编辑器中每行一条）';
     if (d.demoScriptId !== null && !d.demoScriptId) return '请选择示范剧本，或勾选「无示范模式」';
-    const dur = d.duration;
-    if (![dur.targetMinutes, dur.minTurns, dur.maxTurns, dur.countdownSeconds].every(Number.isFinite)) {
-      return '时长参数必须为数字';
-    }
+    if (!Number.isFinite(d.duration.countdownSeconds) || d.duration.countdownSeconds < 60) return '倒计时须为不少于 60 秒的数字';
     return null;
   };
 
@@ -2561,7 +2708,7 @@ function GuidanceTab({ focus, onFocusHandled, onChanged, setNotice }: {
               <tr><th>状态</th><th>名称</th><th>绑定场景</th><th>资格问题</th><th>示范</th><th>操作</th></tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {pageRows.map((row) => (
                 <tr key={row.key} className={`lib-row-${row.status}`}>
                   <td><RowStatusChip row={row} />{row.error && <div className="lib-err">{row.error}</div>}</td>
                   <td style={{ minWidth: 160 }}><CellInput value={row.data.name} onChange={(v) => updateRow(row.key, { name: v })} /></td>
@@ -2588,6 +2735,7 @@ function GuidanceTab({ focus, onFocusHandled, onChanged, setNotice }: {
               ))}
             </tbody>
           </table>
+          <Pagination page={currentPage} totalPages={totalPages} total={rows.length} onChange={setPage} />
         </div>
       )}
       {detailRow && (
@@ -2604,7 +2752,7 @@ function GuidanceTab({ focus, onFocusHandled, onChanged, setNotice }: {
             </select>
           </Field>
           <Field label="名称"><MInput value={detailRow.data.name} onChange={(v) => updateRow(detailRow.key, { name: v })} /></Field>
-          <Field label="资格问题（第1步，1~2 题）" wide>
+          <Field label="资格问题（可选；留空则跳过资格环节）" wide>
             <LinesTextarea value={detailRow.data.qualifyQuestions} onChange={(v) => updateRow(detailRow.key, { qualifyQuestions: v })} placeholder="每行一题，如：你做过地推吗？" />
           </Field>
           <Field label="讲解要点（第3步）" wide>
@@ -2626,10 +2774,10 @@ function GuidanceTab({ focus, onFocusHandled, onChanged, setNotice }: {
           <div className="lib-fieldset">
             <h4>时长参数（第4步）</h4>
             <div className="lib-form">
-              <Field label="目标时长（分钟）"><MInput type="number" value={detailRow.data.duration.targetMinutes} onChange={(v) => updateRow(detailRow.key, { duration: { ...detailRow.data.duration, targetMinutes: Number(v) } })} /></Field>
-              <Field label="最少轮次"><MInput type="number" value={detailRow.data.duration.minTurns} onChange={(v) => updateRow(detailRow.key, { duration: { ...detailRow.data.duration, minTurns: Number(v) } })} /></Field>
-              <Field label="最多轮次"><MInput type="number" value={detailRow.data.duration.maxTurns} onChange={(v) => updateRow(detailRow.key, { duration: { ...detailRow.data.duration, maxTurns: Number(v) } })} /></Field>
-              <Field label="倒计时（秒）"><MInput type="number" value={detailRow.data.duration.countdownSeconds} onChange={(v) => updateRow(detailRow.key, { duration: { ...detailRow.data.duration, countdownSeconds: Number(v) } })} /></Field>
+              <Field label="实际倒计时（秒）"><MInput type="number" value={detailRow.data.duration.countdownSeconds} onChange={(v) => {
+                const countdownSeconds = Number(v);
+                updateRow(detailRow.key, { duration: { ...detailRow.data.duration, countdownSeconds, targetMinutes: countdownSeconds / 60 } });
+              }} /></Field>
             </div>
           </div>
           <Field label="开场旁白（liveIntro.narration）" wide>
@@ -2709,6 +2857,7 @@ function DrillScriptTab({ setNotice }: { setNotice: (s: string | null) => void }
   const [branch, setBranch] = useState<string>('全部');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [page, setPage] = useState(0);
 
   const reload = () => {
     setLoading(true);
@@ -2742,6 +2891,9 @@ function DrillScriptTab({ setNotice }: { setNotice: (s: string | null) => void }
   };
 
   const visibleRows = rows.filter((r) => branch === '全部' || r.data.category === branch);
+  const totalPages = Math.max(1, Math.ceil(visibleRows.length / LIB_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages - 1);
+  const pageRows = visibleRows.slice(currentPage * LIB_PAGE_SIZE, (currentPage + 1) * LIB_PAGE_SIZE);
 
   return (
     <div className="card lib-card">
@@ -2754,7 +2906,7 @@ function DrillScriptTab({ setNotice }: { setNotice: (s: string | null) => void }
       />
       <div className="pick" style={{ padding: '0 16px 12px' }}>
         {['全部', ...SCORE_CATEGORIES].map((c) => (
-          <button key={c} className={`chip${branch === c ? ' on' : ''}`} onClick={() => setBranch(c)}>{c}</button>
+          <button key={c} className={`chip${branch === c ? ' on' : ''}`} onClick={() => { setBranch(c); setPage(0); }}>{c}</button>
         ))}
       </div>
       <p style={{ padding: '0 16px 12px', margin: 0, fontSize: 12.5, color: '#6B7280' }}>
@@ -2771,7 +2923,7 @@ function DrillScriptTab({ setNotice }: { setNotice: (s: string | null) => void }
               <tr><th>状态</th><th>分类</th><th>名称</th><th>剧本内容（整篇交给 AI 理解）</th><th>操作</th></tr>
             </thead>
             <tbody>
-              {visibleRows.map((row) => (
+              {pageRows.map((row) => (
                 <tr key={row.key} className={`lib-row-${row.status}`}>
                   <td><RowStatusChip row={row} />{row.error && <div className="lib-err">{row.error}</div>}</td>
                   <td>
@@ -2793,6 +2945,7 @@ function DrillScriptTab({ setNotice }: { setNotice: (s: string | null) => void }
               ))}
             </tbody>
           </table>
+          <Pagination page={currentPage} totalPages={totalPages} total={visibleRows.length} onChange={setPage} />
         </div>
       )}
     </div>
