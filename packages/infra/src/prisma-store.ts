@@ -13,6 +13,8 @@ import type {
   Element,
   ExamWindow,
   ExtractionProject,
+  Feedback,
+  FeedbackReply,
   GoldenCase,
   LearningPath,
   MethodologyConfig,
@@ -34,8 +36,9 @@ import type {
   User,
   UserRole,
   UserSkillState,
+  VoiceEditCommand,
 } from '@grasp-mvp/core';
-import type { AppealFilter, CertFilter, RecordingFilter, SeedData, SessionFilter, Store } from './store.js';
+import type { AppealFilter, CertFilter, FeedbackFilter, RecordingFilter, SeedData, SessionFilter, Store } from './store.js';
 
 /** 去掉 undefined 值（Prisma Json 字段不接受 undefined） */
 function sanitize<T>(obj: T): T {
@@ -142,6 +145,7 @@ export class PrismaStore implements Store {
   private briefingStandards;
   private realismStandards;
   private appeals;
+  private feedbacks;
   private examWindows;
   private certRecords;
   private userSkillStates;
@@ -149,6 +153,7 @@ export class PrismaStore implements Store {
   private extractionProjects;
   private dataConsents;
   private goldenCases;
+  private voiceEditCommands;
 private regressionRuns;
 private quizQuestions;
 private sessionRecordings;
@@ -177,13 +182,15 @@ private domainEvents;
     this.briefingStandards = docTable<BriefingStandard>(this.prisma.briefingStandard, ['id', 'tenantId', 'name', 'category']);
     this.realismStandards = docTable<RealismStandard>(this.prisma.realismStandard, ['id', 'tenantId', 'name', 'category']);
     this.appeals = docTable<Appeal>(this.prisma.appeal, ['id', 'sessionId', 'userId', 'status', 'createdAt']);
+    this.feedbacks = docTable<Feedback>(this.prisma.feedback, ['id', 'tenantId', 'userId', 'userName', 'type', 'content', 'source', 'status', 'createdAt', 'updatedAt']);
     this.examWindows = docTable<ExamWindow>(this.prisma.examWindow, ['id', 'tenantId', 'name', 'status', 'startsAt', 'endsAt']);
     this.certRecords = docTable<CertRecord>(this.prisma.certRecord, ['id', 'tenantId', 'userId', 'examWindowId', 'passed']);
     this.userSkillStates = docTable<UserSkillState & { id: string }>(this.prisma.userSkillState, ['id', 'userId', 'skillPointId']);
     this.productKBs = docTable<ProductKB>(this.prisma.productKB, ['id', 'tenantId', 'name', 'version']);
     this.extractionProjects = docTable<ExtractionProject>(this.prisma.extractionProject, ['id', 'tenantId', 'name', 'status']);
     this.dataConsents = docTable<DataConsent>(this.prisma.dataConsent, ['id', 'tenantId']);
-    this.goldenCases = docTable<GoldenCase>(this.prisma.goldenCase, ['id', 'name']);
+    this.goldenCases = docTable<GoldenCase>(this.prisma.goldenCase, ['id', 'tenantId', 'name']);
+    this.voiceEditCommands = docTable<VoiceEditCommand>(this.prisma.voiceEditCommand, ['id', 'tenantId', 'userId', 'target', 'status', 'createdAt']);
 this.regressionRuns = docTable<RegressionRun>(this.prisma.regressionRun, ['id', 'at', 'passed']);
 this.quizQuestions = docTable<QuizQuestion>(this.prisma.quizQuestion, ['id', 'tenantId', 'scenarioId', 'skillPointId', 'type']);
 this.sessionRecordings = docTable<SessionRecording>(this.prisma.sessionRecording, ['id', 'sessionId', 'tenantId', 'userId', 'scenarioId', 'mode', 'turnSeq', 'filePath', 'fileSize', 'durationSec', 'createdAt']);
@@ -241,6 +248,12 @@ this.domainEvents = docTable<DomainEvent>(this.prisma.domainEvent, ['id', 'type'
     if (filter.tenantId !== undefined) where.tenantId = filter.tenantId;
     return this.elements.list(where);
   }
+  saveElement(element: Element) {
+    return this.elements.upsertById(element);
+  }
+  deleteElement(id: string) {
+    return this.elements.delete(id);
+  }
   saveCalibrationEvent(event: CalibrationEvent) {
     return this.calibrationEvents.create(event);
   }
@@ -258,11 +271,20 @@ this.domainEvents = docTable<DomainEvent>(this.prisma.domainEvent, ['id', 'type'
   savePersonaConfig(config: PersonaConfig) {
     return this.personaConfigs.upsertById(config);
   }
+  deletePersonaConfig(id: string) {
+    return this.personaConfigs.delete(id);
+  }
   getSkillPoint(id: string) {
     return this.skillPoints.get(id);
   }
   listSkillPoints(tenantId: string) {
     return this.skillPoints.list({ tenantId });
+  }
+  saveSkillPoint(skillPoint: SkillPoint) {
+    return this.skillPoints.upsertById(skillPoint);
+  }
+  deleteSkillPoint(id: string) {
+    return this.skillPoints.delete(id);
   }
   async getScenario(id: string) {
     const s = await this.scenarios.get(id);
@@ -462,6 +484,34 @@ this.domainEvents = docTable<DomainEvent>(this.prisma.domainEvent, ['id', 'type'
     return this.appeals.list(where);
   }
 
+  // ---- 用户反馈 ----
+  createFeedback(feedback: Feedback) {
+    return this.feedbacks.create(feedback);
+  }
+  getFeedback(id: string) {
+    return this.feedbacks.get(id);
+  }
+  updateFeedback(id: string, patch: Partial<Feedback>) {
+    return this.feedbacks.update(id, patch);
+  }
+  deleteFeedback(id: string) {
+    return this.feedbacks.delete(id);
+  }
+  listFeedback(filter: FeedbackFilter) {
+    const where: Record<string, unknown> = {};
+    if (filter.tenantId) where.tenantId = filter.tenantId;
+    if (filter.userId) where.userId = filter.userId;
+    if (filter.status) where.status = filter.status;
+    if (filter.type) where.type = filter.type;
+    return this.feedbacks.list(where);
+  }
+  async addFeedbackReply(reply: FeedbackReply) {
+    const existing = await this.getFeedback(reply.feedbackId);
+    if (!existing) return;
+    const replies = [...existing.replies, reply];
+    await this.updateFeedback(reply.feedbackId, { replies, updatedAt: new Date().toISOString() });
+  }
+
   // ---- 考核认证 ----
   getExamWindow(id: string) {
     return this.examWindows.get(id);
@@ -523,14 +573,26 @@ return this.productKBs.get(id);
   listDataConsents(tenantId: string) {
     return this.dataConsents.list({ tenantId });
   }
-  listGoldenCases() {
-    return this.goldenCases.list();
+  listGoldenCases(tenantId: string) {
+    return this.goldenCases.list({ OR: [{ tenantId }, { tenantId: null }] });
   }
   saveGoldenCase(goldenCase: GoldenCase) {
     return this.goldenCases.upsertById(goldenCase);
   }
   deleteGoldenCase(id: string) {
     return this.goldenCases.delete(id);
+  }
+  saveVoiceEditCommand(command: VoiceEditCommand) {
+    return this.voiceEditCommands.upsertById(command);
+  }
+  getVoiceEditCommand(id: string) {
+    return this.voiceEditCommands.get(id);
+  }
+  async listVoiceEditCommands(filter: { tenantId: string; userId?: string; general?: boolean }) {
+    const rows = await this.voiceEditCommands.list({ tenantId: filter.tenantId, ...(filter.userId ? { userId: filter.userId } : {}) });
+    return rows
+      .filter((command) => filter.general === undefined || command.general === filter.general)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
   saveRegressionRun(run: RegressionRun) {
     return this.regressionRuns.create(run);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Scenario } from '@grasp-mvp/core';
 import { MemoryStore } from '@grasp-mvp/infra';
-import { archetypePrompt, initialCustomerArchetype } from './drill.js';
+import { archetypePrompt, initialCustomerArchetype, resolveDrillScript } from './drill.js';
 import { loadRuntime } from './turn.js';
 import type { RouteContext } from '../ctx.js';
 
@@ -44,4 +44,29 @@ describe('客户类型适用场景', () => {
     expect(runtime?.bundle.systemPrompt).not.toContain('【本场客户类型（系统随机确定，必须严格遵守，优先级高于其他行为要求）】不感兴趣的客户');
     expect(runtime?.bundle.systemPrompt).toContain('对方已经说过姓名或机构时，不得重复确认');
   });
+});
+
+
+it('同分类场景只读取各自显式绑定的演练剧本', async () => {
+  const store = new MemoryStore();
+  await store.saveDrillScript({ id: 'drill-a', tenantId: 'tenant-demo', category: '电销', name: '剧本 A', content: '客户：A' });
+  await store.saveDrillScript({ id: 'drill-b', tenantId: 'tenant-demo', category: '电销', name: '剧本 B', content: '客户：B' });
+  const scenario: Scenario = {
+    ...receptionScenario,
+    id: 'scenario-phone', category: '电销', flowType: 'generic', drillScriptId: 'drill-b',
+  };
+  expect((await resolveDrillScript(store, scenario))?.id).toBe('drill-b');
+  expect(await resolveDrillScript(store, { ...scenario, drillScriptId: undefined })).toBeUndefined();
+  expect(await resolveDrillScript(store, { ...scenario, tenantId: 'tenant-other' })).toBeUndefined();
+});
+
+
+it('显式通用策略即使属于地推分类也不加载地推专项提示词', async () => {
+  const scenario: Scenario = {
+    ...receptionScenario,
+    id: 'scenario-generic-ground', category: '地推', flowType: 'generic',
+  };
+  const runtime = await loadRuntime({ store: new MemoryStore() } as unknown as RouteContext, scenario);
+  expect(runtime?.bundle.systemPrompt).not.toContain('地推客户只是潜在客户');
+  expect(runtime?.bundle.systemPrompt).not.toContain('六连问');
 });

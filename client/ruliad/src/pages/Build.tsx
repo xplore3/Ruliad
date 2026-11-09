@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   fetchScenarios,
@@ -7,18 +7,20 @@ import {
   deleteScenario,
   createPersonaConfig,
   updatePersonaConfig,
+  deletePersonaConfig,
+  fetchPersonaConfig,
+  fetchManagementKnowledgeBase,
   fetchSkillPoints,
+  listScoreItems,
+  listDrillScripts,
   trialChat,
-  extractScenarioFromText,
-  extractScenarioFromAudio,
   getStoredUser,
   apiError,
   listScenarioGuidances,
 } from '../api';
-import type { ScenarioExtractResult } from '../api';
-import type { Scenario, ScenarioParticipant, SkillPoint } from '../types';
+import type { DrillScript, PersonaConfig, Scenario, ScenarioParticipant, ScoreCategory, ScoreItemDef, SkillPoint } from '../types';
 import type { ScenarioGuidance } from '../lib/guidance';
-import { PcmRecorder, pcmToWav } from '../voice';
+import VoiceResourceEditor from './VoiceResourceEditor';
 
 type EditorStep = 'base' | 'goal' | 'role' | 'params' | 'eval' | 'script' | 'participants';
 
@@ -37,11 +39,11 @@ const SCENE_TYPES = [
   { key: 'drill', label: '实战训练', desc: '自由对练' },
 ] as const;
 
-const CATEGORIES = [
-  { key: '电话销售', icon: '📞', dot: 'bg-cat-phone', type: 't1' },
-  { key: '咨询接待', icon: '💬', dot: 'bg-cat-inquiry', type: 't2' },
-  { key: '现场成交', icon: '🤝', dot: 'bg-cat-deal', type: 't3' },
-  { key: '地推引流课', icon: '🚶', dot: 'bg-cat-ground', type: 't4' },
+const CATEGORIES: Array<{ key: ScoreCategory; label: string; icon: string; dot: string; type: string }> = [
+  { key: '电销', label: '电话销售', icon: '📞', dot: 'bg-cat-phone', type: 't1' },
+  { key: '咨询接待', label: '咨询接待', icon: '💬', dot: 'bg-cat-inquiry', type: 't2' },
+  { key: '现场成交', label: '现场成交', icon: '🤝', dot: 'bg-cat-deal', type: 't3' },
+  { key: '地推', label: '地推引流课', icon: '🚶', dot: 'bg-cat-ground', type: 't4' },
 ];
 
 const PERSONALITY_TAGS = ['谨慎', '重数据', '爱压价', '爽快', '强势', '善拖延', '话多', '戒备'];
@@ -57,70 +59,25 @@ const INTERRUPT_OPTIONS = [
   { key: 'strong', label: '频繁打断（高压特训）' },
 ];
 
-const DIMENSIONS = [
-  { key: 'discovery', name: '需求挖掘', desc: '是否问出真实需求与决策链', defaultWeight: 20 },
-  { key: 'presentation', name: '价值表达', desc: '讲清差异化，而非罗列功能', defaultWeight: 20 },
-  { key: 'objection', name: '异议处理', desc: '面对压价的回应质量', defaultWeight: 20 },
-  { key: 'closing', name: '流程推进', desc: '是否拿到下一步承诺', defaultWeight: 15 },
-  { key: 'rhythm', name: '沟通节奏', desc: '倾听、停顿、不打断对方', defaultWeight: 15 },
-  { key: 'compliance', name: '专业合规', desc: '话术准确，不踩禁止事项', defaultWeight: 10 },
-];
-
 const DIFF_LABELS: Record<number, string> = { 1: '初级', 2: '进阶', 3: '挑战' };
 const AVATARS = [
-'/avatars/man-1.png', '/avatars/man-2.png', '/avatars/man-3.png', '/avatars/man-4.png',
-'/avatars/women-1.png', '/avatars/women-2.png', '/avatars/women-3.png', '/avatars/women-4.png',
+  '/avatars/man-1.png', '/avatars/man-2.png', '/avatars/man-3.png', '/avatars/man-4.png',
+  '/avatars/women-1.png', '/avatars/women-2.png', '/avatars/women-3.png', '/avatars/women-4.png',
 ];
-
-const DEFAULT_WEIGHTS: Record<string, number> = Object.fromEntries(
-  DIMENSIONS.map((d) => [d.key, d.defaultWeight])
-);
-
-const FIELD_LABELS: Record<string, string> = {
-  name: '场景标题',
-  category: '场景类别',
-  description: '场景描述',
-  difficulty: '难度',
-  duration: '预计时长',
-  goal: '我方目标',
-  successCriteria: '及格分',
-  doNot: '禁止事项',
-  roleName: '角色姓名',
-  roleTitle: '角色职位',
-  roleIndustry: '角色行业',
-  personalities: '性格标签',
-  decisionStyle: '决策风格',
-  objections: '典型异议',
-  hiddenInfo: '禁止透露',
-  speechRate: '语速',
-  challenge: '挑战强度',
-  interruptLevel: '打断频率',
-  skillPointNames: '考核技能点',
-  dimensionWeights: '六维权重',
-};
-
-const clampInt = (v: unknown, min: number, max: number): number | null => {
-  const n = typeof v === 'string' ? Number(v) : v;
-  if (typeof n !== 'number' || !Number.isFinite(n)) return null;
-  return Math.min(max, Math.max(min, Math.round(n)));
-};
-
-const asText = (v: unknown): string | null => {
-  if (typeof v === 'string') return v.trim() ? v : null;
-  if (Array.isArray(v)) {
-    const s = v.filter((x): x is string => typeof x === 'string').join('；');
-    return s || null;
-  }
-  return null;
-};
 
 interface BuildForm {
   name: string;
-  category: string;
+  category: ScoreCategory;
+  flowType: 'generic' | 'ground_push' | 'reception';
+  methodology: string;
   description: string;
   difficulty: number;
   duration: number;
   sceneType: 'drill' | 'practical';
+  productKBId: string;
+  drillScriptId: string;
+  scoreItemIds: string[];
+  status: 'draft' | 'published';
   goal: string;
   successCriteria: string;
   doNot: string;
@@ -131,14 +88,11 @@ interface BuildForm {
   decisionStyle: string;
   objections: string;
   hiddenInfo: string;
-  speechRate: number;
+  speechRate: 1 | 2 | 3;
   challenge: number;
   interruptLevel: 'off' | 'weak' | 'strong';
   skillPointIds: string[];
-  dimensionWeights: Record<string, number>;
-  /** 剧本（多值字段用换行/分号分隔，保存时拆成数组） */
   scriptExecutionOrder: string;
-  scriptPurpose: string;
   scriptTopics: string;
   scriptCustomerQuestions: string;
   scriptAssessmentPoints: string;
@@ -146,42 +100,16 @@ interface BuildForm {
 }
 
 const EMPTY_PARTICIPANT: ScenarioParticipant = {
-  name: '',
-  traits: '',
-  speakingStyle: '',
-  speechScope: '',
-  languageRequirements: '',
-  goal: '',
+  name: '', traits: '', speakingStyle: '', speechScope: '', languageRequirements: '', goal: '',
 };
 
 const EMPTY_FORM: BuildForm = {
-  name: '',
-  category: '电话销售',
-  description: '',
-  difficulty: 1,
-  duration: 5,
-  sceneType: 'practical',
-  goal: '',
-  successCriteria: '60',
-  doNot: '',
-  roleName: '',
-  roleTitle: '',
-  roleIndustry: '',
-  personalities: [],
-  decisionStyle: DECISION_STYLES[0],
-  objections: '',
-  hiddenInfo: '',
-  speechRate: 2,
-  challenge: 3,
-  interruptLevel: 'weak',
-  skillPointIds: [],
-  dimensionWeights: { ...DEFAULT_WEIGHTS },
-  scriptExecutionOrder: '',
-  scriptPurpose: '',
-  scriptTopics: '',
-  scriptCustomerQuestions: '',
-  scriptAssessmentPoints: '',
-  participants: [],
+  name: '', category: '电销', flowType: 'generic', methodology: '', description: '', difficulty: 1, duration: 10,
+  sceneType: 'practical', productKBId: '', drillScriptId: '', scoreItemIds: [], status: 'published', goal: '',
+  successCriteria: '60', doNot: '', roleName: '', roleTitle: '', roleIndustry: '', personalities: [],
+  decisionStyle: DECISION_STYLES[0], objections: '', hiddenInfo: '', speechRate: 2, challenge: 3,
+  interruptLevel: 'weak', skillPointIds: [], scriptExecutionOrder: '', scriptTopics: '',
+  scriptCustomerQuestions: '', scriptAssessmentPoints: '', participants: [],
 };
 
 interface TrialMsg {
@@ -189,27 +117,26 @@ interface TrialMsg {
   content: string;
 }
 
-const weightsKey = (scenarioId: string) => `grasp-eval-weights:${scenarioId}`;
-
-function loadWeights(scenarioId: string): Record<string, number> | null {
-  try {
-    const raw = localStorage.getItem(weightsKey(scenarioId));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Record<string, number>;
-    return { ...DEFAULT_WEIGHTS, ...parsed };
-  } catch {
-    return null;
-  }
-}
-
-function saveWeights(scenarioId: string, weights: Record<string, number>) {
-  localStorage.setItem(weightsKey(scenarioId), JSON.stringify(weights));
-}
-
 function avatarFor(id: string): string {
   let hash = 0;
   for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
   return AVATARS[hash % AVATARS.length];
+}
+
+function personaEditorFields(persona: PersonaConfig): Partial<BuildForm> {
+  const lines = persona.background.split('\n');
+  const value = (prefix: string) => lines.find((line) => line.startsWith(prefix))?.slice(prefix.length).trim();
+  const legacyObjections = value('典型异议：');
+  const legacyHidden = value('禁止透露（除非被追问）：');
+  return {
+    roleName: persona.name,
+    roleTitle: persona.occupation ?? '',
+    roleIndustry: persona.industry ?? value('行业：') ?? '',
+    personalities: persona.personalityTags ?? value('性格标签：')?.split(/[、,，]/).filter(Boolean) ?? [],
+    decisionStyle: persona.decisionStyle ?? value('决策风格：') ?? DECISION_STYLES[0],
+    objections: persona.objections?.join('\n') ?? legacyObjections ?? '',
+    hiddenInfo: persona.hiddenInfo?.join('\n') ?? legacyHidden ?? '',
+  };
 }
 
 export default function Build() {
@@ -223,8 +150,13 @@ export default function Build() {
   const [mine, setMine] = useState<Scenario[]>([]);
   const [listLoading, setListLoading] = useState(true);
   const [skillPoints, setSkillPoints] = useState<SkillPoint[]>([]);
+  const [scoreItems, setScoreItems] = useState<ScoreItemDef[]>([]);
+  const [drillScripts, setDrillScripts] = useState<DrillScript[]>([]);
+  const [productKB, setProductKB] = useState<{ id: string; name: string } | null>(null);
   const [editingScenarioId, setEditingScenarioId] = useState<string | null>(null);
+  const [editingScenarioVersion, setEditingScenarioVersion] = useState(1);
   const [editingPersonaConfigId, setEditingPersonaConfigId] = useState<string | null>(null);
+  const [editingPersona, setEditingPersona] = useState<PersonaConfig | null>(null);
   /** 新建场景保存成功后，提示条提供「立即配置新手指引」直达动作 */
   const [newSavedScenario, setNewSavedScenario] = useState<{ id: string; name: string } | null>(null);
   /** 编辑中场景已有的新手指引配置（用于时长字段的真相源提示） */
@@ -237,45 +169,25 @@ export default function Build() {
     input: '',
     sending: false,
   });
-  const [ai, setAi] = useState<{
-    recording: boolean;
-    extracting: boolean;
-    level: number;
-    seconds: number;
-    input: string;
-    transcript: string | null;
-    result: ScenarioExtractResult | null;
-  }>({ recording: false, extracting: false, level: 0, seconds: 0, input: '', transcript: null, result: null });
-  const aiRecorderRef = useRef<PcmRecorder | null>(null);
-  const aiChunksRef = useRef<ArrayBuffer[]>([]);
-  const aiTimerRef = useRef<number | null>(null);
-
   const loadMine = useCallback(async () => {
     setListLoading(true);
     try {
-      const data = await fetchScenarios();
-      setMine(data.scenarios.filter((s) => s.source !== '官方'));
+      const data = await fetchScenarios(true);
+      setMine(data.scenarios);
     } catch (err) {
       setNotice(apiError(err, '场景列表加载失败'));
     } finally {
       setListLoading(false);
     }
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
     loadMine();
-    fetchSkillPoints()
-      .then((data) => setSkillPoints(data.skillPoints))
-      .catch(() => setSkillPoints([]));
+    fetchSkillPoints().then((data) => setSkillPoints(data.skillPoints)).catch(() => setSkillPoints([]));
+    listScoreItems().then((data) => setScoreItems(data.items)).catch(() => setScoreItems([]));
+    listDrillScripts().then((data) => setDrillScripts(data.items)).catch(() => setDrillScripts([]));
+    fetchManagementKnowledgeBase().then((data) => setProductKB(data.kb ? { id: data.kb.id, name: data.kb.name } : null)).catch(() => setProductKB(null));
   }, [loadMine]);
-
-  useEffect(
-    () => () => {
-      aiRecorderRef.current?.stop();
-      if (aiTimerRef.current) window.clearInterval(aiTimerRef.current);
-    },
-    []
-  );
 
   const updateForm = (updates: Partial<BuildForm>) => {
     setForm((prev) => ({ ...prev, ...updates }));
@@ -293,7 +205,11 @@ export default function Build() {
       : updateForm({ skillPointIds: [...form.skillPointIds, id] });
   };
 
-  const totalWeight = Object.values(form.dimensionWeights).reduce((a, b) => a + b, 0);
+  const toggleScoreItem = (id: string) => {
+    form.scoreItemIds.includes(id)
+      ? updateForm({ scoreItemIds: form.scoreItemIds.filter((itemId) => itemId !== id) })
+      : updateForm({ scoreItemIds: [...form.scoreItemIds, id] });
+  };
 
   const skillIdsFromNames = (names?: string[]): string[] => {
     if (!names?.length) return [];
@@ -302,184 +218,36 @@ export default function Build() {
       .filter((id): id is string => !!id);
   };
 
-  /** 把 LLM 提取的 fields 清洗/归一化为表单补丁，同时生成预览行 */
-  const sanitizeExtracted = (fields: Record<string, unknown>): { patch: Partial<BuildForm>; rows: [string, string][] } => {
-    const patch: Partial<BuildForm> = {};
-    const rows: [string, string][] = [];
-    const push = (key: string, display: string) => rows.push([FIELD_LABELS[key] ?? key, display]);
-
-    const name = asText(fields.name);
-    if (name) { patch.name = name.slice(0, 30); push('name', patch.name); }
-    const category = asText(fields.category);
-    if (category && CATEGORIES.some((c) => c.key === category)) { patch.category = category; push('category', category); }
-    const description = asText(fields.description);
-    if (description) { patch.description = description.slice(0, 200); push('description', patch.description); }
-    const difficulty = clampInt(fields.difficulty, 1, 3);
-    if (difficulty !== null) { patch.difficulty = difficulty; push('difficulty', DIFF_LABELS[difficulty]); }
-    const duration = clampInt(fields.duration, 1, 60);
-    if (duration !== null) { patch.duration = duration; push('duration', `${duration} 分钟`); }
-    const goal = asText(fields.goal);
-    if (goal) { patch.goal = goal; push('goal', goal); }
-    const passScore = clampInt(fields.successCriteria, 1, 100);
-    if (passScore !== null) { patch.successCriteria = String(passScore); push('successCriteria', `${passScore} 分`); }
-    const doNot = asText(fields.doNot);
-    if (doNot) { patch.doNot = doNot; push('doNot', doNot); }
-    const roleName = asText(fields.roleName);
-    if (roleName) { patch.roleName = roleName; push('roleName', roleName); }
-    const roleTitle = asText(fields.roleTitle);
-    if (roleTitle) { patch.roleTitle = roleTitle; push('roleTitle', roleTitle); }
-    const roleIndustry = asText(fields.roleIndustry);
-    if (roleIndustry) { patch.roleIndustry = roleIndustry; push('roleIndustry', roleIndustry); }
-    if (Array.isArray(fields.personalities)) {
-      const tags = fields.personalities.filter(
-        (t): t is string => typeof t === 'string' && (PERSONALITY_TAGS as string[]).includes(t)
-      );
-      if (tags.length) { patch.personalities = tags; push('personalities', tags.join('、')); }
-    }
-    const decisionStyle = asText(fields.decisionStyle);
-    if (decisionStyle && (DECISION_STYLES as string[]).includes(decisionStyle)) {
-      patch.decisionStyle = decisionStyle; push('decisionStyle', decisionStyle);
-    }
-    const objections = asText(fields.objections);
-    if (objections) { patch.objections = objections; push('objections', objections); }
-    const hiddenInfo = asText(fields.hiddenInfo);
-    if (hiddenInfo) { patch.hiddenInfo = hiddenInfo; push('hiddenInfo', hiddenInfo); }
-    const speechRate = clampInt(fields.speechRate, 1, 3);
-    if (speechRate !== null) {
-      patch.speechRate = speechRate;
-      push('speechRate', ({ 1: '慢', 2: '标准', 3: '快' } as Record<number, string>)[speechRate]);
-    }
-    const challenge = clampInt(fields.challenge, 1, 5);
-    if (challenge !== null) { patch.challenge = challenge; push('challenge', `${challenge} / 5`); }
-    const interrupt = asText(fields.interruptLevel);
-    if (interrupt && ['off', 'weak', 'strong'].includes(interrupt)) {
-      patch.interruptLevel = interrupt as BuildForm['interruptLevel'];
-      push('interruptLevel', INTERRUPT_OPTIONS.find((o) => o.key === interrupt)?.label ?? interrupt);
-    }
-    if (Array.isArray(fields.skillPointNames)) {
-      const names = fields.skillPointNames.filter((n): n is string => typeof n === 'string');
-      const ids = skillIdsFromNames(names);
-      if (ids.length) {
-        patch.skillPointIds = ids;
-        push('skillPointNames', names.filter((n) => skillPoints.some((sp) => sp.name === n)).join('、'));
-      }
-    }
-    if (fields.dimensionWeights && typeof fields.dimensionWeights === 'object') {
-      const raw = fields.dimensionWeights as Record<string, unknown>;
-      const weights = { ...form.dimensionWeights };
-      let touched = false;
-      for (const d of DIMENSIONS) {
-        const n = clampInt(raw[d.key], 0, 100);
-        if (n !== null) { weights[d.key] = n; touched = true; }
-      }
-      if (touched) {
-        const sum = Object.values(weights).reduce((a, b) => a + b, 0);
-        if (sum > 0 && sum !== 100) {
-          let acc = 0;
-          DIMENSIONS.forEach((d, i) => {
-            if (i < DIMENSIONS.length - 1) {
-              weights[d.key] = Math.round((weights[d.key] / sum) * 100);
-              acc += weights[d.key];
-            } else {
-              weights[d.key] = Math.max(0, 100 - acc);
-            }
-          });
-        }
-        patch.dimensionWeights = weights;
-        push('dimensionWeights', DIMENSIONS.map((d) => `${d.name} ${weights[d.key]}%`).join(' / '));
-      }
-    }
-    return { patch, rows };
-  };
-
-  const aiPreview = ai.result?.fields ? sanitizeExtracted(ai.result.fields) : null;
-
   /** 当前表单快照（技能点转换为名称），供增量修改时传给后端；全新场景（无标题无ID）不传 */
   const formSnapshot = (): Record<string, unknown> | undefined => {
     if (!editingScenarioId && !form.name.trim()) return undefined;
     return {
       ...form,
+      scenarioId: editingScenarioId ?? undefined,
       skillPointIds: undefined,
-      skillPointNames: form.skillPointIds
-        .map((id) => skillPoints.find((sp) => sp.id === id)?.name)
-        .filter(Boolean),
+      scoreItemIds: undefined,
+      drillScriptId: undefined,
+      skillPointNames: form.skillPointIds.map((id) => skillPoints.find((sp) => sp.id === id)?.name).filter(Boolean),
+      scoreItemNames: form.scoreItemIds.map((id) => scoreItems.find((item) => item.id === id)?.name).filter(Boolean),
+      drillScriptName: drillScripts.find((script) => script.id === form.drillScriptId)?.name ?? '',
     };
   };
 
-  const startAiRecording = async () => {
-    if (ai.recording || ai.extracting) return;
-    try {
-      const rec = new PcmRecorder();
-      aiChunksRef.current = [];
-      rec.onChunk = (buf) => aiChunksRef.current.push(buf);
-      rec.onLevel = (rms) =>
-        setAi((prev) => (prev.recording ? { ...prev, level: Math.min(1, rms * 4) } : prev));
-      await rec.start();
-      aiRecorderRef.current = rec;
-      aiTimerRef.current = window.setInterval(
-        () => setAi((prev) => (prev.recording ? { ...prev, seconds: prev.seconds + 1 } : prev)),
-        1000
-      );
-      setAi((prev) => ({ ...prev, recording: true, seconds: 0, level: 0, transcript: null, result: null }));
-    } catch (err) {
-      setNotice(err instanceof Error && err.message ? err.message : '无法访问麦克风，请检查浏览器权限');
-    }
-  };
-
-  const stopAiRecording = async () => {
-    if (!ai.recording) return;
-    aiRecorderRef.current?.stop();
-    aiRecorderRef.current = null;
-    if (aiTimerRef.current) {
-      window.clearInterval(aiTimerRef.current);
-      aiTimerRef.current = null;
-    }
-    const chunks = aiChunksRef.current;
-    aiChunksRef.current = [];
-    setAi((prev) => ({ ...prev, recording: false, level: 0 }));
-    if (chunks.length === 0) {
-      setNotice('没有录到声音，请重试');
-      return;
-    }
-    setAi((prev) => ({ ...prev, extracting: true }));
-    try {
-      const res = await extractScenarioFromAudio(pcmToWav(chunks), formSnapshot());
-      setAi((prev) => ({
-        ...prev,
-        extracting: false,
-        transcript: res.transcript ?? null,
-        result: res,
-        input: res.transcript ?? prev.input,
-      }));
-    } catch (err) {
-      setAi((prev) => ({ ...prev, extracting: false }));
-      setNotice(apiError(err, '语音识别失败'));
-    }
-  };
-
-  const handleAiExtract = async () => {
-    const text = ai.input.trim();
-    if (!text || ai.extracting) return;
-    setAi((prev) => ({ ...prev, extracting: true }));
-    try {
-      const res = await extractScenarioFromText(text, formSnapshot());
-      setAi((prev) => ({ ...prev, extracting: false, result: res }));
-    } catch (err) {
-      setAi((prev) => ({ ...prev, extracting: false }));
-      setNotice(apiError(err, '提取失败'));
-    }
-  };
-
-  const handleAiApply = () => {
-    if (!ai.result?.fields) return;
-    const { patch, rows } = sanitizeExtracted(ai.result.fields);
-    if (rows.length === 0) {
-      setNotice('没有可应用的字段');
-      return;
-    }
-    updateForm(patch);
-    setAi((prev) => ({ ...prev, result: null }));
-    setNotice(`已应用 ${rows.length} 个字段到表单，请检查后保存`);
+  /**
+   * 语音自动场景创建和配置落库后的回调：
+   * 新建/更新场景时同步编辑态（后续语音指令自动定位到该场景），并刷新列表
+   */
+  const handleVoiceApplied = async (applied: { result?: Record<string, unknown> }) => {
+    const scenario = applied.result?.scenario as { id: string; name: string } | undefined;
+    await loadMine();
+    if (!scenario?.id) return;
+    const mineNow = await fetchScenarios(true);
+    const saved = mineNow.scenarios.find((s) => s.id === scenario.id);
+    if (!saved) return;
+    setEditingScenarioId(saved.id);
+    setEditingScenarioVersion(saved.version ?? 1);
+    setEditingPersonaConfigId(saved.personaConfigId);
+    setNewSavedScenario(null);
   };
 
   const resetTrial = () => setTrial({ open: false, messages: [], input: '', sending: false });
@@ -487,33 +255,46 @@ export default function Build() {
   const handleReset = () => {
     setForm(EMPTY_FORM);
     setEditingScenarioId(null);
+    setEditingScenarioVersion(1);
     setEditingPersonaConfigId(null);
+    setEditingPersona(null);
     setNewSavedScenario(null);
     setEditingGuidance(null);
     resetTrial();
   };
 
-  const handleEdit = (scenario: Scenario) => {
+  const handleEdit = async (scenario: Scenario) => {
     setEditingScenarioId(scenario.id);
+    setEditingScenarioVersion(scenario.version ?? 1);
     setEditingPersonaConfigId(scenario.personaConfigId);
+    const assessmentPoints = scenario.script?.assessmentPoints ?? [];
     setForm({
       ...EMPTY_FORM,
       name: scenario.name,
-      category: CATEGORIES.some((c) => c.key === scenario.methodology) ? scenario.methodology! : EMPTY_FORM.category,
+      category: scenario.category ?? EMPTY_FORM.category,
+      flowType: scenario.flowType ?? (scenario.category === '地推' ? 'ground_push' : scenario.category === '咨询接待' ? 'reception' : 'generic'),
+      methodology: scenario.methodology ?? '',
       description: scenario.description ?? '',
       difficulty: scenario.difficulty || 1,
-      duration: scenario.durationMinutes || 5,
+      duration: scenario.durationMinutes || 10,
       sceneType: scenario.sceneType ?? 'practical',
+      productKBId: scenario.productKBId ?? '',
+      drillScriptId: scenario.drillScriptId ?? '',
+      scoreItemIds: scenario.scoreItemIds ?? [],
+      status: scenario.status ?? 'published',
+      goal: scenario.script?.purpose ?? '',
       successCriteria: String(scenario.successCriteria?.passScore ?? 60),
+      doNot: assessmentPoints.filter((point) => point.startsWith('禁止：')).map((point) => point.slice(3)).join('；'),
       roleName: scenario.personaName ?? '',
       roleTitle: scenario.personaTitle ?? '',
-      skillPointIds: skillIdsFromNames(scenario.skillPointNames),
-      dimensionWeights: loadWeights(scenario.id) ?? { ...DEFAULT_WEIGHTS },
+      skillPointIds: scenario.skillPointIds ?? skillIdsFromNames(scenario.skillPointNames),
+      speechRate: scenario.conversation?.speechRate ?? 2,
+      challenge: scenario.conversation?.challenge ?? 3,
+      interruptLevel: scenario.conversation?.interruptLevel ?? 'weak',
       scriptExecutionOrder: scenario.script?.executionOrder ?? '',
-      scriptPurpose: scenario.script?.purpose ?? '',
       scriptTopics: (scenario.script?.topics ?? []).join('\n'),
       scriptCustomerQuestions: (scenario.script?.customerQuestions ?? []).join('\n'),
-      scriptAssessmentPoints: (scenario.script?.assessmentPoints ?? []).join('\n'),
+      scriptAssessmentPoints: assessmentPoints.filter((point) => !point.startsWith('禁止：')).join('\n'),
       participants: (scenario.participants ?? []).map((p) => ({ ...EMPTY_PARTICIPANT, ...p })),
     });
     resetTrial();
@@ -521,32 +302,43 @@ export default function Build() {
     setEditorMode('form');
     setActiveTab('editor');
     setNewSavedScenario(null);
-    // 拉一次指引配置，用于时长字段的「以指引配置为准」提示
+    try {
+      const persona = await fetchPersonaConfig(scenario.personaConfigId);
+      setEditingPersona(persona);
+      setForm((current) => ({ ...current, ...personaEditorFields(persona) }));
+    } catch (err) {
+      setNotice(apiError(err, '角色配置加载失败'));
+    }
     listScenarioGuidances()
       .then((r) => setEditingGuidance(r.items.find((g) => g.scenarioId === scenario.id) ?? null))
       .catch(() => setEditingGuidance(null));
   };
 
   const handleDuplicate = async (scenario: Scenario) => {
-    if (!isAdmin) return;
     try {
       const created = await createScenario({
         name: `${scenario.name}（副本）`,
         personaConfigId: scenario.personaConfigId,
-        skillPointIds: skillIdsFromNames(scenario.skillPointNames),
+        skillPointIds: scenario.skillPointIds ?? skillIdsFromNames(scenario.skillPointNames),
+        scoreItemIds: scenario.scoreItemIds ?? [],
         passScore: scenario.successCriteria?.passScore ?? 60,
         durationMinutes: scenario.durationMinutes,
         difficulty: scenario.difficulty,
         coverageTopics: scenario.coverageTopics,
+        description: scenario.description,
+        productKBId: scenario.productKBId,
+        drillScriptId: scenario.drillScriptId,
         methodology: scenario.methodology,
-        source: scenario.source ?? '自建',
+        source: '自建',
         sceneType: scenario.sceneType,
+        category: scenario.category,
+        flowType: scenario.flowType,
         script: scenario.script,
         participants: scenario.participants,
+        conversation: scenario.conversation,
+        status: 'draft',
       });
-      const weights = loadWeights(scenario.id);
-      if (weights) saveWeights(created.id, weights);
-      setNotice(`已复制为「${created.name}」`);
+      setNotice(`已复制为「${created.name}」（草稿）`);
       await loadMine();
     } catch (err) {
       setNotice(apiError(err, '复制失败'));
@@ -554,11 +346,9 @@ export default function Build() {
   };
 
   const handleDelete = async (scenario: Scenario) => {
-    if (!isAdmin) return;
     if (!window.confirm(`确定删除场景「${scenario.name}」吗？此操作不可恢复。`)) return;
     try {
       await deleteScenario(scenario.id);
-      localStorage.removeItem(weightsKey(scenario.id));
       setNotice(`已删除「${scenario.name}」`);
       await loadMine();
     } catch (err) {
@@ -567,13 +357,16 @@ export default function Build() {
   };
 
   const buildBackground = (): string => {
+    const preserved = (editingPersona?.background ?? '').split('\n').filter((line) =>
+      line.trim() && !/^(行业|性格标签|决策风格|典型异议|禁止透露（除非被追问）)：/.test(line)
+    );
     const parts: string[] = [];
     if (form.roleIndustry) parts.push(`行业：${form.roleIndustry}`);
     if (form.personalities.length) parts.push(`性格标签：${form.personalities.join('、')}`);
     if (form.decisionStyle) parts.push(`决策风格：${form.decisionStyle}`);
     if (form.objections) parts.push(`典型异议：${form.objections}`);
     if (form.hiddenInfo) parts.push(`禁止透露（除非被追问）：${form.hiddenInfo}`);
-    return parts.join('\n');
+    return [...preserved, ...parts].join('\n') || '本场景的客户角色';
   };
 
   const buildBehaviorBands = () => {
@@ -601,106 +394,104 @@ export default function Build() {
     updateForm({ participants: form.participants.filter((_, i) => i !== idx) });
 
   const handleSave = async () => {
-    if (!isAdmin || saving) return;
-    if (!form.name.trim()) {
-      setNotice('请填写场景标题');
-      return;
-    }
-    if (totalWeight !== 100) {
-      setNotice(`六维权重合计需为 100%（当前 ${totalWeight}%）`);
-      return;
-    }
+    if (saving) return;
+    if (!form.name.trim()) return setNotice('请填写场景标题');
+    if (!form.skillPointIds.length) return setNotice('请至少选择一个技能点');
+    if (form.status === 'published' && !form.scoreItemIds.length) return setNotice('发布前请至少绑定一条评分标准；也可先保存为草稿');
     const parsed = Number(form.successCriteria);
-    const passScore = Number.isFinite(parsed) && parsed > 0 ? Math.min(100, Math.round(parsed)) : 60;
-    /** 多值文本（换行/分号分隔）拆成数组 */
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) return setNotice('及格分必须为 0-100 的数字');
+    const passScore = Math.round(parsed);
     const splitLines = (s: string) => s.split(/[\n；;]/).map((x) => x.trim()).filter(Boolean);
-    // 我方目标作为评估准绳并入 script.purpose（judge/教练提示均引用）；禁止事项并入考核点。
-    // 实战训练（drill）为无剧本自由对练：不保存剧本流程类字段，但保留目标/禁止事项作为评估依据
     const goalText = form.goal.trim();
     const doNotText = form.doNot.trim();
     const assessmentPoints = splitLines(form.scriptAssessmentPoints);
     if (doNotText) assessmentPoints.push(`禁止：${doNotText}`);
-    const scriptPayload =
-      form.sceneType === 'practical'
-        ? {
-            executionOrder: form.scriptExecutionOrder.trim() || undefined,
-            purpose: form.scriptPurpose.trim() || goalText || undefined,
-            topics: splitLines(form.scriptTopics),
-            customerQuestions: splitLines(form.scriptCustomerQuestions),
-            assessmentPoints,
-          }
-        : goalText || doNotText
-          ? { purpose: goalText || undefined, assessmentPoints }
-          : null;
-    const participantsPayload = form.participants
-      .filter((p) => p.name.trim())
-      .map((p) => ({
-        name: p.name.trim(),
-        traits: p.traits?.trim() || undefined,
-        speakingStyle: p.speakingStyle?.trim() || undefined,
-        speechScope: p.speechScope?.trim() || undefined,
-        languageRequirements: p.languageRequirements?.trim() || undefined,
-        goal: p.goal?.trim() || undefined,
-      }));
+    const scriptPayload = form.sceneType === 'practical'
+      ? {
+          executionOrder: form.scriptExecutionOrder.trim() || undefined,
+          purpose: goalText || undefined,
+          topics: splitLines(form.scriptTopics),
+          customerQuestions: splitLines(form.scriptCustomerQuestions),
+          assessmentPoints,
+        }
+      : goalText || doNotText
+        ? { purpose: goalText || undefined, assessmentPoints }
+        : null;
+    const participantsPayload = form.participants.filter((p) => p.name.trim()).map((p) => ({
+      name: p.name.trim(), traits: p.traits?.trim() || undefined, speakingStyle: p.speakingStyle?.trim() || undefined,
+      speechScope: p.speechScope?.trim() || undefined, languageRequirements: p.languageRequirements?.trim() || undefined,
+      goal: p.goal?.trim() || undefined,
+    }));
     const personaPayload = {
       name: form.roleName.trim() || `${form.name.trim()}角色`,
       background: buildBackground(),
       occupation: form.roleTitle.trim() || undefined,
+      industry: form.roleIndustry.trim() || undefined,
+      personalityTags: form.personalities,
+      decisionStyle: form.decisionStyle,
+      objections: splitLines(form.objections),
+      hiddenInfo: splitLines(form.hiddenInfo),
       behaviorBands: buildBehaviorBands(),
     };
+    const scenarioPayload = {
+      name: form.name.trim(), skillPointIds: form.skillPointIds, scoreItemIds: form.scoreItemIds,
+      passScore, durationMinutes: form.duration, difficulty: form.difficulty,
+      description: form.description.trim() || null, methodology: form.methodology.trim(),
+      sceneType: form.sceneType, category: form.category, flowType: form.flowType, productKBId: form.productKBId || null, drillScriptId: form.drillScriptId || null,
+      script: scriptPayload, participants: participantsPayload, status: form.status,
+      conversation: { speechRate: form.speechRate, challenge: form.challenge, interruptLevel: form.interruptLevel },
+    };
     setSaving(true);
+    let unreferencedPersonaId: string | null = null;
     try {
-      let scenarioId = editingScenarioId;
-      let personaConfigId = editingPersonaConfigId;
-      if (scenarioId) {
-        if (personaConfigId) await updatePersonaConfig(personaConfigId, personaPayload);
-        await updateScenario(scenarioId, {
-          name: form.name.trim(),
-          skillPointIds: form.skillPointIds,
-          passScore,
-          durationMinutes: form.duration,
-          difficulty: form.difficulty,
-          // 场景描述走独立 description 字段；coverageTopics 是规则层字面匹配的话题点，
-          // 编辑器不提供维护入口，清空以避免旧数据把整段描述当话题导致 coverage-miss 误报
-          coverageTopics: [],
-          description: form.description.trim() || null,
-          methodology: form.category,
-          source: '自建',
-          sceneType: form.sceneType,
-          script: scriptPayload,
-          participants: participantsPayload,
+      if (editingScenarioId) {
+        let personaConfigId = editingPersonaConfigId;
+        let persona = editingPersona;
+        const shared = (editingPersona?.usageCount ?? 0) > 1 || mine.some((s) => s.id !== editingScenarioId && s.personaConfigId === editingPersonaConfigId);
+        if (personaConfigId && editingPersona) {
+          if (shared) {
+            persona = await createPersonaConfig({ ...editingPersona, ...personaPayload });
+            personaConfigId = persona.id;
+            unreferencedPersonaId = persona.id;
+          } else {
+            persona = await updatePersonaConfig(personaConfigId, { ...personaPayload, expectedVersion: editingPersona.version });
+          }
+        }
+        const current = mine.find((s) => s.id === editingScenarioId);
+        const updated = await updateScenario(editingScenarioId, {
+          ...scenarioPayload,
+          personaConfigId: personaConfigId ?? undefined,
+          coverageTopics: current?.coverageTopics ?? [],
+          source: current?.source ?? '自建',
+          expectedVersion: editingScenarioVersion,
         });
+        unreferencedPersonaId = null;
+        setEditingScenarioVersion(updated.version ?? 1);
+        setEditingScenarioId(updated.id);
+        setEditingPersonaConfigId(personaConfigId);
+        setEditingPersona(persona);
+        setNewSavedScenario(null);
+        setNotice(shared ? '场景已更新；共享角色已复制为当前场景专属角色，其他场景不受影响' : '场景已更新');
       } else {
         const persona = await createPersonaConfig(personaPayload);
-        personaConfigId = persona.id;
+        unreferencedPersonaId = persona.id;
         const scenario = await createScenario({
-          name: form.name.trim(),
-          personaConfigId: persona.id,
-          skillPointIds: form.skillPointIds,
-          passScore,
-          durationMinutes: form.duration,
-          difficulty: form.difficulty,
+          ...scenarioPayload,
           description: form.description.trim() || undefined,
-          methodology: form.category,
+          personaConfigId: persona.id,
           source: '自建',
-          sceneType: form.sceneType,
-          script: scriptPayload ?? undefined,
-          participants: participantsPayload,
         });
-        scenarioId = scenario.id;
+        unreferencedPersonaId = null;
         setEditingScenarioId(scenario.id);
+        setEditingScenarioVersion(scenario.version ?? 1);
         setEditingPersonaConfigId(persona.id);
-      }
-      if (scenarioId) saveWeights(scenarioId, form.dimensionWeights);
-      if (editingScenarioId) {
-        setNewSavedScenario(null);
-        setNotice('场景已更新');
-      } else {
-        setNewSavedScenario(scenarioId ? { id: scenarioId, name: form.name.trim() } : null);
-        setNotice('场景已保存，可在「我的场景」中查看；可到资源库配置新手指引（资格提问/示范/讲解/难度/时长）');
+        setEditingPersona(persona);
+        setNewSavedScenario({ id: scenario.id, name: form.name.trim() });
+        setNotice('场景已保存，可在场景列表查看；可继续配置新手指引');
       }
       await loadMine();
     } catch (err) {
+      if (unreferencedPersonaId) await deletePersonaConfig(unreferencedPersonaId).catch(() => {});
       setNotice(apiError(err, '保存失败'));
     } finally {
       setSaving(false);
@@ -745,16 +536,14 @@ export default function Build() {
     document.getElementById(`bsec-${key}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  const catType = (key: string) => CATEGORIES.find((c) => c.key === key)?.type ?? 't1';
-  const catDot = (key: string) => CATEGORIES.find((c) => c.key === key)?.dot ?? 'bg-cat-phone';
+  const findCategory = (value: string) => CATEGORIES.find((c) => c.key === value || c.label === value);
+  const catType = (key: string) => findCategory(key)?.type ?? 't1';
+  const catDot = (key: string) => findCategory(key)?.dot ?? 'bg-cat-phone';
   const catChip = (key: string) => {
-    const map: Record<string, string> = { '电话销售': 'chip-coral', '咨询接待': 'chip-blue', '现场成交': 'chip-amber', '地推引流课': 'chip-green' };
-    return map[key] ?? 'chip-coral';
+    const map: Record<string, string> = { 电销: 'chip-coral', 咨询接待: 'chip-blue', 现场成交: 'chip-amber', 地推: 'chip-green' };
+    return map[findCategory(key)?.key ?? key] ?? 'chip-coral';
   };
-  const cardCategory = (s: Scenario) =>
-    CATEGORIES.some((c) => c.key === s.methodology) ? s.methodology! : s.methodology || s.source || '自建';
-
-  const adminTip = '仅管理员可保存场景';
+  const cardCategory = (s: Scenario) => findCategory(s.category ?? '')?.label ?? s.methodology ?? s.source ?? '自建';
 
   return (
     <main className="wrap">
@@ -848,16 +637,12 @@ export default function Build() {
                         <button className="act-btn" onClick={() => handleEdit(scenario)}>✏️ 编辑</button>
                         <button
                           className="act-btn"
-                          disabled={!isAdmin}
-                          title={!isAdmin ? adminTip : undefined}
                           onClick={() => handleDuplicate(scenario)}
                         >
                           ⧉ 复制
                         </button>
                         <button
                           className="act-btn danger"
-                          disabled={!isAdmin}
-                          title={!isAdmin ? adminTip : undefined}
                           onClick={() => handleDelete(scenario)}
                         >
                           🗑 删除
@@ -920,75 +705,18 @@ export default function Build() {
 
             {/* 右侧内容 */}
             <div>
-              {/* 语音自动处理 */}
+              {/* 语音自动场景创建和配置 */}
               {editorMode === 'voice' && (
               <div className="card formsec">
                 <div className="fs-head">
-                  <h3 className="bar-title">语音创建 / 编辑</h3>
-                  <span className="sub">说出想要的场景或要修改的地方，自动识别并填入下方表单</span>
+                  <h3 className="bar-title">语音自动场景创建和配置</h3>
+                  <span className="sub">说出要创建或修改的场景、场景配置或资源库，LLM 自动提炼、服务端自动定位对象，按权限直接保存或提交通用建议；先预览、后落库</span>
                 </div>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
-                  <button
-                    className="btn btn-primary"
-                    disabled={ai.extracting}
-                    onClick={ai.recording ? stopAiRecording : startAiRecording}
-                  >
-                    {ai.recording ? `⏹ 停止并识别（${ai.seconds}s）` : ai.extracting ? '识别中…' : '🎙️ 开始语音输入'}
-                  </button>
-                  {ai.recording && (
-                    <div style={{ flex: 1, minWidth: 120, height: 6, borderRadius: 3, background: '#F3F4F6', overflow: 'hidden' }}>
-                      <div style={{ width: `${Math.round(ai.level * 100)}%`, height: '100%', background: '#F97362', transition: 'width 100ms' }} />
-                    </div>
-                  )}
-                </div>
-                <div className="field">
-                  <textarea
-                    value={ai.input}
-                    onChange={(e) => setAi((prev) => ({ ...prev, input: e.target.value }))}
-                    className="input"
-                    rows={2}
-                    placeholder="也可以在这里打字，例如：把难度改成挑战，客户换成爱压价的采购经理…"
-                    maxLength={500}
-                  />
-                  <div className="hint">语音转写结果会显示在这里，可修改后再提取；编辑已有场景时会基于当前表单做增量修改。</div>
-                </div>
-                {ai.input.trim() && (
-                  <button
-                    className="btn btn-ghost"
-                    disabled={ai.extracting || ai.recording}
-                    onClick={handleAiExtract}
-                  >
-                    {ai.extracting ? '识别中…' : '⌨️ 提取文字内容'}
-                  </button>
-                )}
-                {ai.result && (
-                  <div style={{ marginTop: 12 }}>
-                    <div className="hint" style={{ marginBottom: 8 }}>{ai.result.reply}</div>
-                    {aiPreview && aiPreview.rows.length > 0 ? (
-                      <>
-                        <div className="weights" style={{ marginBottom: 8 }}>
-                          {aiPreview.rows.map(([label, value]) => (
-                            <div key={label} className="witem">
-                              <div className="wl"><span>{label}</span></div>
-                              <div className="wd">{value}</div>
-                            </div>
-                          ))}
-                        </div>
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          <button className="btn btn-primary" onClick={handleAiApply}>应用到表单</button>
-                          <button
-                            className="btn btn-ghost"
-                            onClick={() => setAi((prev) => ({ ...prev, result: null }))}
-                          >
-                            丢弃
-                          </button>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="hint">没有识别到可提取的字段，请换个说法重试。</div>
-                    )}
-                  </div>
-                )}
+                <VoiceResourceEditor
+                  embedded
+                  context={{ scenarioId: editingScenarioId ?? undefined, form: formSnapshot() }}
+                  onApplied={handleVoiceApplied}
+                />
               </div>
               )}
 
@@ -1016,11 +744,45 @@ export default function Build() {
                   <label>场景类别</label>
                   <div className="pick">
                     {CATEGORIES.map((cat) => (
-                      <span key={cat.key} onClick={() => updateForm({ category: cat.key })} className={`chip ${form.category === cat.key ? 'on' : ''}`}>
-                        {cat.icon} {cat.key}
+                      <span
+                        key={cat.key}
+                        onClick={() => updateForm({
+                          category: cat.key,
+                          drillScriptId: drillScripts.some((s) => s.id === form.drillScriptId && s.category === cat.key) ? form.drillScriptId : '',
+                          scoreItemIds: scoreItems.filter((item) => form.scoreItemIds.includes(item.id) && (!item.category || item.category === cat.key)).map((item) => item.id),
+                        })}
+                        className={`chip ${form.category === cat.key ? 'on' : ''}`}
+                      >
+                        {cat.icon} {cat.label}
                       </span>
                     ))}
                   </div>
+                </div>
+                <div className="field">
+                  <label>执行策略</label>
+                  <select value={form.flowType} onChange={(e) => updateForm({ flowType: e.target.value as BuildForm['flowType'] })} className="input">
+                    <option value="generic">通用对话（不加载专项业务规则）</option>
+                    <option value="ground_push">地推专项（双场、孩子互动与推进规则）</option>
+                    <option value="reception">咨询接待专项（固定题与试听流程）</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label>方法论标签（可选）</label>
+                  <input value={form.methodology} onChange={(e) => updateForm({ methodology: e.target.value })} className="input" placeholder="如：张伟三步破冰法 · L2" />
+                </div>
+                <div className="field">
+                  <label>发布状态</label>
+                  <select value={form.status} onChange={(e) => updateForm({ status: e.target.value as BuildForm['status'] })} className="input">
+                    <option value="published">发布（学员可用）</option>
+                    <option value="draft">草稿（仅管理员可见）</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label>产品知识库</label>
+                  <select value={form.productKBId} onChange={(e) => updateForm({ productKBId: e.target.value })} className="input">
+                    <option value="">使用角色默认或机构知识库</option>
+                    {productKB && <option value={productKB.id}>{productKB.name}</option>}
+                  </select>
                 </div>
                 <div className="field">
                   <label>场景描述</label>
@@ -1063,7 +825,7 @@ export default function Build() {
                 <div className="field">
                   <label>成功标准</label>
                   <input type="text" value={form.successCriteria} onChange={(e) => updateForm({ successCriteria: e.target.value })} className="input" />
-                  <div className="hint">填写达标分数（0-100），保存为场景的及格线，非数字时按 60 处理。</div>
+                  <div className="hint">填写达标分数（0-100），保存为场景的及格线。</div>
                 </div>
                 <div className="field">
                   <label>禁止事项</label>
@@ -1112,9 +874,9 @@ export default function Build() {
                 <div className="fs-head"><h3 className="bar-title">对话参数</h3><span className="sub">角色说话的脾气</span></div>
                 <div className="field">
                   <label>语速</label>
-                  <input type="range" min={1} max={3} step={1} value={form.speechRate} onChange={(e) => updateForm({ speechRate: Number(e.target.value) })} />
+                  <input type="range" min={1} max={3} step={1} value={form.speechRate} onChange={(e) => updateForm({ speechRate: Number(e.target.value) as BuildForm['speechRate'] })} />
                   <div className="range-vals"><span>慢</span><span>标准</span><span>快</span></div>
-                  <div className="hint">标准 ≈ 150 WPM</div>
+                  <div className="hint">控制角色对话中的语速表现；实际 TTS 倍率可在资源库指引中配置</div>
                 </div>
                 <div className="field">
                   <label>挑战强度</label>
@@ -1132,49 +894,45 @@ export default function Build() {
 
               {/* ⑤ 评估配置 */}
               <div className="card formsec" id="bsec-eval">
-                <div className="fs-head"><h3 className="bar-title">评估配置</h3><span className="sub">考核技能点与六维权重</span></div>
+                <div className="fs-head"><h3 className="bar-title">评估配置</h3><span className="sub">技能地图与场景专属评分标准</span></div>
                 <div className="field">
                   <label>考核技能点（可多选）</label>
                   <div className="pick">
                     {skillPoints.map((sp) => (
-                      <span key={sp.id} onClick={() => toggleSkillPoint(sp.id)} className={`chip ${form.skillPointIds.includes(sp.id) ? 'on-soft' : ''}`}>
-                        {sp.name}
+                      <span key={sp.id} onClick={() => toggleSkillPoint(sp.id)} className={`chip ${form.skillPointIds.includes(sp.id) ? 'on-soft' : ''}`}>{sp.name}</span>
+                    ))}
+                  </div>
+                  {skillPoints.length === 0 && <div className="hint">暂无可用技能点，请先到资源库创建</div>}
+                </div>
+                <div className="field">
+                  <label>评分标准（发布场景至少一项）</label>
+                  <div className="pick">
+                    {scoreItems.filter((item) => !item.category || item.category === form.category).map((item) => (
+                      <span key={item.id} onClick={() => toggleScoreItem(item.id)} className={`chip ${form.scoreItemIds.includes(item.id) ? 'on-soft' : ''}`}>
+                        {item.name}{item.isObservation ? '（观察）' : ''}
                       </span>
                     ))}
                   </div>
-                  {skillPoints.length === 0 && <div className="hint">暂无可用技能点</div>}
-                </div>
-                <div className="weights">
-                  {DIMENSIONS.map((dim) => (
-                    <div key={dim.key} className="witem">
-                      <div className="wl">
-                        <span>{dim.name}</span>
-                        <input type="number" min={0} max={100} value={form.dimensionWeights[dim.key] ?? dim.defaultWeight}
-                          onChange={(e) => updateForm({ dimensionWeights: { ...form.dimensionWeights, [dim.key]: Number(e.target.value) } })} />
-                      </div>
-                      <div className="wd">{dim.desc}</div>
-                    </div>
-                  ))}
-                </div>
-                <div className="hint" style={{ marginTop: 12 }}>
-                  权重合计需 = 100%（当前 {totalWeight}%{totalWeight === 100 ? ' ✅' : '，请调整'}）
+                  <div className="hint">实际评分只使用此处显式绑定的标准；修改其他场景或同分类资源不会改变本场景的选择范围。</div>
                 </div>
               </div>
 
-              {/* ⑥ 剧本配置（仅实用场景） */}
+              {/* ⑥ 剧本配置 */}
               <div className="card formsec" id="bsec-script">
-                <div className="fs-head"><h3 className="bar-title">剧本配置</h3><span className="sub">有剧本对练的流程与考核点</span></div>
-                {form.sceneType === 'drill' ? (
-                  <div className="hint">当前为「实战训练」类型，无需配置剧本。</div>
-                ) : (
+                <div className="fs-head"><h3 className="bar-title">剧本配置</h3><span className="sub">显式绑定资源，实用场景可补充结构化流程</span></div>
+                <div className="field">
+                  <label>演练剧本（可选）</label>
+                  <select value={form.drillScriptId} onChange={(e) => updateForm({ drillScriptId: e.target.value })} className="input">
+                    <option value="">不引用演练剧本，仅使用场景配置</option>
+                    {drillScripts.filter((script) => script.category === form.category).map((script) => <option key={script.id} value={script.id}>{script.name}</option>)}
+                  </select>
+                  <div className="hint">引用后由该剧本主导客户行为；其他同分类场景不会与此场景自动共用剧本。</div>
+                </div>
+                {form.sceneType === 'practical' && (
                   <>
                     <div className="field">
                       <label>执行顺序</label>
                       <textarea value={form.scriptExecutionOrder} onChange={(e) => updateForm({ scriptExecutionOrder: e.target.value })} className="input" rows={2} placeholder="如：开场破冰 → 需求探询 → 异议处理 → 推进成交" maxLength={200} />
-                    </div>
-                    <div className="field">
-                      <label>目的</label>
-                      <textarea value={form.scriptPurpose} onChange={(e) => updateForm({ scriptPurpose: e.target.value })} className="input" rows={2} placeholder="这个剧本要训练学员达成什么" maxLength={200} />
                     </div>
                     <div className="field">
                       <label>话题</label>
@@ -1248,16 +1006,13 @@ export default function Build() {
                 </button>
                 <button
                   className="btn btn-primary"
-                  disabled={!isAdmin || saving}
-                  title={!isAdmin ? adminTip : undefined}
+                  disabled={saving}
                   onClick={handleSave}
                 >
                   {saving ? '保存中…' : '保存为新版本'}
                 </button>
                 <span className="note">
-                  {isAdmin
-                    ? editingScenarioId ? '保存将更新该场景' : '保存后出现在「我的场景」'
-                    : `${adminTip}（试聊可用）`}
+                  {editingScenarioId ? '保存将更新该场景并递增版本' : '保存后出现在「我的场景」'}
                 </span>
               </div>
 

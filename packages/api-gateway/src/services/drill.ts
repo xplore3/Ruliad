@@ -15,12 +15,13 @@ function extractJson(content: string): string {
   return start >= 0 ? raw.slice(start).trim() : raw.trim();
 }
 
-/** 取场景对应分类的演练剧本（该分类下第一条；无分类或无剧本返回 undefined，调用方走兼容行为） */
+/** 只读取场景显式绑定的演练剧本，并校验资源归属，避免同分类场景互相串用。 */
 export async function resolveDrillScript(store: Store, scenario: Scenario): Promise<DrillScript | undefined> {
-  if (scenario.id === 'scenario-humor-test') return store.getDrillScript('drill-script-humor-test');
-  if (!scenario.category) return undefined;
-  const list = await store.listDrillScripts(scenario.tenantId, scenario.category).catch(() => []);
-  return list.find((s) => s.content.trim());
+  const scriptId = scenario.id === 'scenario-humor-test' ? 'drill-script-humor-test' : scenario.drillScriptId;
+  if (!scriptId) return undefined;
+  const script = await store.getDrillScript(scriptId).catch(() => undefined);
+  if (!script || script.tenantId !== scenario.tenantId || !script.content.trim()) return undefined;
+  return script;
 }
 
 /** 演练剧本注入客户 prompt 的说明段落 */

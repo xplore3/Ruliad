@@ -72,8 +72,10 @@ export interface DifficultyLevel {
 /** 时长参数（第4步） */
 export interface DurationParams {
   targetMinutes: number;
-  minTurns: number;
-  maxTurns: number;
+  /** 已废弃：仅为兼容旧数据保留，运行时不使用 */
+  minTurns?: number;
+  /** 已废弃：仅为兼容旧数据保留，运行时不使用 */
+  maxTurns?: number;
   countdownSeconds: number;
 }
 

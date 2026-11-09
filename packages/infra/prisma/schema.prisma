@@ -340,11 +340,47 @@ model DataConsent {
   @@index([tenantId])
 }
 
+/// 用户反馈：学员/管理者提交的功能建议与问题反馈，admin 在管理后台查看与回复
+model Feedback {
+  id       String   @id @default(uuid())
+  tenantId String
+  userId   String
+  userName String
+  type     String // suggestion | bug | other
+  content  String
+  source   String?
+  status   String   @default("pending") // pending | processing | resolved | closed
+  data     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now())
+
+  @@index([tenantId, status])
+  @@index([tenantId, userId])
+}
+
+/// 场景/资源语音编辑命令：保留原始指令、结构化修改和通用问题处理状态
+model VoiceEditCommand {
+  id        String   @id @default(uuid())
+  tenantId  String
+  userId    String
+  target    String
+  status    String
+  data      String
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, userId])
+  @@index([tenantId, status])
+  @@index([tenantId, createdAt])
+}
+
 /// 评分回归案例库：评分引擎回归测试用，不参与实时执行
 model GoldenCase {
-  id   String @id @default(uuid())
-  name String
-  data String
+  id       String @id @default(uuid())
+  tenantId String?
+  name     String
+  data     String
+
+  @@index([tenantId])
 }
 
 model RegressionRun {

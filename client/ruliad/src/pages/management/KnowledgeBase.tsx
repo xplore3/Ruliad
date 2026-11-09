@@ -119,6 +119,7 @@ export default function ManagementKnowledgeBase() {
     try {
       const payload = {
         name: trimmedName,
+        expectedVersion: version,
         entries: entries.map((e) => ({
           id: e.id,
           kind: e.kind,

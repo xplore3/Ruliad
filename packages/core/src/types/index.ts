@@ -12,3 +12,5 @@ export * from './demo-faq.js';
 export * from './demo-script.js';
 export * from './drill-script.js';
 export * from './guidance.js';
+export * from './voice-command.js';
+export * from './feedback.js';

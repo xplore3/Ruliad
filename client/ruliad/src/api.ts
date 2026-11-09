@@ -24,7 +24,11 @@ ManagementTeamResults,
 ManagementTeamAbility,
 ManagementMemberProfile,
 ManagementSessionDetail,
-ManagementKb,
+  ManagementKb,
+  Feedback,
+  FeedbackReply,
+  FeedbackStatus,
+  FeedbackType,
 } from './types';
 
 const TOKEN_KEY = 'grasp-token';
@@ -161,8 +165,8 @@ export async function fetchCurrentUser() {
 
 // ====== 目录 API ======
 
-export async function fetchScenarios() {
-  const { data } = await api.get('/scenarios');
+export async function fetchScenarios(manage = false) {
+  const { data } = await api.get('/scenarios', { params: manage ? { manage: 1 } : {} });
   return data as { scenarios: Scenario[] };
 }
 
@@ -364,12 +368,19 @@ export interface ScenarioPayload {
   difficulty?: number;
   coverageTopics?: string[];
   description?: string | null;
-  productKBId?: string;
+  productKBId?: string | null;
+  drillScriptId?: string | null;
+  scoreItemIds?: string[];
   methodology?: string;
   source?: string;
   sceneType?: SceneType;
+  category?: import('./types').ScoreCategory;
+  flowType?: 'generic' | 'ground_push' | 'reception';
   script?: ScenarioScript | null;
   participants?: ScenarioParticipant[] | null;
+  conversation?: Scenario['conversation'] | null;
+  status?: 'draft' | 'published';
+  expectedVersion?: number;
 }
 
 export async function createScenario(payload: ScenarioPayload) {
@@ -391,9 +402,22 @@ export interface PersonaConfigPayload {
   background: string;
   age?: number;
   occupation?: string;
+  industry?: string;
+  personalityTags?: string[];
+  decisionStyle?: string;
+  objections?: string[];
+  hiddenInfo?: string[];
   elementIds?: string[];
+  productKBId?: string | null;
   behaviorBands?: { key: string; instruction: string; minArousal: number; maxArousal: number }[];
+  knowledgeBoundary?: { mustNotKnow?: string[]; loadedKnowledge?: string[] };
   voiceProfile?: Record<string, unknown>;
+  expectedVersion?: number;
+}
+
+export async function fetchPersonaConfig(id: string) {
+  const { data } = await api.get(`/persona-configs/${id}`);
+  return data as PersonaConfig;
 }
 
 export async function createPersonaConfig(payload: PersonaConfigPayload) {
@@ -406,9 +430,46 @@ export async function updatePersonaConfig(id: string, payload: Partial<PersonaCo
   return data as PersonaConfig;
 }
 
+export async function deletePersonaConfig(id: string) {
+  await api.delete(`/persona-configs/${id}`);
+}
+
 export async function fetchSkillPoints() {
   const { data } = await api.get('/skill-points');
   return data as { skillPoints: import('./types').SkillPoint[] };
+}
+
+export async function createSkillPoint(payload: Partial<import('./types').SkillPoint>) {
+  const { data } = await api.post('/skill-points', payload);
+  return data as import('./types').SkillPoint;
+}
+
+export async function updateSkillPoint(id: string, payload: Partial<import('./types').SkillPoint>) {
+  const { data } = await api.put(`/skill-points/${id}`, payload);
+  return data as import('./types').SkillPoint;
+}
+
+export async function deleteSkillPoint(id: string) {
+  await api.delete(`/skill-points/${id}`);
+}
+
+export async function listElements() {
+  const { data } = await api.get('/elements');
+  return data as { elements: import('./types').Element[] };
+}
+
+export async function createElement(payload: Partial<import('./types').Element>) {
+  const { data } = await api.post('/elements', payload);
+  return data as import('./types').Element;
+}
+
+export async function updateElement(id: string, payload: Partial<import('./types').Element> & { expectedVersion: number }) {
+  const { data } = await api.put(`/elements/${id}`, payload);
+  return data as import('./types').Element;
+}
+
+export async function deleteElement(id: string) {
+  await api.delete(`/elements/${id}`);
 }
 
 /** 试聊：不落库的角色试聊。后端契约为 { text, history }：text 为最新一条用户消息，history 为之前的多轮 */
@@ -427,6 +488,9 @@ export interface ScenarioExtractResult {
   transcript?: string;
   reply: string;
   fields: Record<string, unknown>;
+  commandId?: string;
+  general?: boolean;
+  generalReason?: string;
 }
 
 /** 文字描述 → 场景维度提取；current 为当前表单快照时做增量修改 */
@@ -477,6 +541,136 @@ export async function saveRealismStandard(payload: Partial<import('./lib/guidanc
 
 export async function deleteRealismStandard(id: string) {
   await api.delete(`/library/realism-standards/${id}`);
+}
+
+export type ResourceEditTarget = 'scenario' | 'persona' | 'skill-point' | 'element' | 'product-kb' | 'demo-faq' | 'demo-script' | 'drill-script' | 'score-item' | 'golden-case' | 'briefing-standard' | 'realism-standard' | 'scenario-guidance';
+
+export interface ResourceEditPreview {
+  transcript?: string;
+  reply: string;
+  patch: Record<string, unknown>;
+  expectedRevision: string;
+  affectedScenarios?: Array<{ id: string; name: string }>;
+  commandId: string;
+  general: boolean;
+  generalReason?: string;
+}
+
+export async function listResourceItems(target: ResourceEditTarget) {
+  const { data } = await api.get('/library/resource-items', { params: { target } });
+  return data as { items: Array<{ id: string; name: string; revision: string; version?: number; createdBy?: string; owned: boolean }> };
+}
+
+export async function previewResourceEdit(target: ResourceEditTarget, id: string | undefined, text: string) {
+  const { data } = await api.post('/library/ai-edit', { target, id, text });
+  return data as ResourceEditPreview;
+}
+
+export async function previewResourceEditAudio(target: ResourceEditTarget, id: string | undefined, wav: Blob) {
+  const fd = new FormData();
+  fd.append('target', target);
+  fd.append('id', id ?? '');
+  fd.append('file', wav, 'resource-edit.wav');
+  const { data } = await api.post('/library/ai-edit', fd);
+  return data as ResourceEditPreview;
+}
+
+export async function applyResourceEdit(target: ResourceEditTarget, id: string | undefined, patch: Record<string, unknown>, expectedRevision: string, commandId: string) {
+  const { data } = await api.post('/library/ai-edit', { target, id, patch, expectedRevision, commandId, apply: true });
+  return data as { item?: { id: string; name?: string }; revision?: string; pendingReview?: boolean; command: import('./types').VoiceEditCommand };
+}
+
+// ====== 语音自动场景创建和配置（统一入口，替代分资源类型的语音编辑） ======
+
+/** 语音配置上下文：嵌入场景编辑器时传入当前场景与表单快照，服务端据此自动定位对象 */
+export interface VoiceConfigContext {
+  scenarioId?: string;
+  form?: Record<string, unknown>;
+}
+
+/** 单条操作预览：LLM 提炼 + 服务端定位/权限策略后的结果 */
+export interface VoiceConfigOperationPreview {
+  index: number;
+  target: string;
+  action: 'create' | 'update';
+  subject: string;
+  resourceName?: string;
+  fields: Record<string, unknown>;
+  persona: Record<string, unknown>;
+  skillPointNames: string[];
+  scoreItemNames: string[];
+  drillScriptName: string;
+  conversation: Record<string, unknown>;
+  resolvedResourceId?: string;
+  scope: 'direct' | 'copy-on-write' | 'general';
+  scopeReason?: string;
+  impact: Array<{ id: string; name: string }>;
+  general: boolean;
+  generalReason?: string;
+  planKind: string;
+}
+
+export interface VoiceConfigPreview {
+  transcript?: string;
+  reply: string;
+  operations: VoiceConfigOperationPreview[];
+  general: boolean;
+  hasPrivate: boolean;
+  commandId: string;
+  expectedRevisions: Record<string, string>;
+}
+
+/** 文字指令 → 生成配置预览（不直接落库） */
+export async function previewVoiceConfigText(text: string, context?: VoiceConfigContext) {
+  const { data } = await api.post('/library/voice-config', { text, context });
+  return data as VoiceConfigPreview;
+}
+
+/** 语音（wav）→ ASR → 生成配置预览 */
+export async function previewVoiceConfigAudio(wav: Blob, context?: VoiceConfigContext) {
+  const fd = new FormData();
+  // context 必须先于文件字段 append，后端 request.file() 才能读到
+  if (context) fd.append('context', JSON.stringify(context));
+  fd.append('file', wav, 'voice-config.wav');
+  const { data } = await api.post('/library/voice-config', fd);
+  return data as VoiceConfigPreview;
+}
+
+/** 确认应用已生成的预览命令（apply=true）；返回落库结果或通用建议待处理标记 */
+export async function applyVoiceConfig(commandId: string, expectedRevisions: Record<string, string>, context?: VoiceConfigContext) {
+  const { data } = await api.post('/library/voice-config', { apply: true, commandId, expectedRevisions, context });
+  return data as {
+    pendingReview?: boolean;
+    command: import('./types').VoiceEditCommand;
+    result?: Record<string, unknown>;
+  };
+}
+
+/** 语音配置命令日志（普通用户仅看自己的；管理员可看全部/筛选通用建议） */
+export async function listVoiceConfigLogs(generalOnly = false) {
+  const { data } = await api.get('/library/voice-config/logs', { params: generalOnly ? { general: '1' } : {} });
+  return data as { items: import('./types').VoiceEditCommand[] };
+}
+
+/** 管理员处理通用建议 */
+export async function reviewVoiceConfigCommand(id: string, payload: { status?: 'pending_review' | 'in_review' | 'resolved' | 'rejected'; reviewNote?: string }) {
+  const { data } = await api.patch(`/library/voice-config/logs/${id}`, payload);
+  return data as import('./types').VoiceEditCommand;
+}
+
+export async function listVoiceEditCommands(generalOnly = false) {
+  const { data } = await api.get('/voice-edit-commands', { params: generalOnly ? { general: 1 } : {} });
+  return data as { items: import('./types').VoiceEditCommand[] };
+}
+
+export async function markVoiceEditCommandApplied(id: string) {
+  const { data } = await api.post(`/voice-edit-commands/${id}/applied`);
+  return data as import('./types').VoiceEditCommand;
+}
+
+export async function reviewVoiceEditCommand(id: string, payload: { status?: 'pending_review' | 'in_review' | 'resolved' | 'rejected'; reviewNote?: string }) {
+  const { data } = await api.patch(`/voice-edit-commands/${id}`, payload);
+  return data as import('./types').VoiceEditCommand;
 }
 
 export async function listScenarioGuidances() {
@@ -776,7 +970,7 @@ export async function fetchManagementKnowledgeBase() {
 }
 
 /** 知识库整体保存（name + 全量条目，自动递增版本） */
-export async function saveManagementKnowledgeBase(payload: { name: string; entries: Array<Partial<KbEntry>> }) {
+export async function saveManagementKnowledgeBase(payload: { name: string; entries: Array<Partial<KbEntry>>; expectedVersion?: number }) {
   const { data } = await api.put('/management/knowledge-base', payload);
   return data as { success: boolean; version: number };
 }
@@ -939,6 +1133,78 @@ export function voiceWsUrl(sessionId: string, kind: 'voice' | 'voice-call' | 'as
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const token = encodeURIComponent(getToken() ?? '');
   return `${proto}//${window.location.host}/api/v1/sessions/${sessionId}/${kind}?token=${token}`;
+}
+
+/** 语音自动配置的流式识别通道地址（浏览器 WS 无法带 header，token 经 query 传入） */
+export function voiceConfigAsrStreamUrl(): string {
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const token = encodeURIComponent(getToken() ?? '');
+  return `${proto}//${window.location.host}/api/v1/library/voice-config/asr-stream?token=${token}`;
+}
+
+// ====== 用户反馈 API ======
+
+/** 提交文字反馈 */
+export async function submitFeedbackText(payload: { type: FeedbackType; content: string; source?: string }) {
+  const { data } = await api.post('/feedback', payload);
+  return data as Feedback;
+}
+
+/** 提交语音反馈：wav 音频上传，后端 ASR 转写为反馈内容 */
+export async function submitFeedbackAudio(payload: { type: FeedbackType; source?: string; wav: Blob }) {
+  const fd = new FormData();
+  fd.append('type', payload.type);
+  if (payload.source?.trim()) fd.append('source', payload.source.trim());
+  fd.append('file', payload.wav, 'feedback.wav');
+  const { data } = await api.post('/feedback', fd, { timeout: 3 * 60 * 1000 });
+  return data as Feedback;
+}
+
+/** 我的反馈列表（当前登录用户） */
+export async function fetchMyFeedback() {
+  const { data } = await api.get('/my/feedback');
+  return data as { feedbacks: Feedback[] };
+}
+
+export interface FeedbackAdminQuery {
+  status?: FeedbackStatus | '';
+  type?: FeedbackType | '';
+  userId?: string;
+  limit?: number;
+  offset?: number;
+}
+
+/** 全部反馈列表（admin/platform） */
+export async function fetchAllFeedback(query: FeedbackAdminQuery = {}) {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(query)) {
+    if (v !== undefined && v !== '') params.set(k, String(v));
+  }
+  const { data } = await api.get(`/feedback?${params.toString()}`);
+  return data as { feedbacks: Feedback[]; total: number; offset: number; limit: number };
+}
+
+/** 反馈详情（admin/platform） */
+export async function fetchFeedbackDetail(id: string) {
+  const { data } = await api.get(`/feedback/${id}`);
+  return data as Feedback;
+}
+
+/** 回复反馈（admin/platform） */
+export async function replyFeedback(id: string, content: string) {
+  const { data } = await api.post(`/feedback/${id}/reply`, { content });
+  return data as FeedbackReply;
+}
+
+/** 更新反馈状态（admin/platform） */
+export async function updateFeedbackStatus(id: string, status: FeedbackStatus) {
+  const { data } = await api.patch(`/feedback/${id}/status`, { status });
+  return data as Feedback;
+}
+
+/** 删除反馈（admin/platform） */
+export async function deleteFeedback(id: string) {
+  await api.delete(`/feedback/${id}`);
 }
 
 export default api;

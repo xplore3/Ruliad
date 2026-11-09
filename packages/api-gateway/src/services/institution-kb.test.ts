@@ -31,6 +31,7 @@ it('剧本场景也注入培训机构定制资料库', async () => {
     durationMinutes: 20,
     difficulty: 1,
     category: '地推',
+    drillScriptId: 'drill-ground',
   };
   const runtime = await loadRuntime({ store } as unknown as RouteContext, scenario);
   expect(runtime?.bundle.systemPrompt).toContain('培训机构定制资料库');

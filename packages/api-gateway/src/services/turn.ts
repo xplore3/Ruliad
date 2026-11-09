@@ -1,5 +1,5 @@
 import { EventTypes, type PersonaConfig, type QuizQuestion, type QuizQuestionPublic, type ReceptionQuestion, type Scenario, type ScenarioGuidance, type Session, type TranscriptTurn, type VoiceFeatures } from '@grasp-mvp/core';
-import { analyzeExpressionIntent, bandFor, checkConsistency, classifyAddressTarget, compilePersona, EmotionTracker, PersonaActor, replyAsChild, ruleCheck } from '@grasp-mvp/role-engine';
+import { analyzeExpressionIntent, bandFor, checkConsistency, classifyAddressTarget, compilePersona, EmotionTracker, GROUND_PUSH_CLOSE_CONTROL, PersonaActor, replyAsChild, ruleCheck } from '@grasp-mvp/role-engine';
 import type { RouteContext } from '../ctx.js';
 import { mkEvent } from '../events.js';
 import { drillScriptPrompt, institutionKnowledgePrompt, archetypePrompt, resolveDrillScript, initialCustomerArchetype, FIRST_SCENE_MAX_MS, GIVE_UP_PATTERN, SCENE_TRANSITION_NARRATION } from './drill.js';
@@ -73,14 +73,20 @@ export async function loadRuntime(
   receptionQuestions?: ReceptionQuestion[],
   receptionTrialDisposition?: Session['receptionTrialDisposition']
 ) {
-  const personaConfig =
-    (await ctx.store.getPersonaConfig(scenario.personaConfigId)) ?? fallbackPersona(scenario);
-  const elements = await ctx.store.listElements({});
+  const configuredPersona = await ctx.store.getPersonaConfig(scenario.personaConfigId);
+  const personaConfig = configuredPersona?.tenantId === scenario.tenantId
+    ? configuredPersona
+    : fallbackPersona(scenario);
+  const elements = (await ctx.store.listElements({}))
+    .filter((element) => element.tenantId === undefined || element.tenantId === scenario.tenantId);
 
-  // 场景/陪练员知识库与机构定制库分别加载，避免绑定其他知识库后丢失机构资料
+  // 所有运行时引用再次校验租户，兼容历史脏数据但不允许跨租户注入。
   const kbId = scenario.productKBId ?? personaConfig.productKBId;
+  const referencedKB = kbId ? await ctx.store.getProductKBById(kbId) : undefined;
   const productKB = kbId
-    ? await ctx.store.getProductKBById(kbId)
+    ? referencedKB?.tenantId === scenario.tenantId
+      ? referencedKB
+      : await ctx.store.getProductKB(scenario.tenantId)
     : await ctx.store.getProductKB(personaConfig.tenantId);
   const institutionKB = kbId
     ? await ctx.store.getProductKB(scenario.tenantId)
@@ -129,11 +135,14 @@ export async function loadRuntime(
   if (institutionKB && (drillScript || productKB?.id !== institutionKB.id)) {
     bundle.systemPrompt = `${bundle.systemPrompt}\n\n${institutionKnowledgePrompt(institutionKB)}`;
   }
-  if (scenario.category === '咨询接待') {
+  if (scenario.flowType ? scenario.flowType === 'ground_push' : scenario.category === '地推') {
+    bundle.systemPrompt = `${bundle.systemPrompt}\n\n${GROUND_PUSH_CLOSE_CONTROL}`;
+  }
+  if ((scenario.flowType ? scenario.flowType === 'reception' : scenario.category === '咨询接待')) {
     bundle.systemPrompt = `${bundle.systemPrompt}\n\n${receptionQuestionPrompt(receptionQuestions, receptionTrialDisposition)}`;
   }
   // 注入本场客户类型：地推按双场制执行；咨询接待固定为有兴趣客户（包括旧会话）
-  const effectiveArchetype = scenario.category === '咨询接待' ? 'interested' : archetype;
+  const effectiveArchetype = (scenario.flowType ? scenario.flowType === 'reception' : scenario.category === '咨询接待') ? 'interested' : archetype;
   if (effectiveArchetype) {
     bundle.systemPrompt = `${bundle.systemPrompt}\n\n${archetypePrompt(effectiveArchetype, scenario.category)}`;
   }
@@ -231,7 +240,7 @@ export async function preparePersonaReply(
   ttsWarmup?: (text: string) => Promise<{ audio: Buffer; format: string } | null>
 ): Promise<PrecomputedPersonaReply | null> {
   try {
-    if (!text.trim() || session.childMode || scenario.category === '咨询接待') return null;
+    if (!text.trim() || session.childMode || (scenario.flowType ? scenario.flowType === 'reception' : scenario.category === '咨询接待')) return null;
     const runtime = await loadRuntime(ctx, scenario, session.difficulty, session.customerArchetype, session.receptionQuestions, session.receptionTrialDisposition);
     const lastTrace = session.emotionTrace[session.emotionTrace.length - 1];
     const tracker = new EmotionTracker(runtime.bundle.dynamics, runtime.bundle.behaviorBands, lastTrace?.arousal);
@@ -327,9 +336,9 @@ export async function runTurn(
     const target = await classifyAddressTarget(gateway.forTask('actor'), session.transcript, text);
     if (target === 'child') {
       traineeTurn.addressedToChild = true;
-      const storyOffer = scenario.category === '地推' && isStoryOfferQuestion(text);
-      const closedQuestion = scenario.category === '地推' && !storyOffer && isChildClosedQuestion(text);
-      const strategy = scenario.category === '地推' && !storyOffer
+      const storyOffer = (scenario.flowType ? scenario.flowType === 'ground_push' : scenario.category === '地推') && isStoryOfferQuestion(text);
+      const closedQuestion = (scenario.flowType ? scenario.flowType === 'ground_push' : scenario.category === '地推') && !storyOffer && isChildClosedQuestion(text);
+      const strategy = (scenario.flowType ? scenario.flowType === 'ground_push' : scenario.category === '地推') && !storyOffer
         ? await assessChildStrategy(gateway.forTask('actor'), [...session.transcript, traineeTurn])
         : { effective: null, reason: '' };
       let childReply: { text: string; resistant: boolean };
@@ -423,13 +432,13 @@ export async function runTurn(
     return null;
   }
   const { bundle, drillScript } = runtime;
-  if (scenario.category === '地推' && session.childInterestResolved) {
+  if ((scenario.flowType ? scenario.flowType === 'ground_push' : scenario.category === '地推') && session.childInterestResolved) {
     bundle.systemPrompt = `${bundle.systemPrompt}\n\n【六连问末题替换（必须执行）】\n销售已提前说服孩子，孩子已明确喜欢或愿意参加。六连问最后一问不得再使用“孩子不喜欢/宝贝你想去吗”，改从以下问题中选择一道本场尚未问过的问题：孩子学的太多了、我太忙了、一周上几次课、我们家有点远、学费怎么收、你们根据年龄分班吗、这个需要孩子练习很长时间吗、你们有内部教材和课程体系吗。检查完整对话，任何问题都不得重复。`;
   }
 
   // 双场制只适用于地推：咨询接待永不进入固定无兴趣小场
   const dualScene =
-    scenario.category === '地推' &&
+    (scenario.flowType ? scenario.flowType === 'ground_push' : scenario.category === '地推') &&
     session.customerArchetype === 'uninterested' &&
     !!drillScript &&
     initialCustomerArchetype(drillScript.content, scenario.category) === 'uninterested';
@@ -456,10 +465,10 @@ export async function runTurn(
   let completionReason = session.completionReason;
   let warmupAudio: Buffer | undefined;
   let warmupFormat: string | undefined;
-  const receptionFollowup = !isSystemGreeting && scenario.category === '咨询接待'
+  const receptionFollowup = !isSystemGreeting && (scenario.flowType ? scenario.flowType === 'reception' : scenario.category === '咨询接待')
     ? receptionTrialFollowup({ ...session, transcript: transcriptSoFar })
     : undefined;
-  const groundPushProgress = !receptionFollowup && !isSystemGreeting && !dualScene && scenario.category === '地推'
+  const groundPushProgress = !receptionFollowup && !isSystemGreeting && !dualScene && (scenario.flowType ? scenario.flowType === 'ground_push' : scenario.category === '地推')
     ? await assessGroundPushProgress(gateway.forTask('actor'), transcriptSoFar, groundPushLastChance)
     : undefined;
   if (receptionFollowup) {

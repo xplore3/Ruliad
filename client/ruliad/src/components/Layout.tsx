@@ -30,7 +30,8 @@ const TAB_ITEMS = [
 /** 一级页面（主 Tab）路径；带顶部导航栏的其余均为二级页面，展示返回按钮 */
 const TAB_PATHS = ['/home', '/build', '/dashboard', '/profile'];
 
-const FULLSCREEN_PATHS = ['/practice', '/call', '/review', '/login'];
+/** 全屏沉浸页面路径（startsWith 匹配，须带尾部斜杠以免误伤 /practice-records 等同前缀路由） */
+const FULLSCREEN_PATHS = ['/practice/', '/call', '/review/', '/login'];
 
 export default function Layout() {
   const location = useLocation();

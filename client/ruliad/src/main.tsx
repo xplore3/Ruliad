@@ -31,6 +31,8 @@ import ManagementTeamAbility from './pages/management/TeamAbility';
 import ManagementKnowledgeBase from './pages/management/KnowledgeBase';
 import ManagementMemberProfile from './pages/management/MemberProfile';
 import ManagementSessionDetail from './pages/management/SessionDetail';
+import Feedback from './pages/Feedback';
+import FeedbackManagement from './pages/management/FeedbackManagement';
 import RequireManager from './components/RequireManager';
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -79,6 +81,16 @@ createRoot(document.getElementById('root')!).render(
             element={
               <RequireRole roles={['admin']}>
                 <OrganizationManagement />
+              </RequireRole>
+            }
+          />
+          <Route path="/feedback" element={<Feedback />} />
+          {/* 反馈管理：仅 admin/platform 可进入（入口在【我的】页） */}
+          <Route
+            path="/admin/feedback"
+            element={
+              <RequireRole roles={['admin', 'platform']}>
+                <FeedbackManagement />
               </RequireRole>
             }
           />

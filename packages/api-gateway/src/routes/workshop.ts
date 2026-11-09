@@ -244,9 +244,9 @@ export async function workshopRoutes(app: FastifyInstance, ctx: RouteContext): P
     async (request, reply) => {
       const scenarioId = request.body?.scenarioId ?? 'scenario-first-visit';
       const scenario = await store.getScenario(scenarioId);
-      if (!scenario) return reply.code(404).send({ error: '场景不存在' });
+      if (!scenario || scenario.tenantId !== request.tenantId) return reply.code(404).send({ error: '场景不存在' });
       const defs = await store.listScoreItemDefs(scenario.tenantId);
-      const cases = await store.listGoldenCases();
+      const cases = await store.listGoldenCases(request.tenantId);
 
       const details: RegressionRun['details'] = [];
       for (const c of cases) {

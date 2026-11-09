@@ -35,6 +35,8 @@ import { dataAssetsRoutes } from './routes/data-assets.js';
 import { recordingsRoutes, recordingAudioRoutes } from './routes/recordings.js';
 import { workshopRoutes } from './routes/workshop.js';
 import { libraryRoutes } from './routes/library.js';
+import { resourceAiRoutes } from './routes/resource-ai.js';
+import { voiceConfigRoutes } from './routes/voice-config.js';
 import { pathsRoutes } from './routes/paths.js';
 import { eventsRoutes } from './routes/events.js';
 import { sandboxRoutes } from './routes/sandbox.js';
@@ -42,6 +44,7 @@ import { abilityDetailRoutes } from './routes/ability-detail.js';
 import { institutionOnboardingRoutes } from './routes/institution-onboarding.js';
 import { organizationsRoutes } from './routes/organizations.js';
 import { managementRoutes } from './routes/management.js';
+import { feedbackRoutes } from './routes/feedback.js';
 
 const port = Number(process.env.API_PORT ?? '3060');
 const host = process.env.API_HOST ?? '0.0.0.0';
@@ -121,6 +124,36 @@ async function main() {
   if (drillSeeded > 0) {
     app.log.info(`演练剧本库：灌入 ${drillSeeded} 条分类模板`);
   }
+  // 旧场景迁移为显式资源引用；已绑定或被清空的配置不覆盖。
+  const allScenarios = await store.listScenarios(DEFAULT_TENANT);
+  const drillScripts = await store.listDrillScripts(DEFAULT_TENANT);
+  const scoreItems = await store.listScoreItemDefs(DEFAULT_TENANT);
+  for (const scenario of allScenarios) {
+    const next = { ...scenario };
+    let changed = false;
+    if (!next.drillScriptId && next.category) {
+      const script = drillScripts.find((item) => item.category === next.category);
+      if (script) {
+        next.drillScriptId = script.id;
+        changed = true;
+      }
+    }
+    if (next.scoreItemIds === undefined) {
+      next.scoreItemIds = scoreItems
+        .filter((item) => next.category ? !item.category || item.category === next.category : next.skillPointIds.includes(item.skillPointId))
+        .map((item) => item.id);
+      changed = true;
+    }
+    if (next.version === undefined) {
+      next.version = 1;
+      changed = true;
+    }
+    if (next.status === undefined) {
+      next.status = 'published';
+      changed = true;
+    }
+    if (changed) await store.saveScenario(next);
+  }
   // 演示考核历史：无任何认证记录时灌入（看板开箱有数据；确定性合成，不依赖 LLM）。
   // 仅 SEED_DEMO_HISTORY=1 或非 production 且未显式设为 0 时执行（生产默认不灌合成数据）
   if (shouldSeedDemoHistory()) {
@@ -146,7 +179,7 @@ async function main() {
   app.addHook('onRequest', async (request, reply) => {
     const path = request.url.split('?')[0];
     if (PUBLIC_PATHS.has(path) || path === '/docs' || path.startsWith('/docs/')) return;
-    const isVoiceWsPath = /^\/api\/v1\/sessions\/[^/]+\/(voice(-call)?|asr-stream)$/.test(path);
+    const isVoiceWsPath = /^(\/api\/v1\/sessions\/[^/]+\/(voice(-call)?|asr-stream)|\/api\/v1\/library\/voice-config\/asr-stream)$/.test(path);
     // 语音对练 WS 升级请求：浏览器 WebSocket 无法带 Authorization header，
     // token 经 query 传入，在 voice 路由内用同一套 verifyToken 校验
     if (request.headers.upgrade === 'websocket' && isVoiceWsPath) {
@@ -299,6 +332,8 @@ async function main() {
     { prefix: '/api/v1' }
   );
   await app.register((a) => recordingAudioRoutes(a, ctx), { prefix: '/api/v1' });
+// 用户反馈：提交/我的反馈对所有登录用户开放；列表/详情/回复/状态/删除在路由内校验 admin/platform
+await app.register((a) => feedbackRoutes(a, ctx), { prefix: '/api/v1' });
   await app.register(
     (a) => {
       // 资源库（考题/评分标准/评分回归案例）定义本身不敏感：GET 对全员开放（学员端场景详情要展示评估维度），
@@ -313,7 +348,13 @@ async function main() {
     },
     { prefix: '/api/v1' }
   );
-  await app.register((a) => abilityDetailRoutes(a, ctx), { prefix: '/api/v1' });
+await app.register(
+(a) => resourceAiRoutes(a, ctx),
+{ prefix: '/api/v1' }
+);
+// 语音自动场景创建和配置：LLM 理解 → 服务端定位对象 → 权限策略 → 预览 → 确认落库
+await app.register((a) => voiceConfigRoutes(a, ctx), { prefix: '/api/v1' });
+await app.register((a) => abilityDetailRoutes(a, ctx), { prefix: '/api/v1' });
 
   try {
     await app.listen({ port, host });

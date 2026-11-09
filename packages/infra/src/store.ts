@@ -11,6 +11,8 @@ import type {
   Element,
   ExamWindow,
   ExtractionProject,
+  Feedback,
+  FeedbackReply,
   GoldenCase,
   LearningPath,
   MethodologyConfig,
@@ -33,6 +35,7 @@ import type {
   User,
   UserRole,
   UserSkillState,
+  VoiceEditCommand,
 } from '@grasp-mvp/core';
 
 export interface SessionFilter {
@@ -61,6 +64,13 @@ export interface RecordingFilter {
   sessionId?: string;
   scenarioId?: string;
   mode?: SessionMode;
+}
+
+export interface FeedbackFilter {
+  tenantId?: string;
+  userId?: string;
+  status?: string;
+  type?: string;
 }
 
 /** 种子数据（scripts/seed 使用） */
@@ -107,6 +117,8 @@ export interface Store {
   // ---- 要素 ----
   getElement(id: string): Promise<Element | undefined>;
   listElements(filter: { layer?: string; tenantId?: string; type?: string }): Promise<Element[]>;
+  saveElement(element: Element): Promise<void>;
+  deleteElement(id: string): Promise<void>;
   saveCalibrationEvent(event: CalibrationEvent): Promise<void>;
   listCalibrationEvents(elementId?: string): Promise<CalibrationEvent[]>;
 
@@ -114,8 +126,11 @@ export interface Store {
   getPersonaConfig(id: string): Promise<PersonaConfig | undefined>;
   listPersonaConfigs(tenantId: string): Promise<PersonaConfig[]>;
   savePersonaConfig(config: PersonaConfig): Promise<void>;
+  deletePersonaConfig(id: string): Promise<void>;
   getSkillPoint(id: string): Promise<SkillPoint | undefined>;
   listSkillPoints(tenantId: string): Promise<SkillPoint[]>;
+  saveSkillPoint(skillPoint: SkillPoint): Promise<void>;
+  deleteSkillPoint(id: string): Promise<void>;
   getScenario(id: string): Promise<Scenario | undefined>;
   listScenarios(tenantId: string): Promise<Scenario[]>;
   saveScenario(scenario: Scenario): Promise<void>;
@@ -185,6 +200,14 @@ export interface Store {
   updateAppeal(id: string, patch: Partial<Appeal>): Promise<void>;
   listAppeals(filter: AppealFilter): Promise<Appeal[]>;
 
+  // ---- 用户反馈 ----
+  createFeedback(feedback: Feedback): Promise<void>;
+  getFeedback(id: string): Promise<Feedback | undefined>;
+  updateFeedback(id: string, patch: Partial<Feedback>): Promise<void>;
+  deleteFeedback(id: string): Promise<void>;
+  listFeedback(filter: FeedbackFilter): Promise<Feedback[]>;
+  addFeedbackReply(reply: FeedbackReply): Promise<void>;
+
   // ---- 考核认证 ----
   getExamWindow(id: string): Promise<ExamWindow | undefined>;
   listExamWindows(tenantId: string): Promise<ExamWindow[]>;
@@ -204,7 +227,7 @@ export interface Store {
   listExtractionProjects(tenantId: string): Promise<ExtractionProject[]>;
   upsertExtractionProject(project: ExtractionProject): Promise<void>;
   listDataConsents(tenantId: string): Promise<DataConsent[]>;
-  listGoldenCases(): Promise<GoldenCase[]>;
+  listGoldenCases(tenantId: string): Promise<GoldenCase[]>;
   saveGoldenCase(goldenCase: GoldenCase): Promise<void>;
   deleteGoldenCase(id: string): Promise<void>;
   saveRegressionRun(run: RegressionRun): Promise<void>;
@@ -219,6 +242,11 @@ export interface Store {
   deleteUser(id: string): Promise<void>;
   /** 删除用户全部关联数据：会话/评分报告/申诉/认证记录/技能状态/场景任务/事件 */
   deleteUserData(userId: string): Promise<void>;
+
+  // ---- 语音编辑命令与通用建议 ----
+  saveVoiceEditCommand(command: VoiceEditCommand): Promise<void>;
+  getVoiceEditCommand(id: string): Promise<VoiceEditCommand | undefined>;
+  listVoiceEditCommands(filter: { tenantId: string; userId?: string; general?: boolean }): Promise<VoiceEditCommand[]>;
 
   // ---- 事件流 ----
   appendEvent(event: DomainEvent): Promise<void>;

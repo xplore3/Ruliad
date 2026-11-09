@@ -298,8 +298,9 @@ export async function performDemoScript(
 }
 
 /** 加载新手指引流程配置（无配置返回 undefined，调用方走兜底逻辑） */
-export async function getGuidance(store: Store, scenarioId: string): Promise<ScenarioGuidance | undefined> {
-  return store.getScenarioGuidance(scenarioId);
+export async function getGuidance(store: Store, scenarioId: string, tenantId?: string): Promise<ScenarioGuidance | undefined> {
+  const guidance = await store.getScenarioGuidance(scenarioId);
+  return guidance && (!tenantId || guidance.tenantId === tenantId) ? guidance : undefined;
 }
 
 const CN_NUMERALS = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];

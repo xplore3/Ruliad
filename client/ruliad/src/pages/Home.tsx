@@ -45,7 +45,7 @@ function IconDeal({ className }: { className?: string }) {
 
 /** 实战训练模块卡片配置（后续增删卡片改这里即可） */
 /* 辅助色统一：图标背景用 slate-100 slate-500 色系，保持商务克制感 */
-const TRAINING_MODULES = [
+const TRAINING_MODULES: readonly TrainingModule[] = [
   {
     key: 'ground-push',
     label: '地推引流课',
@@ -65,6 +65,7 @@ const TRAINING_MODULES = [
     desc: '外呼开场与异议应对，练在 30 秒内抓住客户注意力',
     entry: 'call',
     categoryLabel: '电话销售',
+    locked: true,
   },
   {
     key: 'inquiry',
@@ -85,11 +86,27 @@ const TRAINING_MODULES = [
     desc: '价格谈判与签约推进，练临门一脚的成交能力',
     entry: 'practice',
     categoryLabel: '现场成交',
+    locked: true,
   },
-] as const;
+];
 
 type IconComponent = ({ className }: { className?: string }) => React.JSX.Element;
-type TrainingModule = (typeof TRAINING_MODULES)[number] & { icon: IconComponent };
+
+/** 单个实战训练模块卡片 */
+interface TrainingModule {
+  key: string;
+  label: string;
+  icon: IconComponent;
+  color: string;
+  image: string;
+  desc: string;
+  /** 进入方式：practice=练习页 / call=实时通话页 */
+  entry: 'practice' | 'call';
+  /** 卡片类别标签（用于从场景库匹配可进入的场景） */
+  categoryLabel: string;
+  /** 暂未开放：点击仅弹窗提示，不进入对练 */
+  locked?: boolean;
+}
 
 const CATEGORIES = [
   { label: '全部', value: '', color: '' },
@@ -133,6 +150,8 @@ export default function Home() {
   const [practicedOnly, setPracticedOnly] = useState(false);
   const [startingId, setStartingId] = useState<string | null>(null);
   const [startError, setStartError] = useState('');
+  /** 点击未开放的实战训练模块时，弹出提示（暂时不开放，如需使用请联系公众号） */
+  const [lockedMod, setLockedMod] = useState<TrainingModule | null>(null);
 
   /** 实战训练卡片：从场景类型为「实战训练」的场景中匹配（优先按卡片类别，回退到该类型第一个） */
   const drillScenarios = useMemo(() => scenarios.filter((s) => s.sceneType === 'drill'), [scenarios]);
@@ -142,6 +161,10 @@ export default function Home() {
 
   const startTraining = async (mod: TrainingModule) => {
     if (startingId) return;
+    if (mod.locked) {
+      setLockedMod(mod);
+      return;
+    }
     const hit = drillFor(mod);
     if (!hit) return;
     setStartingId(mod.key);
@@ -265,18 +288,27 @@ export default function Home() {
               return (
                 <div
                   key={mod.key}
-                  className={`card train-card${available && !startingId ? '' : ' disabled'}`}
+                  className={`card train-card${mod.locked || (available && !startingId) ? '' : ' disabled'}`}
                   onClick={() => startTraining(mod)}
                 >
                   <div className="train-left">
                     <div className="train-icon">
                       {mod.icon && <mod.icon className="h-6 w-6" />}
                     </div>
-                    <h3>{mod.label}</h3>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <h3>{mod.label}</h3>
+                      {mod.locked && <span className="chip chip-gray">未开放</span>}
+                    </div>
                     <p className="desc">{available ? mod.desc : '该类别暂无可用场景'}</p>
                     <div className="train-meta">
-                      <span className="train-go">
-                        {starting ? '创建会话中…' : mod.entry === 'call' ? '发起通话 →' : '开始练习 →'}
+                      <span className="train-go" style={mod.locked ? { color: '#6B7280' } : undefined}>
+                        {starting
+                          ? '创建会话中…'
+                          : mod.locked
+                            ? '暂未开放，敬请期待'
+                            : mod.entry === 'call'
+                              ? '发起通话 →'
+                              : '开始练习 →'}
                       </span>
                     </div>
                   </div>
@@ -396,6 +428,53 @@ export default function Home() {
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {/* 未开放实战训练模块提示弹窗 */}
+          {lockedMod && (
+            <div className="lib-overlay" onClick={() => setLockedMod(null)}>
+              <div
+                className="card"
+                onClick={(e) => e.stopPropagation()}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="locked-module-title"
+                style={{
+                  width: 'min(420px, calc(100vw - 32px))',
+                  padding: '26px 24px 20px',
+                  textAlign: 'center',
+                  border: '1px solid #F3F4F6',
+                }}
+              >
+                <div
+                  style={{
+                    width: 54,
+                    height: 54,
+                    borderRadius: '50%',
+                    background: '#FFF0EE',
+                    color: '#FF6B5B',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    margin: '0 auto 14px',
+                  }}
+                >
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="4.5" y="10.5" width="15" height="9.5" rx="2.5" />
+                    <path d="M8 10.5V7.5a4 4 0 018 0v3" />
+                  </svg>
+                </div>
+                <h3 id="locked-module-title" style={{ fontSize: 17, fontWeight: 700, marginBottom: 8 }}>
+                  「{lockedMod.label}」暂时不开放
+                </h3>
+                <p style={{ fontSize: 13.5, lineHeight: 1.7, color: '#4B5563', margin: '0 auto 18px', maxWidth: 300 }}>
+                  该场景只对部分用户开放，如需使用，请联系公众号。
+                </p>
+                <button className="btn btn-primary btn-sm" onClick={() => setLockedMod(null)}>
+                  我知道了
+                </button>
+              </div>
             </div>
           )}
         </>

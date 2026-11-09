@@ -14,7 +14,17 @@ export function scenarioText(s: Scenario): string {
   return [s.name, s.personaName ?? '', s.description ?? '', ...(s.coverageTopics ?? [])].join(' ');
 }
 
+const SCORE_CATEGORY_LABELS: Record<NonNullable<Scenario['category']>, string> = {
+  电销: '电话销售',
+  咨询接待: '咨询接待',
+  现场成交: '现场成交',
+  地推: '地推引流课',
+};
+
 export function categoryOf(s: Scenario): CategoryRule | null {
+  const explicitLabel = s.category ? SCORE_CATEGORY_LABELS[s.category] : undefined;
+  const explicit = CATEGORY_RULES.find((r) => r.label === explicitLabel);
+  if (explicit) return explicit;
   const text = scenarioText(s);
   return CATEGORY_RULES.find((r) => r.keywords.some((k) => text.includes(k))) ?? null;
 }
@@ -23,6 +33,5 @@ export function matchCategory(s: Scenario, value: string): boolean {
   if (!value) return true;
   const rule = CATEGORY_RULES.find((r) => r.label === value);
   if (!rule) return true;
-  const text = scenarioText(s);
-  return rule.keywords.some((k) => text.includes(k));
+  return categoryOf(s)?.label === rule.label;
 }

@@ -504,15 +504,18 @@ export async function managementRoutes(app: FastifyInstance, ctx: RouteContext):
   });
 
   app.put<{
-    Body: { name?: string; entries?: Array<Partial<ProductKBEntry>> };
+    Body: { name?: string; entries?: Array<Partial<ProductKBEntry>>; expectedVersion?: number };
   }>('/management/knowledge-base', { preHandler: requireManager }, async (request, reply) => {
-    const { name, entries } = request.body ?? {};
+    const { name, entries, expectedVersion } = request.body ?? {};
     if (!name?.trim()) return reply.code(400).send({ error: 'name 必填' });
     if (!Array.isArray(entries)) return reply.code(400).send({ error: 'entries 必须为数组' });
     const error = validateEntries(entries);
     if (error) return reply.code(400).send({ error });
 
     const existing = await store.getProductKB(request.tenantId);
+    if (expectedVersion !== undefined && expectedVersion !== (existing?.version ?? 0)) {
+      return reply.code(409).send({ error: '知识库已被其他用户修改，请刷新后重试', currentVersion: existing?.version ?? 0 });
+    }
     const version = (existing?.version ?? 0) + 1;
     const normalized: ProductKBEntry[] = entries.map((e) => ({
       id: e.id ?? randomUUID(),

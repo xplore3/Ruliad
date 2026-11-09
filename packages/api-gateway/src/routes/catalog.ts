@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import type { BehaviorBand, ChatMessage, PersonaConfig, Scenario, ScenarioParticipant, ScenarioScript, SceneType, TranscriptTurn } from '@grasp-mvp/core';
+import type { BehaviorBand, ChatMessage, ConversationSettings, Element, PersonaConfig, Scenario, ScenarioParticipant, ScenarioScript, SceneType, ScoreCategory, SkillPoint, TranscriptTurn } from '@grasp-mvp/core';
+import { SCORE_CATEGORIES } from '@grasp-mvp/core';
 import { bandFor, compilePersona, PersonaActor } from '@grasp-mvp/role-engine';
 import type { RouteContext } from '../ctx.js';
 import { requireRoles } from '../auth.js';
@@ -10,11 +11,41 @@ interface PersonaBody {
   background?: string;
   age?: number;
   occupation?: string;
+  industry?: string;
+  personalityTags?: string[];
+  decisionStyle?: string;
+  objections?: string[];
+  hiddenInfo?: string[];
   elementIds?: string[];
   productKBId?: string | null;
   behaviorBands?: BehaviorBand[];
   knowledgeBoundary?: { mustNotKnow?: string[]; loadedKnowledge?: string[] };
   voiceProfile?: Record<string, unknown>;
+  expectedVersion?: number;
+}
+
+interface ScenarioBody {
+  name?: string;
+  personaConfigId?: string;
+  skillPointIds?: string[];
+  passScore?: number;
+  durationMinutes?: number;
+  difficulty?: number;
+  coverageTopics?: string[];
+  description?: string | null;
+  productKBId?: string | null;
+  drillScriptId?: string | null;
+  scoreItemIds?: string[];
+  methodology?: string;
+  source?: string;
+  sceneType?: SceneType;
+  category?: ScoreCategory;
+  flowType?: 'generic' | 'ground_push' | 'reception';
+  script?: ScenarioScript | null;
+  participants?: ScenarioParticipant[] | null;
+  conversation?: ConversationSettings | null;
+  status?: 'draft' | 'published';
+  expectedVersion?: number;
 }
 
 function isStringArray(v: unknown): v is string[] {
@@ -65,8 +96,13 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
   }
 
   // 场景列表（join 角色名/职业与技能点名；methodology/source/practiceCount 随记录透传）
-  app.get('/scenarios', async (request) => {
-    const scenarios = await store.listScenarios(request.tenantId);
+  app.get<{ Querystring: { manage?: string } }>('/scenarios', async (request) => {
+    const all = await store.listScenarios(request.tenantId);
+    const scenarios = request.userRole === 'admin' || request.userRole === 'platform'
+      ? all
+      : request.query.manage === '1'
+        ? all.filter((s) => s.createdBy === request.userId)
+        : all.filter((s) => (s.status ?? 'published') === 'published');
     const items = await Promise.all(
       scenarios.map(async (s) => {
         const persona = await store.getPersonaConfig(s.personaConfigId);
@@ -83,178 +119,146 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     return { scenarios: items };
   });
 
-  // 创建场景
-  app.post<{
-    Body: {
-      name: string;
-      personaConfigId: string;
-      skillPointIds: string[];
-      passScore: number;
-      durationMinutes: number;
-      difficulty?: number;
-      coverageTopics?: string[];
-      description?: string;
-      productKBId?: string;
-      methodology?: string;
-      source?: string;
-      sceneType?: SceneType;
-      script?: ScenarioScript;
-      participants?: ScenarioParticipant[];
-    };
-  }>('/scenarios', { preHandler: requireRoles('admin') }, async (request, reply) => {
-    const { name, personaConfigId, skillPointIds, passScore, durationMinutes, difficulty, coverageTopics, description, productKBId, methodology, source, sceneType, script, participants } =
-      request.body ?? {};
-    if (!name || !personaConfigId || !Array.isArray(skillPointIds) || skillPointIds.length === 0) {
-      return reply.code(400).send({ error: 'name / personaConfigId / skillPointIds 必填' });
+  async function validateScenario(scenario: Scenario, tenantId: string): Promise<string | null> {
+    if (!scenario.name?.trim() || !scenario.personaConfigId) return 'name / personaConfigId 必填';
+    if (!Array.isArray(scenario.skillPointIds) || scenario.skillPointIds.length === 0) return 'skillPointIds 必须为非空数组';
+    if (scenario.sceneType !== undefined && scenario.sceneType !== 'drill' && scenario.sceneType !== 'practical') {
+      return "sceneType 仅支持 'drill' | 'practical'";
     }
-    if (sceneType !== undefined && sceneType !== 'drill' && sceneType !== 'practical') {
-      return reply.code(400).send({ error: "sceneType 仅支持 'drill' | 'practical'" });
+    if (scenario.category !== undefined && !SCORE_CATEGORIES.includes(scenario.category)) return 'category 无效';
+    if (scenario.flowType !== undefined && !['generic', 'ground_push', 'reception'].includes(scenario.flowType)) return 'flowType 无效';
+    if (scenario.status !== undefined && scenario.status !== 'draft' && scenario.status !== 'published') return 'status 无效';
+    if (!Number.isFinite(scenario.successCriteria?.passScore) || scenario.successCriteria.passScore < 0 || scenario.successCriteria.passScore > 100) {
+      return 'passScore 必须为 0-100 的数字';
     }
-    if (typeof passScore !== 'number' || typeof durationMinutes !== 'number') {
-      return reply.code(400).send({ error: 'passScore / durationMinutes 必须为数字' });
+    if (!Number.isFinite(scenario.durationMinutes) || scenario.durationMinutes < 1 || scenario.durationMinutes > 60) {
+      return 'durationMinutes 必须为 1-60 的数字';
     }
-    if (difficulty !== undefined && typeof difficulty !== 'number') {
-      return reply.code(400).send({ error: 'difficulty 必须为数字' });
-    }
-    if (coverageTopics !== undefined && !isStringArray(coverageTopics)) {
-      return reply.code(400).send({ error: 'coverageTopics 必须为字符串数组' });
-    }
-    const persona = await store.getPersonaConfig(personaConfigId);
-    if (!persona) return reply.code(400).send({ error: 'personaConfigId 不存在' });
-    if (persona.tenantId !== request.tenantId) {
-      return reply.code(400).send({ error: 'personaConfigId 不属于本租户' });
-    }
-    for (const spId of skillPointIds) {
-      const sp = await store.getSkillPoint(spId);
-      if (!sp) return reply.code(400).send({ error: `技能点不存在: ${spId}` });
-      if (sp.tenantId !== request.tenantId) {
-        return reply.code(400).send({ error: `技能点不属于本租户: ${spId}` });
-      }
-    }
+    if (!Number.isInteger(scenario.difficulty) || scenario.difficulty < 1 || scenario.difficulty > 3) return 'difficulty 必须为 1-3 的整数';
+    if (scenario.coverageTopics !== undefined && !isStringArray(scenario.coverageTopics)) return 'coverageTopics 必须为字符串数组';
+    if (scenario.scoreItemIds !== undefined && !isStringArray(scenario.scoreItemIds)) return 'scoreItemIds 必须为字符串数组';
+    if (scenario.status === 'published' && !scenario.category) return '已发布场景必须选择分类';
+    if (scenario.status === 'published' && !scenario.scoreItemIds?.length) return '已发布场景必须至少绑定一条评分标准';
 
+    const persona = await store.getPersonaConfig(scenario.personaConfigId);
+    if (!persona || persona.tenantId !== tenantId) return 'personaConfigId 不存在或不属于本租户';
+    for (const spId of scenario.skillPointIds) {
+      const sp = await store.getSkillPoint(spId);
+      if (!sp || sp.tenantId !== tenantId) return `技能点不存在或不属于本租户: ${spId}`;
+    }
+    if (scenario.productKBId) {
+      const kb = await store.getProductKBById(scenario.productKBId);
+      if (!kb || kb.tenantId !== tenantId) return 'productKBId 不存在或不属于本租户';
+    }
+    if (scenario.drillScriptId) {
+      const script = await store.getDrillScript(scenario.drillScriptId);
+      if (!script || script.tenantId !== tenantId) return 'drillScriptId 不存在或不属于本租户';
+      if (scenario.category && script.category !== scenario.category) return '演练剧本分类必须与场景分类一致';
+    }
+    for (const itemId of scenario.scoreItemIds ?? []) {
+      const item = (await store.listScoreItemDefs(tenantId)).find((d) => d.id === itemId);
+      if (!item) return `评分标准不存在或不属于本租户: ${itemId}`;
+      if (scenario.category && item.category && item.category !== scenario.category) return `评分标准「${item.name}」与场景分类不一致`;
+    }
+    const conversation = scenario.conversation;
+    if (conversation) {
+      if (![1, 2, 3].includes(conversation.speechRate)) return 'conversation.speechRate 仅支持 1/2/3';
+      if (!Number.isInteger(conversation.challenge) || conversation.challenge < 1 || conversation.challenge > 5) return 'conversation.challenge 必须为 1-5 的整数';
+      if (!['off', 'weak', 'strong'].includes(conversation.interruptLevel)) return 'conversation.interruptLevel 无效';
+    }
+    return null;
+  }
+
+  app.post<{ Body: ScenarioBody }>('/scenarios', async (request, reply) => {
+    const body = request.body ?? {};
     const scenario: Scenario = {
       id: randomUUID(),
       tenantId: request.tenantId,
-      name,
-      personaConfigId,
-      productKBId: productKBId || undefined,
-      skillPointIds,
-      successCriteria: { passScore },
-      durationMinutes,
-      difficulty: difficulty ?? 1,
-      coverageTopics,
-      description,
-      methodology,
-      source,
-      sceneType,
-      script,
-      participants,
+      name: body.name?.trim() ?? '',
+      personaConfigId: body.personaConfigId ?? '',
+      productKBId: body.productKBId || undefined,
+      drillScriptId: body.drillScriptId || undefined,
+      scoreItemIds: body.scoreItemIds,
+      skillPointIds: body.skillPointIds ?? [],
+      successCriteria: { passScore: body.passScore ?? Number.NaN },
+      durationMinutes: body.durationMinutes ?? Number.NaN,
+      difficulty: body.difficulty ?? 1,
+      coverageTopics: body.coverageTopics,
+      description: body.description || undefined,
+      methodology: body.methodology?.trim() || undefined,
+      source: body.source,
+      sceneType: body.sceneType ?? 'practical',
+      category: body.category,
+      flowType: body.flowType ?? 'generic',
+      script: body.script ?? undefined,
+      participants: body.participants ?? undefined,
+      conversation: body.conversation ?? undefined,
+      version: 1,
+      status: body.status ?? 'published',
+      createdBy: request.userId,
+      updatedBy: request.userId,
     };
+    const error = await validateScenario(scenario, request.tenantId);
+    if (error) return reply.code(400).send({ error });
     await store.saveScenario(scenario);
     return reply.code(201).send(scenario);
   });
 
-  // 更新场景（部分字段更新，仅传需要改的字段；admin 专属）
-  app.put<{
-    Params: { id: string };
-    Body: {
-      name?: string;
-      personaConfigId?: string;
-      skillPointIds?: string[];
-      passScore?: number;
-      durationMinutes?: number;
-      difficulty?: number;
-      coverageTopics?: string[];
-      description?: string | null;
-      productKBId?: string | null;
-      methodology?: string;
-      source?: string;
-      sceneType?: SceneType;
-      script?: ScenarioScript | null;
-      participants?: ScenarioParticipant[] | null;
-    };
-  }>('/scenarios/:id', { preHandler: requireRoles('admin') }, async (request, reply) => {
+  app.put<{ Params: { id: string }; Body: ScenarioBody }>('/scenarios/:id', async (request, reply) => {
     const existing = await store.getScenario(request.params.id);
-    if (!existing || existing.tenantId !== request.tenantId) {
-      return reply.code(404).send({ error: '场景不存在' });
-    }
+    if (!existing || existing.tenantId !== request.tenantId) return reply.code(404).send({ error: '场景不存在' });
+    const isAdmin = request.userRole === 'admin' || request.userRole === 'platform';
+    if (!isAdmin && existing.createdBy !== request.userId) return reply.code(403).send({ error: '只能修改自己创建的场景' });
     const body = request.body ?? {};
-    const scenario: Scenario = { ...existing };
-    if (body.name !== undefined) scenario.name = body.name;
-    if (body.personaConfigId !== undefined) {
-      const persona = await store.getPersonaConfig(body.personaConfigId);
-      if (!persona) return reply.code(400).send({ error: 'personaConfigId 不存在' });
-      if (persona.tenantId !== request.tenantId) {
-        return reply.code(400).send({ error: 'personaConfigId 不属于本租户' });
-      }
-      scenario.personaConfigId = body.personaConfigId;
+    const currentVersion = existing.version ?? 1;
+    if (body.expectedVersion !== currentVersion) {
+      return reply.code(409).send({ error: '场景已被其他用户修改，请刷新后重试', currentVersion });
     }
-    if (body.skillPointIds !== undefined) {
-      if (!Array.isArray(body.skillPointIds) || body.skillPointIds.length === 0) {
-        return reply.code(400).send({ error: 'skillPointIds 必须为非空数组' });
-      }
-      for (const spId of body.skillPointIds) {
-        const sp = await store.getSkillPoint(spId);
-        if (!sp) return reply.code(400).send({ error: `技能点不存在: ${spId}` });
-        if (sp.tenantId !== request.tenantId) {
-          return reply.code(400).send({ error: `技能点不属于本租户: ${spId}` });
-        }
-      }
-      scenario.skillPointIds = body.skillPointIds;
-    }
-    if (body.passScore !== undefined) {
-      if (typeof body.passScore !== 'number') {
-        return reply.code(400).send({ error: 'passScore 必须为数字' });
-      }
-      scenario.successCriteria = { ...existing.successCriteria, passScore: body.passScore };
-    }
-    if (body.durationMinutes !== undefined) {
-      if (typeof body.durationMinutes !== 'number') {
-        return reply.code(400).send({ error: 'durationMinutes 必须为数字' });
-      }
-      scenario.durationMinutes = body.durationMinutes;
-    }
-    if (body.difficulty !== undefined) {
-      if (typeof body.difficulty !== 'number') {
-        return reply.code(400).send({ error: 'difficulty 必须为数字' });
-      }
-      scenario.difficulty = body.difficulty;
-    }
-    if (body.coverageTopics !== undefined) {
-      if (!isStringArray(body.coverageTopics)) {
-        return reply.code(400).send({ error: 'coverageTopics 必须为字符串数组' });
-      }
-      scenario.coverageTopics = body.coverageTopics;
-    }
-    if (body.description !== undefined) scenario.description = body.description ?? undefined;
-    if (body.productKBId !== undefined) scenario.productKBId = body.productKBId || undefined;
-    if (body.methodology !== undefined) scenario.methodology = body.methodology;
-    if (body.source !== undefined) scenario.source = body.source;
-    if (body.sceneType !== undefined) {
-      if (body.sceneType !== 'drill' && body.sceneType !== 'practical') {
-        return reply.code(400).send({ error: "sceneType 仅支持 'drill' | 'practical'" });
-      }
-      scenario.sceneType = body.sceneType;
-    }
-    if (body.script !== undefined) scenario.script = body.script ?? undefined;
-    if (body.participants !== undefined) scenario.participants = body.participants ?? undefined;
+    const scenario: Scenario = {
+      ...existing,
+      name: body.name !== undefined ? body.name.trim() : existing.name,
+      personaConfigId: body.personaConfigId ?? existing.personaConfigId,
+      productKBId: body.productKBId !== undefined ? body.productKBId || undefined : existing.productKBId,
+      drillScriptId: body.drillScriptId !== undefined ? body.drillScriptId || undefined : existing.drillScriptId,
+      scoreItemIds: body.scoreItemIds ?? existing.scoreItemIds,
+      skillPointIds: body.skillPointIds ?? existing.skillPointIds,
+      successCriteria: body.passScore !== undefined ? { ...existing.successCriteria, passScore: body.passScore } : existing.successCriteria,
+      durationMinutes: body.durationMinutes ?? existing.durationMinutes,
+      difficulty: body.difficulty ?? existing.difficulty,
+      coverageTopics: body.coverageTopics ?? existing.coverageTopics,
+      description: body.description !== undefined ? body.description || undefined : existing.description,
+      methodology: body.methodology !== undefined ? body.methodology.trim() || undefined : existing.methodology,
+      source: body.source ?? existing.source,
+      sceneType: body.sceneType ?? existing.sceneType,
+      category: body.category ?? existing.category,
+      flowType: body.flowType ?? existing.flowType ?? 'generic',
+      script: body.script !== undefined ? body.script ?? undefined : existing.script,
+      participants: body.participants !== undefined ? body.participants ?? undefined : existing.participants,
+      conversation: body.conversation !== undefined ? body.conversation ?? undefined : existing.conversation,
+      status: body.status ?? existing.status ?? 'published',
+      version: currentVersion + 1,
+      updatedBy: request.userId,
+    };
+    const error = await validateScenario(scenario, request.tenantId);
+    if (error) return reply.code(400).send({ error });
     await store.saveScenario(scenario);
     return scenario;
   });
 
-  // 删除场景（admin 专属）
+  // 删除场景：admin 可删除全部，普通用户仅删除自己创建的场景
   app.delete<{ Params: { id: string } }>(
     '/scenarios/:id',
-    { preHandler: requireRoles('admin') },
     async (request, reply) => {
       const existing = await store.getScenario(request.params.id);
       if (!existing || existing.tenantId !== request.tenantId) {
         return reply.code(404).send({ error: '场景不存在' });
       }
+      const isAdmin = request.userRole === 'admin' || request.userRole === 'platform';
+      if (!isAdmin && existing.createdBy !== request.userId) return reply.code(403).send({ error: '只能删除自己创建的场景' });
       await store.deleteScenario(request.params.id);
       // 级联删除该场景的引导资源包
       const guidance = await store.getScenarioGuidance(request.params.id);
-      if (guidance) await store.deleteScenarioGuidance(guidance.id);
+      if (guidance?.tenantId === request.tenantId) await store.deleteScenarioGuidance(guidance.id);
       return { ok: true };
     }
   );
@@ -268,97 +272,108 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     if (!persona || persona.tenantId !== request.tenantId) {
       return reply.code(404).send({ error: '角色不存在' });
     }
-    return persona;
+    const usageCount = (await store.listScenarios(request.tenantId)).filter((scenario) => scenario.personaConfigId === persona.id).length;
+    return { ...persona, usageCount };
   });
 
-  // 创建角色配置
+  async function checkProductKB(id: string | null | undefined, tenantId: string): Promise<string | null> {
+    if (!id) return null;
+    const kb = await store.getProductKBById(id);
+    return kb && kb.tenantId === tenantId ? null : 'productKBId 不存在或不属于本租户';
+  }
+
   app.post<{ Body: PersonaBody }>(
     '/persona-configs',
-    { preHandler: requireRoles('admin') },
     async (request, reply) => {
-    const body = request.body ?? {};
-    const error = validatePersonaBody(body);
-    if (error) return reply.code(400).send({ error });
-    const elementError = await checkElementIds(body.elementIds ?? [], request.tenantId);
-    if (elementError) return reply.code(400).send({ error: elementError });
-    const persona: PersonaConfig = {
-      id: randomUUID(),
-      tenantId: request.tenantId,
-      name: body.name!.trim(),
-      background: body.background!.trim(),
-      age: body.age,
-      occupation: body.occupation?.trim() || undefined,
-      elementIds: body.elementIds ?? [],
-      productKBId: body.productKBId ?? undefined,
-      behaviorBands: body.behaviorBands!,
-      knowledgeBoundary: {
-        mustNotKnow: body.knowledgeBoundary?.mustNotKnow ?? [],
-        loadedKnowledge: body.knowledgeBoundary?.loadedKnowledge ?? [],
-      },
-      voiceProfile: body.voiceProfile,
-      version: 1,
-    };
-    await store.savePersonaConfig(persona);
-    return reply.code(201).send(persona);
+      const body = request.body ?? {};
+      const error = validatePersonaBody(body);
+      if (error) return reply.code(400).send({ error });
+      const elementError = await checkElementIds(body.elementIds ?? [], request.tenantId);
+      if (elementError) return reply.code(400).send({ error: elementError });
+      const kbError = await checkProductKB(body.productKBId, request.tenantId);
+      if (kbError) return reply.code(400).send({ error: kbError });
+      const persona: PersonaConfig = {
+        id: randomUUID(),
+        tenantId: request.tenantId,
+        name: body.name!.trim(),
+        background: body.background!.trim(),
+        age: body.age,
+        occupation: body.occupation?.trim() || undefined,
+        industry: body.industry?.trim() || undefined,
+        personalityTags: body.personalityTags ?? [],
+        decisionStyle: body.decisionStyle,
+        objections: body.objections ?? [],
+        hiddenInfo: body.hiddenInfo ?? [],
+        elementIds: body.elementIds ?? [],
+        productKBId: body.productKBId ?? undefined,
+        behaviorBands: body.behaviorBands!,
+        knowledgeBoundary: {
+          mustNotKnow: body.knowledgeBoundary?.mustNotKnow ?? [],
+          loadedKnowledge: body.knowledgeBoundary?.loadedKnowledge ?? [],
+        },
+        voiceProfile: body.voiceProfile,
+        version: 1,
+        createdBy: request.userId,
+        updatedBy: request.userId,
+      };
+      await store.savePersonaConfig(persona);
+      return reply.code(201).send(persona);
     }
   );
 
-  // 更新角色配置（version 自增）
   app.put<{ Params: { id: string }; Body: PersonaBody }>(
     '/persona-configs/:id',
-    { preHandler: requireRoles('admin') },
     async (request, reply) => {
       const existing = await store.getPersonaConfig(request.params.id);
-      if (!existing || existing.tenantId !== request.tenantId) {
-        return reply.code(404).send({ error: '角色不存在' });
+      if (!existing || existing.tenantId !== request.tenantId) return reply.code(404).send({ error: '角色不存在' });
+      const isAdmin = request.userRole === 'admin' || request.userRole === 'platform';
+      if (!isAdmin && existing.createdBy !== request.userId) return reply.code(403).send({ error: '只能修改自己创建的私有角色' });
+      if (!isAdmin) {
+        const usageCount = (await store.listScenarios(request.tenantId)).filter((scenario) => scenario.personaConfigId === existing.id).length;
+        if (usageCount > 1) return reply.code(409).send({ error: '角色已被多个场景引用，请先复制为场景专属角色' });
       }
       const body = request.body ?? {};
-      // 部分更新（patch 语义）：只校验出现的字段，未传字段保留原值，
-      // 避免管理端只传部分字段时清空 elementIds/age/knowledgeBoundary 等
-      if (body.name !== undefined && !body.name.trim()) {
-        return reply.code(400).send({ error: 'name 不能为空' });
+      if (body.expectedVersion !== existing.version) {
+        return reply.code(409).send({ error: '角色已被其他用户修改，请刷新后重试', currentVersion: existing.version });
       }
-      if (body.background !== undefined && !body.background.trim()) {
-        return reply.code(400).send({ error: 'background 不能为空' });
-      }
-      if (body.age !== undefined && (!Number.isFinite(body.age) || body.age <= 0)) {
-        return reply.code(400).send({ error: 'age 必须为正数' });
-      }
+      if (body.name !== undefined && !body.name.trim()) return reply.code(400).send({ error: 'name 不能为空' });
+      if (body.background !== undefined && !body.background.trim()) return reply.code(400).send({ error: 'background 不能为空' });
+      if (body.age !== undefined && (!Number.isFinite(body.age) || body.age <= 0)) return reply.code(400).send({ error: 'age 必须为正数' });
       if (body.behaviorBands !== undefined) {
-        const bandError = validatePersonaBody({
-          name: 'x',
-          background: 'x',
-          behaviorBands: body.behaviorBands,
-        });
+        const bandError = validatePersonaBody({ name: 'x', background: 'x', behaviorBands: body.behaviorBands });
         if (bandError) return reply.code(400).send({ error: bandError });
       }
-      if (body.elementIds !== undefined && !Array.isArray(body.elementIds)) {
-        return reply.code(400).send({ error: 'elementIds 必须为数组' });
-      }
+      if (body.elementIds !== undefined && !Array.isArray(body.elementIds)) return reply.code(400).send({ error: 'elementIds 必须为数组' });
       const elementError = await checkElementIds(body.elementIds ?? [], request.tenantId);
       if (elementError) return reply.code(400).send({ error: elementError });
+      const kbError = await checkProductKB(body.productKBId, request.tenantId);
+      if (kbError) return reply.code(400).send({ error: kbError });
       const persona: PersonaConfig = {
         ...existing,
         name: body.name?.trim() ?? existing.name,
         background: body.background?.trim() ?? existing.background,
         age: body.age ?? existing.age,
-        occupation:
-          body.occupation !== undefined ? body.occupation.trim() || undefined : existing.occupation,
+        occupation: body.occupation !== undefined ? body.occupation.trim() || undefined : existing.occupation,
+        industry: body.industry !== undefined ? body.industry.trim() || undefined : existing.industry,
+        personalityTags: body.personalityTags ?? existing.personalityTags,
+        decisionStyle: body.decisionStyle ?? existing.decisionStyle,
+        objections: body.objections ?? existing.objections,
+        hiddenInfo: body.hiddenInfo ?? existing.hiddenInfo,
         elementIds: body.elementIds ?? existing.elementIds,
-        productKBId: body.productKBId !== undefined ? (body.productKBId || undefined) : existing.productKBId,
+        productKBId: body.productKBId !== undefined ? body.productKBId || undefined : existing.productKBId,
         behaviorBands: body.behaviorBands ?? existing.behaviorBands,
         knowledgeBoundary: body.knowledgeBoundary
           ? {
               mustNotKnow: body.knowledgeBoundary.mustNotKnow ?? existing.knowledgeBoundary.mustNotKnow,
-              loadedKnowledge:
-                body.knowledgeBoundary.loadedKnowledge ?? existing.knowledgeBoundary.loadedKnowledge,
+              loadedKnowledge: body.knowledgeBoundary.loadedKnowledge ?? existing.knowledgeBoundary.loadedKnowledge,
             }
           : existing.knowledgeBoundary,
         voiceProfile: body.voiceProfile ?? existing.voiceProfile,
         version: existing.version + 1,
+        updatedBy: request.userId,
       };
-    await store.savePersonaConfig(persona);
-    return persona;
+      await store.savePersonaConfig(persona);
+      return persona;
     }
   );
 
@@ -375,10 +390,11 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     const text = request.body?.text?.trim();
     if (!text) return reply.code(400).send({ error: 'text 必填' });
 
-    const elements = await store.listElements({});
-    // 加载产品知识库：陪练员级 productKBId 或租户默认 KB
-    const kb = persona.productKBId
-      ? await store.getProductKBById(persona.productKBId)
+    const elements = (await store.listElements({}))
+      .filter((element) => element.tenantId === undefined || element.tenantId === request.tenantId);
+    const referencedKB = persona.productKBId ? await store.getProductKBById(persona.productKBId) : undefined;
+    const kb = referencedKB?.tenantId === request.tenantId
+      ? referencedKB
       : await store.getProductKB(persona.tenantId);
     const bundle = compilePersona(persona, elements, kb);
     const band = bandFor(bundle.dynamics.baseArousal, bundle.behaviorBands);
@@ -399,7 +415,7 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     return { reply: replyText };
   });
 
-  // ---- 角色画像自定义（普通用户可调用） ----
+  // ---- 角色画像自定义（仅管理员可修改租户共享角色） ----
 
   /** 保存自定义画像特征（沟通风格、核心顾虑、挑战强度、行业偏好、知识边界等） */
   app.patch<{ Params: { id: string }; Body: {
@@ -411,7 +427,7 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     background?: string;
     occupation?: string;
     avatar?: string;
-  } }>('/persona-configs/:id/customize', async (request, reply) => {
+  } }>('/persona-configs/:id/customize', { preHandler: requireRoles('admin') }, async (request, reply) => {
     const persona = await store.getPersonaConfig(request.params.id);
     if (!persona || persona.tenantId !== request.tenantId) {
       return reply.code(404).send({ error: '角色不存在' });
@@ -457,7 +473,7 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
    * 返回 { avatar: dataUrl }
    * 限制 2MB，仅接受图片类型
    */
-  app.post<{ Params: { id: string } }>('/persona-configs/:id/avatar', async (request, reply) => {
+  app.post<{ Params: { id: string } }>('/persona-configs/:id/avatar', { preHandler: requireRoles('admin') }, async (request, reply) => {
     const persona = await store.getPersonaConfig(request.params.id);
     if (!persona || persona.tenantId !== request.tenantId) {
       return reply.code(404).send({ error: '角色不存在' });
@@ -494,7 +510,7 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     text?: string;
     history?: { role: 'user' | 'assistant'; content: string }[];
     apply?: boolean;
-  } }>('/persona-configs/:id/chat-customize', async (request, reply) => {
+  } }>('/persona-configs/:id/chat-customize', { preHandler: requireRoles('admin') }, async (request, reply) => {
     const persona = await store.getPersonaConfig(request.params.id);
     if (!persona || persona.tenantId !== request.tenantId) {
       return reply.code(404).send({ error: '角色不存在' });
@@ -609,7 +625,7 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     content?: string;
     fileName?: string;
     apply?: boolean;
-  } }>('/persona-configs/:id/import', async (request, reply) => {
+  } }>('/persona-configs/:id/import', { preHandler: requireRoles('admin') }, async (request, reply) => {
     const persona = await store.getPersonaConfig(request.params.id);
     if (!persona || persona.tenantId !== request.tenantId) {
       return reply.code(404).send({ error: '角色不存在' });
@@ -723,6 +739,105 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
   app.get('/skill-points', async (request) => ({
     skillPoints: await store.listSkillPoints(request.tenantId),
   }));
+
+  app.post<{ Body: Partial<SkillPoint> }>('/skill-points', { preHandler: requireRoles('admin') }, async (request, reply) => {
+    if (!request.body?.name?.trim()) return reply.code(400).send({ error: 'name 必填' });
+    const skillPoint: SkillPoint = {
+      ...request.body,
+      id: randomUUID(),
+      tenantId: request.tenantId,
+      name: request.body.name.trim(),
+      description: request.body.description?.trim() || undefined,
+    };
+    await store.saveSkillPoint(skillPoint);
+    return reply.code(201).send(skillPoint);
+  });
+
+  app.put<{ Params: { id: string }; Body: Partial<SkillPoint> }>('/skill-points/:id', { preHandler: requireRoles('admin') }, async (request, reply) => {
+    const existing = await store.getSkillPoint(request.params.id);
+    if (!existing || existing.tenantId !== request.tenantId) return reply.code(404).send({ error: '技能点不存在' });
+    const name = request.body?.name !== undefined ? request.body.name.trim() : existing.name;
+    if (!name) return reply.code(400).send({ error: 'name 不能为空' });
+    const skillPoint: SkillPoint = {
+      ...existing,
+      ...request.body,
+      id: existing.id,
+      tenantId: existing.tenantId,
+      name,
+      description: request.body?.description !== undefined ? request.body.description.trim() || undefined : existing.description,
+    };
+    await store.saveSkillPoint(skillPoint);
+    return skillPoint;
+  });
+
+  app.delete<{ Params: { id: string } }>('/skill-points/:id', { preHandler: requireRoles('admin') }, async (request, reply) => {
+    const existing = await store.getSkillPoint(request.params.id);
+    if (!existing || existing.tenantId !== request.tenantId) return reply.code(404).send({ error: '技能点不存在' });
+    const scenarios = (await store.listScenarios(request.tenantId)).filter((s) => s.skillPointIds.includes(existing.id));
+    const scoreItems = (await store.listScoreItemDefs(request.tenantId)).filter((item) => item.skillPointId === existing.id);
+    if (scenarios.length || scoreItems.length) {
+      return reply.code(409).send({ error: `技能点仍被 ${scenarios.length} 个场景、${scoreItems.length} 条评分标准引用，请先解除引用` });
+    }
+    await store.deleteSkillPoint(existing.id);
+    return { ok: true };
+  });
+
+  app.post<{ Body: Partial<Element> }>('/elements', { preHandler: requireRoles('admin') }, async (request, reply) => {
+    const body = request.body ?? {};
+    if (!body.name?.trim() || !body.content?.trim()) return reply.code(400).send({ error: 'name / content 必填' });
+    if (!body.type || !['C', 'E', 'B', 'S'].includes(body.type)) return reply.code(400).send({ error: 'type 仅支持 C/E/B/S' });
+    const shared = request.userRole === 'platform' && body.layer && body.layer !== 'tenant';
+    const element: Element = {
+      id: randomUUID(),
+      type: body.type,
+      layer: shared ? body.layer! : 'tenant',
+      tenantId: shared ? undefined : request.tenantId,
+      name: body.name.trim(),
+      content: body.content.trim(),
+      dynamics: body.dynamics,
+      version: 1,
+    };
+    await store.saveElement(element);
+    return reply.code(201).send(element);
+  });
+
+  app.put<{ Params: { id: string }; Body: Partial<Element> & { expectedVersion?: number } }>('/elements/:id', { preHandler: requireRoles('admin') }, async (request, reply) => {
+    const existing = await store.getElement(request.params.id);
+    if (!existing || (request.userRole !== 'platform' && existing.tenantId !== request.tenantId)) return reply.code(404).send({ error: '要素不存在' });
+    if (request.body?.expectedVersion !== existing.version) return reply.code(409).send({ error: '要素已被其他用户修改，请刷新后重试', currentVersion: existing.version });
+    const body = request.body ?? {};
+    const element: Element = {
+      ...existing,
+      name: body.name?.trim() ?? existing.name,
+      content: body.content?.trim() ?? existing.content,
+      type: body.type ?? existing.type,
+      dynamics: body.dynamics ?? existing.dynamics,
+      version: existing.version + 1,
+    };
+    if (!element.name || !element.content || !['C', 'E', 'B', 'S'].includes(element.type)) return reply.code(400).send({ error: '名称、正文、类型无效' });
+    await store.saveElement(element);
+    return element;
+  });
+
+  app.delete<{ Params: { id: string } }>('/elements/:id', { preHandler: requireRoles('admin') }, async (request, reply) => {
+    const existing = await store.getElement(request.params.id);
+    if (!existing || (request.userRole !== 'platform' && existing.tenantId !== request.tenantId)) return reply.code(404).send({ error: '要素不存在' });
+    const usedBy = (await store.listPersonaConfigs(request.tenantId)).filter((persona) => persona.elementIds.includes(existing.id));
+    if (usedBy.length) return reply.code(409).send({ error: `要素仍被 ${usedBy.length} 个角色引用，请先解除引用` });
+    await store.deleteElement(existing.id);
+    return { ok: true };
+  });
+
+  app.delete<{ Params: { id: string } }>('/persona-configs/:id', async (request, reply) => {
+    const existing = await store.getPersonaConfig(request.params.id);
+    if (!existing || existing.tenantId !== request.tenantId) return reply.code(404).send({ error: '角色不存在' });
+    const isAdmin = request.userRole === 'admin' || request.userRole === 'platform';
+    if (!isAdmin && existing.createdBy !== request.userId) return reply.code(403).send({ error: '只能删除自己创建的私有角色' });
+    const usedBy = (await store.listScenarios(request.tenantId)).filter((scenario) => scenario.personaConfigId === existing.id);
+    if (usedBy.length) return reply.code(409).send({ error: `角色仍被 ${usedBy.length} 个场景引用，请先更换场景角色` });
+    await store.deletePersonaConfig(existing.id);
+    return { ok: true };
+  });
 
   // ── 陪练员卡片列表（首页探探式滑动用） ──
   // 合并 persona-configs + scenarios，返回 RoleCard 格式
