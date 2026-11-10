@@ -5,6 +5,7 @@ import type {
   PersonaConfig,
   Scenario,
   ScenarioParticipant,
+  ScoreReport,
   VoiceConfigOperation,
   VoiceEditCommand,
 } from '@grasp-mvp/core';
@@ -167,6 +168,120 @@ async function locateResource(
 function matchesName(name: string, q: string): boolean {
   const n = normalize(name);
   return !!n && (n === q || n.includes(q) || q.includes(n));
+}
+
+/** 意图分流：识别「询问上一场评分原因」类问题，避免走进资源编辑流程 */
+async function detectScoreExplain(gateway: RouteContext['gateway'], text: string): Promise<{ scoreExplain: boolean; scenarioName?: string }> {
+  const prompt = [
+    '你是意图分类器，判断用户指令属于哪一类：',
+    '- score_explain：询问/复盘以往某次销售对练（模拟演练）的得分情况与原因，例如"上一场为什么激情度得分低""上次演练各项评分的原因是什么""帮我分析上次的扣分点"。',
+    '- edit：要求创建或修改场景、角色、技能点、评分标准、剧本、知识库等资源（包括"根据上次评分把难度调低"这类要改配置的指令）。',
+    '只返回 JSON：{"intent":"score_explain"|"edit","scenarioName":"指令中提到的场景名称，没有则为空字符串"}',
+  ].join('\n');
+  try {
+    const result = await gateway.forTask('extractor').chat(
+      [{ role: 'system', content: prompt }, { role: 'user', content: text.slice(0, 2000) }],
+      { jsonMode: true, temperature: 0 },
+    );
+    const match = result.content.match(/\{[\s\S]*\}/);
+    const parsed = match ? (JSON.parse(match[0]) as { intent?: string; scenarioName?: string }) : {};
+    const scenarioName = typeof parsed.scenarioName === 'string' ? parsed.scenarioName.trim() : '';
+    return { scoreExplain: parsed.intent === 'score_explain', scenarioName: scenarioName || undefined };
+  } catch {
+    return { scoreExplain: false };
+  }
+}
+
+/** 评分解读的目标场景：优先编辑中的场景，其次按名称匹配 */
+async function resolveExplainScenario(
+  store: Store,
+  tenantId: string,
+  context: CommandContext,
+  scenarioName?: string,
+): Promise<Scenario | undefined> {
+  if (context.scenarioId) {
+    const scenario = await store.getScenario(context.scenarioId);
+    if (scenario && scenario.tenantId === tenantId) return scenario;
+  }
+  const q = normalize(scenarioName ?? '');
+  if (!q) return undefined;
+  const scenarios = await store.listScenarios(tenantId);
+  return scenarios.find((s) => normalize(s.name ?? '') === q) ?? scenarios.find((s) => matchesName(s.name ?? '', q));
+}
+
+function clipText(text: unknown, max: number): string {
+  const s = typeof text === 'string' ? text : '';
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+
+/** 压缩评分报告：只保留解释得分原因所需的字段 */
+function summarizeReport(report: ScoreReport) {
+  return {
+    totalScore: report.totalScore,
+    baseScore: report.baseScore,
+    confidenceIndex: report.confidenceIndex,
+    passed: report.passed,
+    completionStatus: report.completionStatus,
+    completionReason: report.completionReason,
+    fatalViolation: report.fatalViolation,
+    skillScores: report.skillScores,
+    items: report.items.map((item) => ({
+      name: item.itemName,
+      level: item.levelLabel,
+      score: item.score,
+      quote: clipText(item.quote, 160),
+      rationale: clipText(item.rationale, 300),
+      betterScript: clipText(item.betterScript, 160),
+      confidence: item.confidence,
+      isReference: item.isReference,
+    })),
+    violations: report.violations,
+    ruleStats: {
+      interruptions: report.ruleStats.interruptions,
+      fillerCounts: report.ruleStats.fillerCounts,
+      coverageHits: report.ruleStats.coverageHits,
+      coverageMisses: report.ruleStats.coverageMisses,
+      talkRatio: report.ruleStats.talkRatio,
+      avgSpeechRate: report.ruleStats.avgSpeechRate,
+      pauseCount: report.ruleStats.pauseCount,
+      fluencyScore: report.ruleStats.fluencyScore,
+      voice: report.ruleStats.voice,
+      voiceChild: report.ruleStats.voiceChild,
+    },
+    summary: clipText(report.summary, 400),
+    improvementGoal: report.improvementGoal,
+  };
+}
+
+/** 基于评分报告回答「为什么得这个分」：只依据报告数据，要求引用依据 */
+async function buildScoreExplanation(
+  gateway: RouteContext['gateway'],
+  args: { scenarioName: string; question: string; report: ScoreReport },
+): Promise<string> {
+  const prompt = [
+    '你是销售陪练的评分解读助手。给定一场对练的评分报告（JSON），回答用户关于各项得分/扣分原因的问题。',
+    '要求：',
+    '1. 只能依据报告中的数据回答（评分项得分与档位、判定理由 rationale、引用原文 quote、违规 violations、规则统计 ruleStats、总结 summary），不要编造报告没有的信息；报告没覆盖的点要明确说明。',
+    '2. 先给一句话结论，再按评分项说明原因：该项得分、命中档位、扣分依据（引用原文或声学/规则数据）；用户问到具体项时聚焦该项，问整体时覆盖主要失分项。',
+    '3. 每个主要原因后给出报告依据，格式「原文：…」或「数据：…」。',
+    '4. 最后给出 1-3 条可操作的改进建议（可引用报告中的 betterScript 或 improvementGoal）。',
+    '5. 用中文、口语化教练口吻，控制在 400 字以内。',
+    `【场景】${args.scenarioName}`,
+    `【评分报告】${JSON.stringify(summarizeReport(args.report))}`,
+    '严格返回 JSON：{"answer":"..."}',
+  ].join('\n');
+  const result = await gateway.forTask('extractor').chat(
+    [{ role: 'system', content: prompt }, { role: 'user', content: args.question.slice(0, 2000) }],
+    { jsonMode: true, temperature: 0.3 },
+  );
+  const match = result.content.match(/\{[\s\S]*\}/);
+  if (match) {
+    try {
+      const parsed = JSON.parse(match[0]) as { answer?: string };
+      if (typeof parsed.answer === 'string' && parsed.answer.trim()) return parsed.answer.trim();
+    } catch { /* 落到原文兜底 */ }
+  }
+  return clipText(result.content, 1000);
 }
 
 function buildBehaviorBands(speechRate: unknown, challenge: unknown, interruptLevel: unknown) {
@@ -506,6 +621,41 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
 
     /* ---------------- 生成预览 ---------------- */
     if (!text) return reply.code(400).send({ error: 'text 或音频必填' });
+
+    /* ---------------- 评分原因解读（上一场同场景对练） ---------------- */
+    const intent = await detectScoreExplain(gateway, text);
+    if (intent.scoreExplain) {
+      const scenario = await resolveExplainScenario(store, request.tenantId, context, intent.scenarioName);
+      // 未指定场景时回退到该用户最近一场已完成对练（独立语音编辑页 / 新场景草稿无 scenarioId）
+      const sessions = scenario
+        ? await store.listSessions({ userId: request.userId, scenarioId: scenario.id })
+        : await store.listSessions({ userId: request.userId });
+      const lastSession = sessions
+        .filter((s) => s.status === 'completed')
+        .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
+      if (!lastSession) {
+        return reply.code(422).send({
+          error: scenario ? `场景「${scenario.name}」下还没有已完成的练习记录` : '你还没有已完成的练习记录',
+        });
+      }
+      const report = await store.getScoreReportBySession(lastSession.id);
+      if (!report) {
+        return reply.code(422).send({ error: '上一场练习的评分报告尚未生成，请稍后再试' });
+      }
+      const sessionScenario = scenario ?? await store.getScenario(lastSession.scenarioId);
+      const answer = await buildScoreExplanation(gateway, { scenarioName: sessionScenario?.name ?? '对练', question: text, report });
+      return {
+        transcript,
+        scoreExplain: {
+          scenarioName: sessionScenario?.name ?? '对练',
+          sessionId: lastSession.id,
+          sessionAt: lastSession.startedAt,
+          totalScore: report.totalScore,
+          passed: report.passed,
+          answer,
+        },
+      };
+    }
 
     const names = await availableNames(store, request.tenantId);
     const prompt = [

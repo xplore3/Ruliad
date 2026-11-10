@@ -193,6 +193,8 @@ export default function Practice() {
   const guidanceCancelRef = useRef<(() => void) | null>(null);
   /** 自动聆听最大时长兜底定时器 */
   const vadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 正式对练单次发言的最大时长兜底定时器 */
+  const liveRecordTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** isRecording 镜像（录音器 onLevel 回调中读取，避免闭包过期） */
   const isRecordingRef = useRef(false);
   /** live 阶段 VAD：本轮是否已检测到说话 / 最近一次有声时刻 / 自适应阈值实例 */
@@ -381,8 +383,8 @@ export default function Practice() {
         levelAtRef.current = now;
         setMicLevel(Math.min(1, rms * 3));
       }
-      // live 阶段自动断句：检测到说话后连续静音 VAD_SILENCE_MS，自动关麦提交本轮；一直不说话则持续等；
-      // 单次发言不设时长上限，学员（地推）停下来才视为本轮表达结束
+      // live 阶段自动断句：检测到说话后连续静音 VAD_SILENCE_MS，自动关麦提交本轮；
+      // 另有 60 秒兜底，持续环境音或 VAD 误判也不会让本轮无限录音
       if (!isRecordingRef.current) return;
       if (liveVadRef.current.isSpeech(rms)) {
         if (!liveSpokeRef.current) liveSpokeRef.current = true;
@@ -432,6 +434,10 @@ export default function Practice() {
       if (vadTimerRef.current) {
         clearTimeout(vadTimerRef.current);
         vadTimerRef.current = null;
+      }
+      if (liveRecordTimerRef.current) {
+        clearTimeout(liveRecordTimerRef.current);
+        liveRecordTimerRef.current = null;
       }
       guidanceRecRef.current?.stop();
       guidanceRecRef.current = null;
@@ -1270,6 +1276,10 @@ export default function Practice() {
     isRecordingRef.current = false;
     liveSpokeRef.current = false;
     liveLastVoiceAtRef.current = 0;
+    if (liveRecordTimerRef.current) {
+      clearTimeout(liveRecordTimerRef.current);
+      liveRecordTimerRef.current = null;
+    }
     recorder.stop();
     socket.send({ type: 'finish' });
     setIsRecording(false);
@@ -1306,6 +1316,11 @@ export default function Practice() {
     liveSpokeRef.current = false;
     liveLastVoiceAtRef.current = 0;
     isRecordingRef.current = true;
+    if (liveRecordTimerRef.current) clearTimeout(liveRecordTimerRef.current);
+    liveRecordTimerRef.current = setTimeout(() => {
+      liveRecordTimerRef.current = null;
+      finishRecordingRef.current?.();
+    }, VAD_MAX_RECORD_MS);
     setIsRecording(true);
     setStatusBoth('user_turn');
   };
@@ -1373,6 +1388,10 @@ export default function Practice() {
 
       const prevStatus = statusRef.current;
       // 冻结本地一切收发：录音停止、ASR/TTS 轮次取消、播放器暂停、指引阶段媒体中断
+      if (liveRecordTimerRef.current) {
+        clearTimeout(liveRecordTimerRef.current);
+        liveRecordTimerRef.current = null;
+      }
       if (isRecording) {
         isRecordingRef.current = false;
         liveSpokeRef.current = false;
@@ -1407,6 +1426,10 @@ export default function Practice() {
   // ===== 结束并评分 =====
   const finishSession = async () => {
     if (!sessionId || statusRef.current === 'evaluating') return;
+    if (liveRecordTimerRef.current) {
+      clearTimeout(liveRecordTimerRef.current);
+      liveRecordTimerRef.current = null;
+    }
     if (isRecording) {
       isRecordingRef.current = false;
       liveSpokeRef.current = false;

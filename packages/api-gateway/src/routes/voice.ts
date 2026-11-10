@@ -34,6 +34,7 @@ function pcmRMS(buf: Buffer): number {
 /** VAD 配置 */
 const VAD_SILENCE_MS = 2500; // 允许说话中的自然停顿，避免 1 秒静音就把本轮截断
 const VAD_CHUNK_MS = 100; // 每 100ms 检测一次
+const VAD_MAX_SPEECH_MS = 60_000; // 持续环境音也不能让一轮发言无限录音
 /** ASR 文本稳定后的预测生成参数：短输入不预测，避免把口头禅误判为完整发言 */
 const PREDICTION_STABLE_MS = 800;
 const PREDICTION_MIN_CHARS = 8;
@@ -451,8 +452,9 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
           const voiceFeatures = uplink ? analyzePcm16(uplink) ?? undefined : undefined;
           // 首句 TTS 预合成与 runTurn 内的语义一致性审查并行（warmup 只服务家长主应答轮）
           const warmupProfile = await personaVoice(store, scenario.id, scenario.personaConfigId, req.log);
-          const predicted = await (prediction?.promise ?? Promise.resolve(null));
-          const precomputedReply = prediction?.inputText === userText && predicted?.transcriptLength === session.transcript.length
+          // 最终文本已变化时立即丢弃预测，不再等待那次已经无用的 LLM 请求
+          const predicted = prediction?.inputText === userText ? await prediction.promise : null;
+          const precomputedReply = predicted?.transcriptLength === session.transcript.length
             ? predicted.reply
             : null;
           console.log(`[VoiceCall][trace] speculative reply ${precomputedReply ? 'reused' : 'discarded/missing'}: sessionId=${sessionId}`);
@@ -705,6 +707,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
       let roundAudio: Buffer[] = []; // 本轮全部上行音频（供回合落库前声学特征提取）
       let vadSilenceStart = 0; // 静音开始时间戳（0 = 未在静音）
       let vadHasSpeech = false; // 本轮检测到过语音
+      let vadSpeechStart = 0; // 本轮首次检测到语音的时间
       let latestText = '';
       let latestIsFinal = false;
       let finishRequested = false;
@@ -743,6 +746,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
         roundAudio = [];
         vadSilenceStart = 0;
         vadHasSpeech = false;
+        vadSpeechStart = 0;
         latestText = '';
         latestIsFinal = false;
         finishRequested = false;
@@ -941,7 +945,7 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
         send({ type: 'listening' });
       };
 
-      /** VAD 处理：检测到静音后自动 finish ASR */
+      /** VAD 处理：静音判停；持续有声最多 60 秒也强制收尾，避免环境音导致永不提交 */
       const processVAD = () => {
         if (!listening || closed || finishRequested) return;
 
@@ -949,23 +953,23 @@ export async function voiceRoutes(app: FastifyInstance, ctx: RouteContext): Prom
         const buf = Buffer.concat(vadBuffer);
         vadBuffer = [];
 
+        const now = Date.now();
         const rms = pcmRMS(buf);
         if (vad.isSpeech(rms)) {
-          // 检测到语音
+          if (!vadHasSpeech) vadSpeechStart = now;
           vadHasSpeech = true;
           vadSilenceStart = 0;
-        } else if (vadHasSpeech) {
-          // 之前有语音，现在静音
-          if (vadSilenceStart === 0) {
-            vadSilenceStart = Date.now();
-          }
-          const silenceMs = Date.now() - vadSilenceStart;
-          if (silenceMs >= VAD_SILENCE_MS) {
-            finishRequested = true;
-            // 已有句末结果且之后没有新的阶段文本时可直接提交，无需再等识别流关闭
-            if (latestIsFinal) completeASR(round, latestText);
-            else asrStream?.finish();
-          }
+        } else if (vadHasSpeech && vadSilenceStart === 0) {
+          vadSilenceStart = now;
+        }
+
+        const silenceExpired = vadHasSpeech && vadSilenceStart > 0 && now - vadSilenceStart >= VAD_SILENCE_MS;
+        const maxSpeechReached = vadHasSpeech && now - vadSpeechStart >= VAD_MAX_SPEECH_MS;
+        if (silenceExpired || maxSpeechReached) {
+          finishRequested = true;
+          // 已有句末结果且之后没有新的阶段文本时可直接提交，无需再等识别流关闭
+          if (latestIsFinal) completeASR(round, latestText);
+          else asrStream?.finish();
         }
       };
 

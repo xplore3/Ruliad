@@ -224,7 +224,7 @@ export default function VoiceResourceEditor({
   };
 
   const apply = async () => {
-    if (!preview || busy) return;
+    if (!preview || preview.scoreExplain || busy) return;
     setBusy(true);
     try {
       const saved = await applyVoiceConfig(preview.commandId, preview.expectedRevisions, context);
@@ -255,7 +255,7 @@ export default function VoiceResourceEditor({
             <h3>语音自动场景创建和配置</h3>
             <p className="hint">
               直接用自然语言描述要创建或修改的场景、场景配置或资源库对象：LLM 自动提炼内容，服务端自动定位对象，
-              先预览差异、确认后才保存；版本冲突不会覆盖他人修改。
+              先预览差异、确认后才保存；版本冲突不会覆盖他人修改。也可以询问上一场对练的评分原因（如"上一场为什么某项得分低"）。
             </p>
           </div>
         </div>
@@ -272,7 +272,7 @@ export default function VoiceResourceEditor({
           rows={4}
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="例如：新建一个电销场景「首次电话邀约」，客户是爱压价的采购经理，时长 12 分钟、及格分 80；或者：把当前场景的难度改成挑战，再绑定需求挖掘技能点"
+          placeholder="例如：新建一个电销场景「首次电话邀约」，客户是爱压价的采购经理，时长 12 分钟、及格分 80；也可以直接问：上一场为什么「激情度」得分低？"
           maxLength={2000}
         />
       </div>
@@ -292,6 +292,25 @@ export default function VoiceResourceEditor({
         <div style={{ marginTop: 20 }}>
           <p className="hint" style={{ marginBottom: 8 }}>{preview.reply}</p>
           {preview.transcript && <p className="hint">识别原文：{preview.transcript}</p>}
+          {preview.scoreExplain ? (
+            <div className="card inner-card" style={{ padding: 14, marginTop: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span className="chip blue">评分解读</span>
+                <strong>{preview.scoreExplain.scenarioName}</strong>
+                <span className="hint">
+                  {new Date(preview.scoreExplain.sessionAt).toLocaleString()} · 总分 {preview.scoreExplain.totalScore}
+                  {preview.scoreExplain.passed ? '（通过）' : '（未通过）'}
+                </span>
+              </div>
+              <p style={{ marginTop: 10, whiteSpace: 'pre-wrap', lineHeight: 1.7 }}>{preview.scoreExplain.answer}</p>
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <button className="btn btn-ghost" disabled={busy} onClick={discard}>
+                  继续提问
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
           {preview.general && (
             <p className="lib-warn">
               {`本次包含通用 / 共享内容${preview.operations.find((op) => op.generalReason)?.generalReason ? `：${preview.operations.find((op) => op.generalReason)?.generalReason}` : ''}，将进入统一处理页面，不直接修改业务数据。`}
@@ -342,6 +361,8 @@ export default function VoiceResourceEditor({
               丢弃预览
             </button>
           </div>
+            </>
+          )}
         </div>
       )}
       {notice && <p className="hint" style={{ marginTop: 16 }}>{notice}</p>}
