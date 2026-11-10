@@ -483,3 +483,44 @@ describe('地推改进话术的具体业务动作', () => {
     expect(result.betterScript).toBe(betterScript);
   });
 });
+
+describe('judgeItem 机构资料注入', () => {
+  const tabooDef: ScoreItemDef = {
+    ...def,
+    id: 'item-taboo',
+    name: '地推销售忌讳',
+    scoringMode: 'score',
+    deductionOnly: true,
+    weight: 0,
+    levels: [],
+  };
+  const institutionKB = {
+    id: 'kb-1',
+    tenantId: 'tenant-demo',
+    name: '机构产品知识库',
+    version: 1,
+    entries: [{ id: 'e1', kind: 'keypoint' as const, title: '班容', content: '一个班8人', frequency: 1 }],
+    effectiveAt: '2026-01-01T00:00:00Z',
+  };
+
+  function capturingGateway(prompts: string[]): LLMGateway {
+    const handler: MockHandler = (messages) => {
+      prompts.push(messages.map((m) => m.content).join('\n'));
+      return JSON.stringify({ score: 0, levelKey: 'ok', quote: '', quoteTurnSeq: 1, rationale: '', betterScript: '' });
+    };
+    return { forTask: () => new MockLLMProvider(handler) };
+  }
+
+  it('deductionOnly 忌讳项的 judge prompt 包含机构实际资料', async () => {
+    const prompts: string[] = [];
+    await judgeItem(tabooDef, session, capturingGateway(prompts), undefined, undefined, undefined, institutionKB);
+    expect(prompts[0]).toContain('机构实际资料');
+    expect(prompts[0]).toContain('一个班8人');
+  });
+
+  it('普通评分项不注入机构资料', async () => {
+    const prompts: string[] = [];
+    await judgeItem(def, session, capturingGateway(prompts), undefined, undefined, undefined, institutionKB);
+    expect(prompts[0]).not.toContain('机构实际资料');
+  });
+});

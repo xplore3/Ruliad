@@ -300,8 +300,19 @@ export default function VoiceResourceEditor({
         <div style={{ marginTop: 20 }}>
           <p className="hint" style={{ marginBottom: 8 }}>{preview.reply}</p>
           {preview.transcript && <p className="hint">识别原文：{preview.transcript}</p>}
-          {preview.scoreExplain ? (
+          {preview.noChange ? (
             <div className="card inner-card" style={{ padding: 14, marginTop: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span className="chip green">无需修改</span>
+                <span className="hint">现有规则已覆盖你的要求</span>
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <button className="btn btn-ghost" disabled={busy} onClick={discard}>
+                  继续提问
+                </button>
+              </div>
+            </div>
+          ) : preview.scoreExplain ? (            <div className="card inner-card" style={{ padding: 14, marginTop: 12 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <span className="chip blue">评分解读</span>
                 <strong>{preview.scoreExplain.scenarioName}</strong>

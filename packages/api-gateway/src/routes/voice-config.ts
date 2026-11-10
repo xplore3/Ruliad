@@ -706,6 +706,10 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
     }
 
     const names = await availableNames(store, request.tenantId);
+    // 翻译指南需要现状对照：注入演练剧本全文，让 LLM 能判断"现有剧本是否已覆盖该要求"
+    const drillScripts = (await store.listDrillScripts(request.tenantId)).slice(0, 5).map((s) => ({
+      id: s.id, name: s.name, category: s.category, content: String(s.content ?? '').slice(0, 6000),
+    }));
     const prompt = [
       '你是销售陪练系统的「语音自动场景创建和配置」助手。用户用自然语言描述要创建或修改的场景、场景配置或资源库对象。',
       '',
@@ -736,6 +740,18 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
       '- scriptExecutionOrder / scriptTopics / scriptCustomerQuestions / scriptAssessmentPoints 为剧本流程/话题/客户问题/考核点；多值用换行或分号分隔。',
       '- participants 为参与者数组，每项可含 name/traits/speakingStyle/speechScope/languageRequirements/goal。',
       '',
+      '【人类业务语言 → 资源修改 翻译指南】',
+      '把用户的业务说法映射到正确的资源和字段，不要凭字面猜：',
+      '- 客户的拒绝/异议话术、六连问、孩子沟通节拍（先情感支持再讲故事）、成交环节规则 → target=drill-script，fields.content 为合并后的剧本全文（在下方【现有演练剧本】基础上修改，保留无关段落原文）。',
+      '- 评分/扣分/误判/评分口径问题（如虚假承诺、语速、激情度）→ target=score-item；若用户提到某次历史演练的误判，用 analyze-update 诊断并追加判定说明，不要重写全文。',
+      '- 机构事实（班容、价格、师资、课时、退费、地址等）→ target=product-kb，fields.entries 必须包含全部原有条目加新增/修改条目，不得只返回新增条目。',
+      '- 客户性格、情绪反应、提问方式 → target=persona，改 personalityTags/behaviorBands/background 等。',
+      '- 场景目标、考核点、及格分、时长 → target=scenario 对应字段。',
+      '- 用户说"上一场/刚才那次演练"是在指认问题发生的现场，不代表一定要改评分标准；按问题实质选择资源。',
+      '',
+      '【已覆盖则不修改】',
+      '先对照【现有演练剧本】等现状内容判断用户要求是否已经被现有规则覆盖。若已完整覆盖：operations 返回空数组，reply 用一两句话指出现有哪条规则已包含该要求，不要重复追加或改写。若只是部分覆盖，只修改缺失部分。',
+      '',
       '【第三步：通用性判断】',
       '若涉及跨场景规则、公共产品事实、合规规范、通用提示词/评分规则/系统能力，或要修改被多个场景共用的资源：general=true 并给出 generalReason。',
       '',
@@ -743,6 +759,7 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
       '若一条指令同时包含「私有/场景专属」与「通用」两部分，返回多个 operations，每部分一条；通用部分 general=true。',
       '',
       `【当前租户可用资源】${JSON.stringify(names)}`,
+      drillScripts.length ? `【现有演练剧本】${JSON.stringify(drillScripts)}` : '',
       context.scenarioId ? `【当前正在编辑的场景 ID】${context.scenarioId}` : '',
       context.form ? `【当前编辑表单快照（供理解，不是数据库）】${JSON.stringify(context.form)}` : '',
       '',
@@ -771,7 +788,11 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
     }
 
     const rawOperations = (parsed.operations ?? []).filter((op) => op && typeof op === 'object');
-    if (rawOperations.length === 0) return reply.code(422).send({ error: '没有识别到操作内容，请换个说法重试' });
+    if (rawOperations.length === 0) {
+      // 已覆盖则不修改：LLM 判断现有规则已包含用户要求时返回空 operations，直接回说明
+      if (parsed.reply?.trim()) return { transcript, reply: parsed.reply, operations: [], noChange: true };
+      return reply.code(422).send({ error: '没有识别到操作内容，请换个说法重试' });
+    }
 
     const operations: ParsedOperation[] = [];
     for (const raw of rawOperations) {
