@@ -1,4 +1,5 @@
-import type { ImprovementCandidate, LLMGateway, Scenario, ScoreItemDef, ScoreItemResult, Session } from '@grasp-mvp/core';
+import type { ImprovementCandidate, LLMGateway, Scenario, ScoreItemDef, ScoreItemResult, Session, SuggestionRule } from '@grasp-mvp/core';
+import { fillTemplate, suggestionData, SUGGESTION_KEYS } from './suggestion-rules.js';
 
 export interface SummaryInput {
   totalScore: number;
@@ -11,29 +12,34 @@ export interface SummaryInput {
   improvementGoal?: ImprovementCandidate;
 }
 
-/** 模板回退总结：不依赖 LLM，任何环境下都能给出有信息量的教练点评 */
-export function buildFallbackSummary(scenario: Scenario, input: SummaryInput): string {
+/** 模板回退总结：不依赖 LLM，任何环境下都能给出有信息量的教练点评；文案模板来自改进建议库 */
+export function buildFallbackSummary(scenario: Scenario, input: SummaryInput, rules?: SuggestionRule[]): string {
+  const tpl = suggestionData<Record<string, string>>(rules, SUGGESTION_KEYS.summaryFallback);
   const lines: string[] = [];
   lines.push(
-    `本次练习总分 ${input.totalScore} 分，${input.passed ? '已通过' : '未通过'}（及格线 ${scenario.successCriteria.passScore} 分）。`
+    fillTemplate(tpl.totalLine, {
+      totalScore: input.totalScore,
+      passedText: input.passed ? '已通过' : '未通过',
+      passScore: scenario.successCriteria.passScore,
+    })
   );
   const scored = input.items.filter((i) => !i.isObservation && !i.isDeduction);
   if (scored.length > 0) {
     const best = [...scored].sort((a, b) => b.score - a.score)[0];
-    if (best.score >= 60) lines.push(`表现较好：${best.itemName}（${best.score} 分），继续保持。`);
+    if (best.score >= 60) lines.push(fillTemplate(tpl.bestLine, { itemName: best.itemName, score: best.score }));
   }
   if (input.improvementGoal) {
-    lines.push(`最需要改进：${input.improvementGoal.title}——${input.improvementGoal.rationale}`);
-    lines.push(`具体建议：${input.improvementGoal.suggestion}`);
+    lines.push(fillTemplate(tpl.goalReasonLine, { title: input.improvementGoal.title, rationale: input.improvementGoal.rationale }));
+    lines.push(fillTemplate(tpl.goalSuggestionLine, { suggestion: input.improvementGoal.suggestion }));
   } else {
-    if (input.fatalViolation) lines.push('注意：本次话术命中合规红线，一票否决，务必避免任何效果承诺类表述。');
+    if (input.fatalViolation) lines.push(tpl.fatalLine);
     const worst = [...scored].sort((a, b) => a.score - b.score)[0];
     if (worst?.score < 60) {
       const reason = worst.rationale ? `——${worst.rationale}` : '';
-      lines.push(`最需要改进：${worst.itemName}（${worst.score} 分）${reason}`);
-      lines.push(`建议：针对「${worst.itemName}」参照报告中的更优话术做专项练习，再练一次巩固。`);
+      lines.push(fillTemplate(tpl.worstLine, { itemName: worst.itemName, score: worst.score, reason }));
+      lines.push(fillTemplate(tpl.worstSuggestion, { itemName: worst.itemName }));
     } else {
-      lines.push('建议：保持当前节奏，尝试在更高难度场景中巩固发挥。');
+      lines.push(tpl.goodLine);
     }
   }
   return lines.join('\n');
@@ -81,7 +87,8 @@ export async function generateSummary(
   session: Session,
   scenario: Scenario,
   gateway: LLMGateway,
-  input: SummaryInput
+  input: SummaryInput,
+  rules?: SuggestionRule[]
 ): Promise<string> {
   try {
     const result = await gateway
@@ -94,5 +101,5 @@ export async function generateSummary(
   } catch {
     // 落入模板回退
   }
-  return buildFallbackSummary(scenario, input);
+  return buildFallbackSummary(scenario, input, rules);
 }

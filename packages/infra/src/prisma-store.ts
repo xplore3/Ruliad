@@ -25,6 +25,7 @@ import type {
   RealismStandard,
   RegressionRun,
   Scenario,
+  SuggestionRule,
   ScenarioGuidance,
   ScenarioTask,
   ScoreItemDef,
@@ -143,6 +144,7 @@ export class PrismaStore implements Store {
   private drillScripts;
   private scenarioGuidances;
   private briefingStandards;
+  private suggestionRules;
   private realismStandards;
   private appeals;
   private feedbacks;
@@ -180,6 +182,7 @@ private domainEvents;
     this.drillScripts = docTable<DrillScript>(this.prisma.drillScript, ['id', 'tenantId', 'name', 'category']);
     this.scenarioGuidances = docTable<ScenarioGuidance>(this.prisma.scenarioGuidance, ['id', 'tenantId', 'scenarioId', 'name']);
     this.briefingStandards = docTable<BriefingStandard>(this.prisma.briefingStandard, ['id', 'tenantId', 'name', 'category']);
+    this.suggestionRules = docTable<SuggestionRule>(this.prisma.suggestionRule, ['id', 'tenantId', 'name', 'key', 'category']);
     this.realismStandards = docTable<RealismStandard>(this.prisma.realismStandard, ['id', 'tenantId', 'name', 'category']);
     this.appeals = docTable<Appeal>(this.prisma.appeal, ['id', 'sessionId', 'userId', 'status', 'createdAt']);
     this.feedbacks = docTable<Feedback>(this.prisma.feedback, ['id', 'tenantId', 'userId', 'userName', 'type', 'content', 'source', 'status', 'createdAt', 'updatedAt']);
@@ -455,6 +458,15 @@ this.domainEvents = docTable<DomainEvent>(this.prisma.domainEvent, ['id', 'type'
   }
   deleteBriefingStandard(id: string) {
     return this.briefingStandards.delete(id);
+  }
+  listSuggestionRules(tenantId: string) {
+    return this.suggestionRules.list({ tenantId });
+  }
+  saveSuggestionRule(rule: SuggestionRule) {
+    return this.suggestionRules.upsertById(rule);
+  }
+  deleteSuggestionRule(id: string) {
+    return this.suggestionRules.delete(id);
   }
   listRealismStandards(tenantId: string) {
     return this.realismStandards.list({ tenantId });

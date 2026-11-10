@@ -8,6 +8,7 @@ import type {
   Session,
   SkillScore,
   QuizScore,
+  SuggestionRule,
   VoiceBaseline,
 } from '@grasp-mvp/core';
 import { isReceptionTrialDeclined } from '@grasp-mvp/core';
@@ -54,6 +55,8 @@ export interface ScoreOptions {
   institutionKB?: ProductKB;
   /** 客户 TTS 语速倍率：语速在普通适中区间或该倍率对应的客户匹配区间，任一满足即得分 */
   customerRateMultiplier?: number;
+  /** 改进建议库：点评/改进建议文案与阶段逻辑的唯一来源；缺省用内置默认规则（与迁移前一致） */
+  suggestionRules?: SuggestionRule[];
 }
 
 /** 评分过程日志器最小接口 */
@@ -101,7 +104,7 @@ export async function scoreSession(
 
   const items = await mapWithConcurrency(relevantDefs, 3, async (def, i) => {
     const itemStart = Date.now();
-    const item = await judgeItem(def, session, gateway, scenario, options.scoringFocus, stats, options.institutionKB, options.customerRateMultiplier);
+    const item = await judgeItem(def, session, gateway, scenario, options.scoringFocus, stats, options.institutionKB, options.customerRateMultiplier, options.suggestionRules);
     log?.info(
       {
         sessionId: session.id,
@@ -178,8 +181,8 @@ export async function scoreSession(
     : undefined;
 
   const improvementGoal = incomplete
-    ? buildGroundPushIncompleteGoal(session)
-    : buildImprovementGoal(items, relevantDefs, violations, baseScore);
+    ? buildGroundPushIncompleteGoal(session, options.suggestionRules)
+    : buildImprovementGoal(items, relevantDefs, violations, baseScore, options.suggestionRules);
 
   // ---- 教练总结：LLM 优先生成，失败回退模板，保证报告始终带 summary ----
   const fillerTotal = Object.values(stats.fillerCounts).reduce((sum, n) => sum + n, 0);
@@ -193,7 +196,7 @@ export async function scoreSession(
         defs: relevantDefs,
         fillerTotal,
         improvementGoal,
-      });
+      }, options.suggestionRules);
 
   log?.info(
     {

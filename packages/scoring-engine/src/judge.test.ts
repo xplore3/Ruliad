@@ -524,3 +524,21 @@ describe('judgeItem 机构资料注入', () => {
     expect(prompts[0]).not.toContain('机构实际资料');
   });
 });
+
+describe('judgeItem 扣减项输出格式', () => {
+  it('deductionOnly 项要求 score 为扣减参数，未触犯必须为 0，而非百分制总分', async () => {
+    const prompts: string[] = [];
+    const handler: MockHandler = (messages) => {
+      prompts.push(messages.map((m) => m.content).join('\n'));
+      return JSON.stringify({ score: 0, quote: '', quoteTurnSeq: 1, rationale: '', betterScript: '' });
+    };
+    const gateway: LLMGateway = { forTask: () => new MockLLMProvider(handler) };
+    const tabooDef: ScoreItemDef = {
+      ...def, id: 'item-taboo-fmt', name: '地推销售忌讳', scoringMode: 'score', deductionOnly: true, weight: 0, levels: [],
+    };
+    await judgeItem(tabooDef, session, gateway);
+    expect(prompts[0]).toContain('扣减参数');
+    expect(prompts[0]).toContain('未触犯任何条款时必须为0');
+    expect(prompts[0]).not.toContain('0到100的整数总分');
+  });
+});

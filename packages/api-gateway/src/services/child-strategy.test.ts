@@ -77,13 +77,13 @@ it('先情感支持再讲有趣故事后提问时孩子固定回答喜欢并解�
   expect((await store.getSession(session.id))?.childInterestResolved).toBe(true);
 });
 
-it('第二次仍不能合理说服孩子时记为卖邀请函失败', async () => {
+it('第二次仍不能合理说服孩子时记为家长认为孩子不感兴趣而离开', async () => {
   const { store, session, ctx } = await setup({ effective: false, attempt: 1 });
   const result = await runTurn(ctx, session, scenario, '你就说喜欢还是不喜欢？');
   expect(result?.timeUp).toBe(true);
   const saved = await store.getSession(session.id);
   expect(saved?.completionStatus).toBe('incomplete');
-  expect(saved?.completionReason).toContain('卖邀请函失败');
+  expect(saved?.completionReason).toContain('家长认为孩子不感兴趣');
 });
 
 it('提前解决孩子兴趣后向客户注入六连问末题替换规则', async () => {
@@ -110,5 +110,5 @@ it('讲故事征求意见后第二次仍无效时触发家长离开', async () =
   expect(result?.timeUp).toBe(true);
   const saved = await store.getSession(session.id);
   expect(saved?.completionStatus).toBe('incomplete');
-  expect(saved?.completionReason).toContain('卖邀请函失败');
+  expect(saved?.completionReason).toContain('家长认为孩子不感兴趣');
 });

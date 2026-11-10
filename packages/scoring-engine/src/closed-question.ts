@@ -68,6 +68,6 @@ export async function analyzeClosedAdvanceQuestions(
       quoteTurnSeq: turn.seq,
     };
   } catch {
-    return noDeduction('非邀约封闭式推进提问语义复核失败，保守不扣分。');
+    return noDeduction('封闭式推进提问检测未完成，本项未扣分。');
   }
 }

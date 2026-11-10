@@ -8,7 +8,9 @@ import type {
   ScoreItemResult,
   ScoreReport,
   Session,
+  SuggestionRule,
 } from '@grasp-mvp/core';
+import { suggestionData, SUGGESTION_KEYS } from './suggestion-rules.js';
 import { judgeReceptionAnswers } from './reception.js';
 import { analyzeReceptionFluency } from './fluency.js';
 import { analyzeReceptionRepetition } from './repetition.js';
@@ -206,19 +208,20 @@ function buildProsodyLines(session: Session): string[] {
 }
 
 const CUSTOMER_FAREWELL_PATTERN = /先走了|再见|拜拜|回头见|下次见|周[一二三四五六日天]见/;
-const VAGUE_GROUND_SCRIPT_PATTERN = /(?:您|你)(?:先)?(?:看|了解)(?:一下|下)/;
-const CONCRETE_GROUND_ACTION_PATTERN = /拿上|接过|登记|填写|支付|购买|订好|定下|约定|安排|报名/;
 
-function actionableGroundBetterScript(script: string, category?: string): string {
+function actionableGroundBetterScript(script: string, category?: string, rules?: SuggestionRule[]): string {
+  const vague = suggestionData<{
+    vagueBetterScript: { vaguePattern: string; concretePattern: string; replacement: string };
+  }>(rules, SUGGESTION_KEYS.groundPushIncomplete, '地推').vagueBetterScript;
   if (
     category !== '地推' ||
     !script ||
-    !VAGUE_GROUND_SCRIPT_PATTERN.test(script) ||
-    CONCRETE_GROUND_ACTION_PATTERN.test(script)
+    !new RegExp(vague.vaguePattern).test(script) ||
+    new RegExp(vague.concretePattern).test(script)
   ) {
     return script;
   }
-  return '来，您拿上邀请函，我给您登记姓名和电话，再约孩子周六到校体验。';
+  return vague.replacement;
 }
 
 function customerEndedWithFarewell(session: Session): boolean {
@@ -283,7 +286,9 @@ function buildJudgePrompt(
     '对话记录：',
     transcriptLines,
     def.scoringMode === 'score'
-      ? '请只输出 JSON：{"score":0到100的整数总分,"dimensions":"各维度得分明细（仅限该评分标准自身定义的维度）","quote":"引用原文","quoteTurnSeq":数字,"rationale":"判定理由","betterScript":"更优话术示范"}'
+      ? def.deductionOnly
+        ? '请只输出 JSON：{"score":扣减参数（0到100的整数，表示按该标准累计应扣减的分值；未触犯任何条款时必须为0，禁止输出100减分后的得分）,"dimensions":"各条款是否触犯及各自扣减分值明细（仅限该评分标准自身定义的条款）","quote":"引用原文","quoteTurnSeq":数字,"rationale":"判定理由","betterScript":"更优话术示范"}'
+        : '请只输出 JSON：{"score":0到100的整数总分,"dimensions":"各维度得分明细（仅限该评分标准自身定义的维度）","quote":"引用原文","quoteTurnSeq":数字,"rationale":"判定理由","betterScript":"更优话术示范"}'
       : '请只输出 JSON：{"levelKey":"档位key","quote":"引用原文","quoteTurnSeq":数字,"rationale":"判定理由","betterScript":"更优话术示范"}',
     'rationale 中不同语义点请用换行符（\n）分隔，让每个语义段成为独立一条，不要把所有内容挤在一个段落里。',
     'betterScript 要求：针对该评分标准的扣分点，给一句学员当时可以直接说的中文话术示范，不超过 60 字；若判定为最高档（无扣分）则给空字符串。话术必须写清具体对象、动作和业务目的，不得只写“注意沟通”“您看一下”“您了解一下”等空泛建议。地推场景涉及业务推进时，应明确让客户拿上邀请函、填写姓名电话、选择支付方式或约定到校时间等下一步动作。',
@@ -323,7 +328,7 @@ function parseJudgeOutput(content: string, def: ScoreItemDef): JudgeParsed {
         betterScript: String(parsed.betterScript ?? ''),
       };
     } catch {
-      return { levelKey: 'score', score: 50, quote: '', quoteTurnSeq: 0, rationale: 'judge 输出解析失败，回退中间分 50', betterScript: '' };
+      return { levelKey: 'score', score: 50, quote: '', quoteTurnSeq: 0, rationale: '本次评定信息不足，暂按 50 分计', betterScript: '' };
     }
   }
   try {
@@ -345,7 +350,7 @@ function parseJudgeOutput(content: string, def: ScoreItemDef): JudgeParsed {
       levelKey: mid.key,
       quote: '',
       quoteTurnSeq: 0,
-      rationale: `judge 输出解析失败，回退中间档 ${mid.key}`,
+      rationale: `本次评定信息不足，暂按「${mid.label}」档计`,
       betterScript: '',
     };
   }
@@ -373,7 +378,8 @@ export async function judgeItem(
   scoringFocus?: string[],
   stats?: ScoreReport['ruleStats'],
   institutionKB?: ProductKB,
-  customerRateMultiplier?: number
+  customerRateMultiplier?: number,
+  rules?: SuggestionRule[]
 ): Promise<ScoreItemResult> {
   if (def.name === '对答得当' && scenario?.category === '咨询接待' && session.receptionQuestions?.length === 10) {
     return judgeReceptionAnswers(def, session, gateway, institutionKB);
@@ -383,6 +389,9 @@ export async function judgeItem(
   }
   if (['地推主动性', '地推范主动性'].includes(def.name) && scenario?.category === '地推' && session.completionStatus === 'incomplete') {
     const lastTrainee = [...session.transcript].reverse().find((turn) => turn.speaker === 'trainee');
+    const incompleteItem = suggestionData<{ incompleteItem: { rationale: string; betterScript: string } }>(
+      rules, SUGGESTION_KEYS.groundPushIncomplete, '地推'
+    ).incompleteItem;
     return {
       itemId: def.id,
       itemName: def.name,
@@ -392,8 +401,8 @@ export async function judgeItem(
       score: 0,
       quote: lastTrainee?.text ?? '',
       quoteTurnSeq: lastTrainee?.seq ?? 0,
-      rationale: session.completionReason ?? '客户已给最后推进机会，但学员仍没有实质成交动作，地推主动性不合格，本场未完成。',
-      betterScript: '来，您拿上邀请函，在这边填一下姓名和电话。您是微信还是支付宝？我们现在订好，再约孩子到校体验的时间。',
+      rationale: session.completionReason ?? incompleteItem.rationale,
+      betterScript: incompleteItem.betterScript,
       confidence: 0.99,
       judgeAgree: true,
       isReference: false,
@@ -454,7 +463,7 @@ export async function judgeItem(
 
   const prompt = buildJudgePrompt(def, session, scenario, scoringFocus, stats, institutionKB);
   const primary = await runJudge(gateway.forTask('judge'), prompt, def);
-  primary.betterScript = actionableGroundBetterScript(primary.betterScript, scenario?.category ?? def.category);
+  primary.betterScript = actionableGroundBetterScript(primary.betterScript, scenario?.category ?? def.category, rules);
   const secondary = await runJudge(gateway.forTask('judge_secondary'), prompt, def);
 
   // 直接打分模式：双 judge 分差 ≤10 视为一致（取均值），否则取主 judge 并标记"参考"
@@ -465,7 +474,7 @@ export async function judgeItem(
     const baseScore = agree ? Math.round((p + s) / 2) : p;
     const baseRationale = agree
       ? primary.rationale
-      : `${primary.rationale}（双 judge 不一致：次 judge 判 ${s} 分，取主 judge 结果）`;
+      : `${primary.rationale}（两位评审判定不一致，本项结果仅供参考）`;
     const isReceptionTaboo = def.name === '咨询接待忌讳事项' && scenario?.category === '咨询接待';
     const isGroundPushTaboo = def.name === '地推销售忌讳' && scenario?.category === '地推';
     const usesSharedTabooRules = isReceptionTaboo || isGroundPushTaboo;
@@ -477,6 +486,7 @@ export async function judgeItem(
       ? await analyzeReceptionKnowledgeHonesty(session, gateway, institutionKB)
       : undefined;
     const childClosedQuestions = isGroundPushTaboo ? analyzeGroundChildClosedQuestions(session) : undefined;
+    const advice = suggestionData<Record<string, { title: string; suggestion: string }>>(rules, SUGGESTION_KEYS.tabooDeterministic);
     const quoteTurnSeq = fluency?.triggered
       ? fluency.quoteTurnSeq
       : repetition?.triggered
@@ -512,12 +522,12 @@ export async function judgeItem(
       ].filter(Boolean).join('\n'),
       betterScript: [
         primary.betterScript,
-        fluency?.triggered ? '放慢语速，先组织好语言再完整表达，减少嗯、啊和重复断句。' : '',
-        repetition?.triggered ? '直接回应客户当前的问题，同一意思表达一次即可，把新信息讲简洁、讲全面。' : '',
-        trialInvitation?.triggered ? '您什么时候方便参加？我给您安排。' : '',
-        closedAdvanceQuestions?.triggered ? '我直接给您介绍一下我们课程的核心优势，您听听看是否适合孩子。' : '',
-        childClosedQuestions?.triggered ? '先尊重和鼓励孩子，再讲一个有趣的故事或做个小游戏，孩子开心后再问他喜不喜欢。' : '',
-        knowledgeHonesty?.triggered ? '我是新来的，对您问的问题确实不清楚，我马上了解清楚再回复您。' : '',
+        fluency?.triggered ? advice.fluency.suggestion : '',
+        repetition?.triggered ? advice.repetition.suggestion : '',
+        trialInvitation?.triggered ? advice.trialInvitation.suggestion : '',
+        closedAdvanceQuestions?.triggered ? advice.closedAdvanceQuestions.suggestion : '',
+        childClosedQuestions?.triggered ? advice.childClosedQuestions.suggestion : '',
+        knowledgeHonesty?.triggered ? advice.knowledgeHonesty.suggestion : '',
       ].filter(Boolean).join('；') || undefined,
       confidence: agree ? 0.95 : 0.5,
       judgeAgree: agree,
@@ -534,45 +544,45 @@ export async function judgeItem(
           quoteTurnSeq: primary.quoteTurnSeq,
         }] : []),
         ...(fluency?.triggered ? [{
-          title: '避免磕磕绊绊和填充词',
+          title: advice.fluency.title,
           impact: fluency.deduction,
           rationale: fluency.rationale,
-          suggestion: '放慢语速，先组织好语言再完整表达，减少嗯、啊和重复断句。',
+          suggestion: advice.fluency.suggestion,
           quoteTurnSeq: fluency.quoteTurnSeq,
         }] : []),
         ...(repetition?.triggered ? [{
-          title: '同一意思只表达一次',
+          title: advice.repetition.title,
           impact: repetition.deduction,
           rationale: repetition.rationale,
-          suggestion: '直接回应客户当前的问题，同一意思表达一次即可，把新信息讲简洁、讲全面。',
+          suggestion: advice.repetition.suggestion,
           quoteTurnSeq: repetition.quoteTurnSeq,
         }] : []),
         ...(trialInvitation?.triggered ? [{
-          title: '用开放式问题推进邀约',
+          title: advice.trialInvitation.title,
           impact: trialInvitation.deduction,
           rationale: trialInvitation.rationale,
-          suggestion: '您什么时候方便参加？我给您安排。',
+          suggestion: advice.trialInvitation.suggestion,
           quoteTurnSeq: trialInvitation.quoteTurnSeq,
         }] : []),
         ...(closedAdvanceQuestions?.triggered ? [{
-          title: '避免封闭式推进提问',
+          title: advice.closedAdvanceQuestions.title,
           impact: closedAdvanceQuestions.deduction,
           rationale: closedAdvanceQuestions.rationale,
-          suggestion: '我直接给您介绍一下我们课程的核心优势，您听听看是否适合孩子。',
+          suggestion: advice.closedAdvanceQuestions.suggestion,
           quoteTurnSeq: closedAdvanceQuestions.quoteTurnSeq,
         }] : []),
         ...(childClosedQuestions?.triggered ? [{
-          title: '先铺垫再询问孩子兴趣',
+          title: advice.childClosedQuestions.title,
           impact: childClosedQuestions.deduction,
           rationale: childClosedQuestions.rationale,
-          suggestion: '先尊重和鼓励孩子，再讲一个有趣的故事或做个小游戏，孩子开心后再问他喜不喜欢。',
+          suggestion: advice.childClosedQuestions.suggestion,
           quoteTurnSeq: childClosedQuestions.quoteTurnSeq,
         }] : []),
         ...(knowledgeHonesty?.triggered ? [{
-          title: '不确定时先核实，不信口胡说',
+          title: advice.knowledgeHonesty.title,
           impact: knowledgeHonesty.deduction,
           rationale: knowledgeHonesty.rationale,
-          suggestion: '我是新来的，对您问的问题确实不清楚，我马上了解清楚再回复您。',
+          suggestion: advice.knowledgeHonesty.suggestion,
           quoteTurnSeq: knowledgeHonesty.quoteTurnSeq,
         }] : []),
       ],
@@ -594,7 +604,7 @@ export async function judgeItem(
     quoteTurnSeq: chosen.quoteTurnSeq,
     rationale: agree
       ? chosen.rationale
-      : `${chosen.rationale}（双 judge 不一致：次 judge 判 ${secondary.levelKey}，取主 judge 结果）`,
+      : `${chosen.rationale}（两位评审判定不一致，本项结果仅供参考）`,
     betterScript: chosen.betterScript || undefined,
     confidence: agree ? 0.95 : 0.5,
     judgeAgree: agree,

@@ -23,6 +23,7 @@ import type {
   RealismStandard,
   RegressionRun,
   Scenario,
+  SuggestionRule,
   ScenarioGuidance,
   ScenarioTask,
   ScoreItemDef,
@@ -190,6 +191,9 @@ export interface Store {
   listBriefingStandards(tenantId: string): Promise<BriefingStandard[]>;
   saveBriefingStandard(s: BriefingStandard): Promise<void>;
   deleteBriefingStandard(id: string): Promise<void>;
+  listSuggestionRules(tenantId: string): Promise<SuggestionRule[]>;
+  saveSuggestionRule(rule: SuggestionRule): Promise<void>;
+  deleteSuggestionRule(id: string): Promise<void>;
   listRealismStandards(tenantId: string): Promise<RealismStandard[]>;
   saveRealismStandard(s: RealismStandard): Promise<void>;
   deleteRealismStandard(id: string): Promise<void>;

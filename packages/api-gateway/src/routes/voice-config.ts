@@ -173,6 +173,11 @@ async function locateResource(
 
   const all = (await listResources(store, target, tenantId)) as any[];
   if (!q) return undefined;
+  // 改进建议规则支持按稳定 key / id 定位（名称与 key 都可作为 subject）
+  if (target === 'suggestion-rule') {
+    const byKey = all.find((item) => normalize(item.key) === q || normalize(item.id) === q);
+    if (byKey) return byKey;
+  }
   const exact = all.find((item) => normalize(nameOf(target, item)) === q);
   if (exact) return exact;
   return all.find((item) => matchesName(nameOf(target, item), q));
@@ -471,8 +476,8 @@ function decideScope(args: {
   general: boolean;
   generalReason?: string;
 }): { scope: 'direct' | 'copy-on-write' | 'general'; reason?: string } {
-  if (args.general) return { scope: 'general', reason: args.generalReason };
   if (args.admin) return { scope: 'direct' };
+  if (args.general) return { scope: 'general', reason: args.generalReason };
   // 方法论配置是租户共享配置：非管理员的新建同样进入通用建议，不直接落库
   if (args.action === 'create' && args.target !== 'methodology-config') return { scope: 'direct' };
   if (args.target === 'scenario') {
@@ -710,6 +715,7 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
     const drillScripts = (await store.listDrillScripts(request.tenantId)).slice(0, 5).map((s) => ({
       id: s.id, name: s.name, category: s.category, content: String(s.content ?? '').slice(0, 6000),
     }));
+    const suggestionRules = await store.listSuggestionRules(request.tenantId);
     const prompt = [
       '你是销售陪练系统的「语音自动场景创建和配置」助手。用户用自然语言描述要创建或修改的场景、场景配置或资源库对象。',
       '',
@@ -718,7 +724,7 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
       '  scenario=对练场景；persona=陪练角色；skill-point=技能点；element=角色要素；product-kb=产品知识库；',
       '  demo-faq=示范问答；demo-script=示范剧本；drill-script=演练剧本；score-item=评分标准；golden-case=评分回归案例；',
       '  briefing-standard=讲解标准；realism-standard=演练真实度标准；scenario-guidance=场景指引配置；',
-      '  quiz-question=测验题；methodology-config=方法论配置。',
+      '  quiz-question=测验题；methodology-config=方法论配置；suggestion-rule=改进建议规则（点评/改进建议的文案与阶段逻辑）。',
       '- action = create、update 或 analyze-update。',
       '- analyze-update 用于要求先查找历史演练、分析评分原因、再修改评分标准的复合指令；target=score-item，fields={}。',
       '- analysis={category:"地推|电销|咨询接待|现场成交（可选）",scenarioName:"历史场景名称（可选）",aspect:"用户要求补充的评分维度"}；aspect 用简短中文保留用户原意，例如磕磕绊绊、礼貌礼仪、需求挖掘、预算异议，不要限定为固定枚举。',
@@ -745,9 +751,11 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
       '- 客户的拒绝/异议话术、六连问、孩子沟通节拍（先情感支持再讲故事）、成交环节规则 → target=drill-script，fields.content 为合并后的剧本全文（在下方【现有演练剧本】基础上修改，保留无关段落原文）。',
       '- 评分/扣分/误判/评分口径问题（如虚假承诺、语速、激情度）→ target=score-item；若用户提到某次历史演练的误判，用 analyze-update 诊断并追加判定说明，不要重写全文。',
       '- 机构事实（班容、价格、师资、课时、退费、地址等）→ target=product-kb，fields.entries 必须包含全部原有条目加新增/修改条目，不得只返回新增条目。',
+      '- 点评/改进建议的内容与阶段逻辑（如"以后XX情况都用这个改进建议"）→ target=suggestion-rule，fields.data 在【现有改进建议规则】基础上合并修改，保留未涉及的键；subject 用规则名称或 key（如 ground-push-incomplete）。建议库是租户内普通配置资源，general=false，不要因"适用于所有演练"就标为通用建议。',
       '- 客户性格、情绪反应、提问方式 → target=persona，改 personalityTags/behaviorBands/background 等。',
       '- 场景目标、考核点、及格分、时长 → target=scenario 对应字段。',
       '- 用户说"上一场/刚才那次演练"是在指认问题发生的现场，不代表一定要改评分标准；按问题实质选择资源。',
+      '- 给评分标准追加判定说明时，用 fields.judgePromptAppend / behaviorAnchorAppend（服务端自动追加到原文末尾），不要整体替换 judgePrompt/behaviorAnchor/content 等长文本字段。',
       '',
       '【已覆盖则不修改】',
       '先对照【现有演练剧本】等现状内容判断用户要求是否已经被现有规则覆盖。若已完整覆盖：operations 返回空数组，reply 用一两句话指出现有哪条规则已包含该要求，不要重复追加或改写。若只是部分覆盖，只修改缺失部分。',
@@ -760,6 +768,7 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
       '',
       `【当前租户可用资源】${JSON.stringify(names)}`,
       drillScripts.length ? `【现有演练剧本】${JSON.stringify(drillScripts)}` : '',
+      suggestionRules.length ? `【现有改进建议规则】${JSON.stringify(suggestionRules.map((r) => ({ id: r.id, key: r.key, name: r.name, category: r.category, data: r.data })))}` : '',
       context.scenarioId ? `【当前正在编辑的场景 ID】${context.scenarioId}` : '',
       context.form ? `【当前编辑表单快照（供理解，不是数据库）】${JSON.stringify(context.form)}` : '',
       '',
@@ -812,7 +821,7 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
         drillScriptName: raw.drillScriptName ? String(raw.drillScriptName) : undefined,
         conversation: (raw.conversation ?? {}) as Patch,
         analysis: raw.analysis && typeof raw.analysis === 'object' ? raw.analysis : undefined,
-        general: raw.general === true,
+        general: target === 'suggestion-rule' ? false : raw.general === true,
         generalReason: raw.generalReason ? String(raw.generalReason) : undefined,
       });
     }
@@ -917,7 +926,14 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
       }
 
       if (op.target === 'scenario') {
-        const { patch, bindings, bindingsProvided } = await buildScenarioPatch(store, request.tenantId, op.fields);
+        const fieldsWithBindings: Patch = {
+          ...op.fields,
+          // 空数组是 LLM 输出模板里的占位符，不是"清空"指令，只有非空才转发
+          ...(op.skillPointNames?.length ? { skillPointNames: op.skillPointNames } : {}),
+          ...(op.scoreItemNames?.length ? { scoreItemNames: op.scoreItemNames } : {}),
+          ...(op.drillScriptName ? { drillScriptName: op.drillScriptName } : {}),
+        };
+        const { patch, bindings, bindingsProvided } = await buildScenarioPatch(store, request.tenantId, fieldsWithBindings);
         const basePersona = buildPersonaPatch(op.persona ?? {});
         const { personaPatch, behaviorBands } = pushPersonaOps(planOperations, op, basePersona, current);
         if (behaviorBands) personaPatch.behaviorBands = behaviorBands;
@@ -952,8 +968,13 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
         } else {
           const scenarioPatch: Patch = { ...patch };
           if (bindingsProvided) {
-            scenarioPatch.skillPointIds = bindings.skillPointIds;
-            scenarioPatch.scoreItemIds = bindings.scoreItemIds;
+            // 更新场景时绑定为增量合并（"绑定X"不应清掉已有绑定）；空数组占位符已在转发时过滤，未提及的绑定类型不动
+            if (Array.isArray(fieldsWithBindings.skillPointNames) && fieldsWithBindings.skillPointNames.length) {
+              scenarioPatch.skillPointIds = [...new Set([...(current.skillPointIds ?? []), ...bindings.skillPointIds])];
+            }
+            if (Array.isArray(fieldsWithBindings.scoreItemNames) && fieldsWithBindings.scoreItemNames.length) {
+              scenarioPatch.scoreItemIds = [...new Set([...(current.scoreItemIds ?? []), ...bindings.scoreItemIds])];
+            }
             if (bindings.drillScriptId) scenarioPatch.drillScriptId = bindings.drillScriptId;
           }
           const personaChanged = Object.keys(personaPatch).length > 0;
@@ -1011,9 +1032,30 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
       }
 
       // 非场景资源
+      // 追加语义：LLM 给出 xxxAppend 字段时，与当前资源文本合并（judgePromptAppend → judgePrompt 追加），避免全文重写失败
+      const mergedFields: Patch = { ...op.fields };
+      for (const key of Object.keys(mergedFields)) {
+        if (!key.endsWith('Append')) continue;
+        const base = key.slice(0, -'Append'.length);
+        const addition = asText(mergedFields[key]);
+        delete mergedFields[key];
+        if (!addition) continue;
+        const existing = typeof current?.[base] === 'string' ? (current[base] as string).trim() : '';
+        mergedFields[base] = existing && !existing.includes(addition) ? `${existing}\n${addition}` : (existing || addition);
+      }
       let clean: Patch;
-      try { clean = cleanPatch(op.target, op.fields); } catch (error) {
+      try { clean = cleanPatch(op.target, mergedFields); } catch (error) {
         return reply.code(422).send({ error: error instanceof Error ? error.message : '提取结果无效' });
+      }
+      // 防覆盖护栏：长文本字段的整体替换必须保留原文开头，否则视为误覆盖（追加请用 xxxAppend）
+      if (current && (op.target === 'score-item' || op.target === 'drill-script')) {
+        for (const field of ['judgePrompt', 'behaviorAnchor', 'content']) {
+          const before = typeof current[field] === 'string' ? (current[field] as string).trim() : '';
+          const next = typeof clean[field] === 'string' ? (clean[field] as string).trim() : undefined;
+          if (next && before.length > 200 && !next.includes(before.slice(0, 80))) {
+            return reply.code(422).send({ error: `字段 ${field} 的修改未保留原有内容，属于整体覆盖。请改用「${field}Append」追加说明，或输出包含原文的完整合并文本。` });
+          }
+        }
       }
       // 测验题的引用字段允许用名称，服务端解析为租户内 ID；解析失败直接回读错误
       if (op.target === 'quiz-question') {

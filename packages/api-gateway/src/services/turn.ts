@@ -379,7 +379,7 @@ export async function runTurn(
           childInterestResolved,
           childStoryOffered,
           completionStatus: 'incomplete',
-          completionReason: `卖邀请函失败：销售未能用合理策略说服孩子。${strategy.reason}`,
+          completionReason: `家长认为孩子不感兴趣，带孩子离开了：销售未能用合理策略说服孩子。${strategy.reason}`,
         });
         analyzeIntentInBackground();
         return {
@@ -469,7 +469,7 @@ export async function runTurn(
     ? receptionTrialFollowup({ ...session, transcript: transcriptSoFar })
     : undefined;
   const groundPushProgress = !receptionFollowup && !isSystemGreeting && !dualScene && (scenario.flowType ? scenario.flowType === 'ground_push' : scenario.category === '地推')
-    ? await assessGroundPushProgress(gateway.forTask('actor'), transcriptSoFar, groundPushLastChance)
+    ? await assessGroundPushProgress(gateway.forTask('actor'), transcriptSoFar, groundPushLastChance, await store.listSuggestionRules(session.tenantId))
     : undefined;
   if (receptionFollowup) {
     replyText = receptionFollowup.text;

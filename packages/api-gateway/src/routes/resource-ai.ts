@@ -13,6 +13,7 @@ import type {
   QuizQuestion,
   RealismStandard,
   Scenario,
+  SuggestionRule,
   ScenarioGuidance,
   ScoreItemDef,
   SkillPoint,
@@ -26,7 +27,7 @@ import { requireRoles } from '../auth.js';
 export const TARGETS = [
   'scenario', 'persona', 'skill-point', 'element', 'product-kb', 'demo-faq', 'demo-script',
   'drill-script', 'score-item', 'golden-case', 'briefing-standard', 'realism-standard', 'scenario-guidance',
-  'quiz-question', 'methodology-config',
+  'quiz-question', 'methodology-config', 'suggestion-rule',
 ] as const;
 export type Target = (typeof TARGETS)[number];
 export type Patch = Record<string, unknown>;
@@ -71,6 +72,11 @@ export const RESOURCE_DEFS: Record<Target, { label: string; fields: string[]; sc
     fields: ['name', 'skillWeights', 'redlinePhrases', 'fillerWords', 'passScore'],
     schema: 'name 字符串；skillWeights 为 {技能点ID:权重} 对象；redlinePhrases/fillerWords 为字符串数组；passScore 0-100 数字。租户内单例，新建即编辑同一份配置。',
   },
+  'suggestion-rule': {
+    label: '改进建议规则',
+    fields: ['name', 'key', 'category', 'data'],
+    schema: 'name/key 必填（key 为稳定规则键：ground-push-incomplete=地推未完成演练、taboo-deterministic=忌讳项确定性建议、generic-goal=通用改进目标兜底、summary-fallback=教练总结兜底模板）；category=地推|电销|咨询接待|现场成交（可空=通用）；data 为该规则组的结构化内容对象（阶段定义 stages、建议文本 suggestion、模板等），修改时在现有 data 基础上合并，保留未涉及的键。',
+  },
 };
 
 export function revisionOf(item: unknown): string {
@@ -108,6 +114,7 @@ export async function getResource(store: Store, target: Target, id: string | und
       item = config && (!id || config.id === id) ? config : undefined;
       break;
     }
+    case 'suggestion-rule': item = (await store.listSuggestionRules(tenantId)).find((entry) => entry.id === id || entry.key === id); break;
   }
   if (!item || (item.tenantId !== tenantId && !(target === 'golden-case' && !item.tenantId))) return undefined;
   return item;
@@ -130,6 +137,7 @@ export async function listResources(store: Store, target: Target, tenantId: stri
     case 'scenario-guidance': return store.listScenarioGuidances(tenantId);
     case 'quiz-question': return store.listQuizQuestions(tenantId);
     case 'methodology-config': { const config = await store.getMethodologyConfig(tenantId); return config ? [config] : []; }
+    case 'suggestion-rule': return store.listSuggestionRules(tenantId);
   }
 }
 
@@ -228,6 +236,7 @@ export function validateRequired(target: Target, item: any): string | null {
   if (target === 'score-item' && (!item.name?.trim() || !item.skillPointId || (item.scoringMode !== 'score' && !item.levels?.length))) return '评分标准名称、技能点、档位必填';
   if (target === 'golden-case' && (!item.name?.trim() || !item.transcript?.length || !item.expected?.length)) return '回归案例名称、对话、期望判定必填';
   if ((target === 'briefing-standard' || target === 'realism-standard') && (!item.name?.trim() || !item.category?.trim() || !item.description?.trim())) return '标准名称、分类、说明必填';
+  if (target === 'suggestion-rule' && (!item.name?.trim() || !item.key?.trim() || !item.data || typeof item.data !== 'object')) return '建议规则名称、稳定键 key 与结构化内容 data 必填';
   if (target === 'scenario-guidance' && (!item.name?.trim() || !item.scenarioId || !Array.isArray(item.qualifyQuestions))) return '指引名称、绑定场景、资格问题数组必填';
   if (target === 'quiz-question') {
     if (!item.prompt?.trim() || !QUIZ_TYPES.includes(item.type)) return '测验题题干与类型必填，类型无效';
@@ -337,6 +346,7 @@ export async function applyResource(store: Store, target: Target, id: string | u
     case 'golden-case': await store.saveGoldenCase(item as GoldenCase); return item;
     case 'briefing-standard': await store.saveBriefingStandard(item as BriefingStandard); return item;
     case 'realism-standard': await store.saveRealismStandard(item as RealismStandard); return item;
+    case 'suggestion-rule': await store.saveSuggestionRule(item as SuggestionRule); return item;
     case 'scenario-guidance': {
       item.demoScriptId = item.demoScriptId ?? null;
       item.keyPoints = item.keyPoints ?? [];

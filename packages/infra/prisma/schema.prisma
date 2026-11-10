@@ -191,6 +191,18 @@ model BriefingStandard {
   @@index([tenantId])
 }
 
+/// 改进建议库：点评/改进建议文案与阶段逻辑，替代代码硬编码；key=稳定规则键，data=结构化规则内容
+model SuggestionRule {
+  id       String @id @default(uuid())
+  tenantId String
+  name     String
+  key      String
+  category String @default("")
+  data     String
+
+  @@index([tenantId])
+}
+
 /// 演练真实度标准库：第4步「演练」AI 客户逼真度要求
 model RealismStandard {
   id       String @id @default(uuid())

@@ -247,6 +247,7 @@ export async function workshopRoutes(app: FastifyInstance, ctx: RouteContext): P
       if (!scenario || scenario.tenantId !== request.tenantId) return reply.code(404).send({ error: '场景不存在' });
       const defs = await store.listScoreItemDefs(scenario.tenantId);
       const cases = await store.listGoldenCases(request.tenantId);
+      const suggestionRules = await store.listSuggestionRules(request.tenantId);
 
       const details: RegressionRun['details'] = [];
       for (const c of cases) {
@@ -264,7 +265,7 @@ export async function workshopRoutes(app: FastifyInstance, ctx: RouteContext): P
           startedAt: now,
           endedAt: now,
         };
-        const report = await scoreSession(session, scenario, defs, gateway);
+        const report = await scoreSession(session, scenario, defs, gateway, { suggestionRules });
         for (const exp of c.expected) {
           const item = report.items.find((i) => i.itemId === exp.itemId);
           details.push({

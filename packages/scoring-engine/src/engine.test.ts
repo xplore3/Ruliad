@@ -330,7 +330,7 @@ describe('scoreSession', () => {
     expect(report.summary).toContain('本场演练未完成');
   });
 
-  it('未能说服孩子时按卖邀请函失败给出沟通策略建议', async () => {
+  it('未能说服孩子时按孩子沟通未成功给出沟通策略建议', async () => {
     const childDefs: ScoreItemDef[] = [{
       ...defs[0],
       id: 'ground-child-strategy',
@@ -343,7 +343,7 @@ describe('scoreSession', () => {
         ...session,
         scenarioId: 'scenario-ground',
         completionStatus: 'incomplete',
-        completionReason: '卖邀请函失败：销售未能用合理策略说服孩子。',
+        completionReason: '家长认为孩子不感兴趣，带孩子离开了：销售未能用合理策略说服孩子。',
       },
       { ...scenario, id: 'scenario-ground', category: '地推' },
       childDefs,
@@ -353,6 +353,6 @@ describe('scoreSession', () => {
     expect(report.improvementGoal?.title).toBe('改进与孩子沟通的策略');
     expect(report.improvementGoal?.suggestion).toContain('先给孩子情感支持');
     expect(report.improvementGoal?.suggestion).toContain('能逗孩子开心的故事');
-    expect(report.summary).toContain('卖邀请函失败');
+    expect(report.summary).toContain('家长认为孩子不感兴趣');
   });
 });
