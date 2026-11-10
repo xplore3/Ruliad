@@ -25,6 +25,8 @@ const TARGET_LABELS: Record<string, string> = {
   'briefing-standard': '讲解标准',
   'realism-standard': '演练真实度标准',
   'scenario-guidance': '场景指引配置',
+  'quiz-question': '测验题',
+  'methodology-config': '方法论配置',
 };
 
 const KIND_LABELS: Record<string, string> = {
@@ -53,6 +55,12 @@ const FIELD_LABELS: Record<string, string> = {
   speechRate: '语速', challenge: '挑战强度', interruptLevel: '打断频率',
   scriptExecutionOrder: '执行顺序', scriptTopics: '话题', scriptCustomerQuestions: '客户问题', scriptAssessmentPoints: '主要考核点',
   participants: '参与者',
+  // 测验题
+  scenarioId: '所属场景', skillPointId: '所属技能点', productKBEntryId: '关联知识条目', type: '题型',
+  prompt: '题干', options: '选项', correctAnswer: '正确答案', referencePoints: '参考要点',
+  explanation: '解析', score: '分值', trigger: '触发条件', required: '必答',
+  // 方法论配置
+  skillWeights: '技能点权重', redlinePhrases: '红线话术', fillerWords: '口头禅', passScore: '及格分',
 };
 
 function fmtValue(key: string, value: unknown): string {
@@ -319,7 +327,7 @@ export default function VoiceResourceEditor({
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12 }}>
             {preview.operations.map((op) => {
               const scope = SCOPE_STYLES[op.scope] ?? SCOPE_STYLES.direct;
-              const rows = operationRows(op);
+              const rows = op.diagnosis ? [] : operationRows(op);
               return (
                 <div key={op.index} className="card inner-card" style={{ padding: 14 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -333,6 +341,28 @@ export default function VoiceResourceEditor({
                   </div>
                   {op.scopeReason && op.scope !== 'direct' && (
                     <p className="hint" style={{ marginTop: 6 }}>{op.scopeReason}</p>
+                  )}
+                  {op.diagnosis && (
+                    <div style={{ marginTop: 10 }}>
+                      <p><strong>{op.diagnosis.summary}</strong></p>
+                      <p className="hint" style={{ marginTop: 6 }}>
+                        诊断对象：{op.diagnosis.session.scenarioName}
+                        {op.diagnosis.session.endedAt ? `（${new Date(op.diagnosis.session.endedAt).toLocaleString()}）` : ''}
+                        {' '}· {op.diagnosis.scoreItem.name} · 评分维度：{op.diagnosis.aspect}
+                      </p>
+                      <div style={{ marginTop: 8 }}>
+                        <strong>原因判断</strong>
+                        {op.diagnosis.reasons.map((reason) => <p key={reason} className="hint" style={{ marginTop: 4 }}>· {reason}</p>)}
+                      </div>
+                      <div style={{ marginTop: 8 }}>
+                        <strong>检测证据</strong>
+                        {op.diagnosis.evidence.map((item) => <p key={item} className="hint" style={{ marginTop: 4 }}>· {item}</p>)}
+                      </div>
+                      <div style={{ marginTop: 8 }}>
+                        <strong>本次修改</strong>
+                        {op.diagnosis.proposedChanges.map((change) => <p key={change} className="hint" style={{ marginTop: 4 }}>· {change}</p>)}
+                      </div>
+                    </div>
                   )}
                   {rows.length > 0 && (
                     <div className="weights" style={{ marginTop: 8 }}>

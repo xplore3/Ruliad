@@ -51,6 +51,23 @@ export interface VoiceCommandSuggestion {
   reason: string;
 }
 
+/** 历史演练诊断证据及本次增量修改说明 */
+export interface VoiceConfigDiagnosis {
+  kind: 'score-item-analysis';
+  aspect: string;
+  session: {
+    id: string;
+    scenarioId: string;
+    scenarioName: string;
+    endedAt?: string;
+  };
+  scoreItem: { id: string; name: string };
+  summary: string;
+  reasons: string[];
+  evidence: string[];
+  proposedChanges: string[];
+}
+
 export interface VoiceEditCommand {
   id: string;
   tenantId: string;
@@ -94,4 +111,6 @@ export interface VoiceEditCommand {
   drillScriptName?: string;
   /** 混合命令中提炼出的通用建议 */
   suggestions?: VoiceCommandSuggestion[];
+  /** 诊断并修改任务的历史证据 */
+  diagnoses?: VoiceConfigDiagnosis[];
 }

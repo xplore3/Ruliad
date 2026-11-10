@@ -59,4 +59,8 @@ export interface MethodologyConfig {
   /** 口头禅/填充词清单 */
   fillerWords: string[];
   passScore: number;
+  /** 创建人（JSON 载荷字段，用于权限与归属校验） */
+  createdBy?: string;
+  /** 最后更新人 */
+  updatedBy?: string;
 }

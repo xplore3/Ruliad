@@ -7,8 +7,10 @@ import type {
   DrillScript,
   Element,
   GoldenCase,
+  MethodologyConfig,
   PersonaConfig,
   ProductKB,
+  QuizQuestion,
   RealismStandard,
   Scenario,
   ScenarioGuidance,
@@ -24,6 +26,7 @@ import { requireRoles } from '../auth.js';
 export const TARGETS = [
   'scenario', 'persona', 'skill-point', 'element', 'product-kb', 'demo-faq', 'demo-script',
   'drill-script', 'score-item', 'golden-case', 'briefing-standard', 'realism-standard', 'scenario-guidance',
+  'quiz-question', 'methodology-config',
 ] as const;
 export type Target = (typeof TARGETS)[number];
 export type Patch = Record<string, unknown>;
@@ -58,15 +61,28 @@ export const RESOURCE_DEFS: Record<Target, { label: string; fields: string[]; sc
     fields: ['scenarioId', 'name', 'qualifyQuestions', 'demoScriptId', 'keyPoints', 'briefingStandardIds', 'realismStandardIds', 'difficultyLevels', 'defaultDifficulty', 'duration', 'liveIntro', 'voiceProfile', 'scoringFocus'],
     schema: 'scenarioId/name 必填；qualifyQuestions/keyPoints/briefingStandardIds/realismStandardIds/scoringFocus 为字符串数组；demoScriptId 可为 null；duration/liveIntro/voiceProfile/difficultyLevels 按当前结构。',
   },
+  'quiz-question': {
+    label: '测验题',
+    fields: ['scenarioId', 'skillPointId', 'productKBEntryId', 'type', 'prompt', 'options', 'correctAnswer', 'referencePoints', 'explanation', 'score', 'trigger', 'required'],
+    schema: 'scenarioId/skillPointId 为资源 ID（可空，场景绑定时可填场景名称由服务端解析）；type=single_choice|multi_choice|true_false|short_answer|scenario_pick；prompt 题干必填；options 为 {id,label} 数组（选择题至少两项）；correctAnswer 为选项 id 数组（简答为字符串）；referencePoints 为字符串数组；explanation 字符串；score 数字；trigger 为 {kind, ...} 触发对象，kind=turn_count(afterNTurns)|keyword_hit(keywords)|topic_covered(topic)|time_elapsed(seconds)|manual；required 布尔。',
+  },
+  'methodology-config': {
+    label: '方法论配置',
+    fields: ['name', 'skillWeights', 'redlinePhrases', 'fillerWords', 'passScore'],
+    schema: 'name 字符串；skillWeights 为 {技能点ID:权重} 对象；redlinePhrases/fillerWords 为字符串数组；passScore 0-100 数字。租户内单例，新建即编辑同一份配置。',
+  },
 };
 
 export function revisionOf(item: unknown): string {
   return createHash('sha256').update(JSON.stringify(item ?? null)).digest('hex');
 }
 
+const QUIZ_TYPES = ['single_choice', 'multi_choice', 'true_false', 'short_answer', 'scenario_pick'];
+const CHOICE_QUIZ_TYPES = ['single_choice', 'multi_choice', 'true_false', 'scenario_pick'];
+
 export function nameOf(target: Target, item: unknown): string {
-  const value = item as { name?: string; question?: string; scenarioId?: string } | null;
-  return value?.name ?? value?.question ?? (target === 'scenario-guidance' ? value?.scenarioId : undefined) ?? '';
+  const value = item as { name?: string; prompt?: string; question?: string; scenarioId?: string } | null;
+  return value?.name ?? value?.prompt ?? value?.question ?? (target === 'scenario-guidance' ? value?.scenarioId : undefined) ?? '';
 }
 
 export async function getResource(store: Store, target: Target, id: string | undefined, tenantId: string): Promise<unknown | undefined> {
@@ -86,6 +102,12 @@ export async function getResource(store: Store, target: Target, id: string | und
     case 'briefing-standard': item = (await store.listBriefingStandards(tenantId)).find((entry) => entry.id === id); break;
     case 'realism-standard': item = (await store.listRealismStandards(tenantId)).find((entry) => entry.id === id); break;
     case 'scenario-guidance': item = await store.getScenarioGuidanceById(id); break;
+    case 'quiz-question': item = (await store.listQuizQuestions(tenantId)).find((entry) => entry.id === id); break;
+    case 'methodology-config': {
+      const config = await store.getMethodologyConfig(tenantId);
+      item = config && (!id || config.id === id) ? config : undefined;
+      break;
+    }
   }
   if (!item || (item.tenantId !== tenantId && !(target === 'golden-case' && !item.tenantId))) return undefined;
   return item;
@@ -106,6 +128,8 @@ export async function listResources(store: Store, target: Target, tenantId: stri
     case 'briefing-standard': return store.listBriefingStandards(tenantId);
     case 'realism-standard': return store.listRealismStandards(tenantId);
     case 'scenario-guidance': return store.listScenarioGuidances(tenantId);
+    case 'quiz-question': return store.listQuizQuestions(tenantId);
+    case 'methodology-config': { const config = await store.getMethodologyConfig(tenantId); return config ? [config] : []; }
   }
 }
 
@@ -162,6 +186,23 @@ export async function validateReferences(store: Store, target: Target, item: any
     const skill = await store.getSkillPoint(item.skillPointId);
     if (!skill || skill.tenantId !== tenantId) return '评分标准技能点不存在或跨租户';
   }
+  if (target === 'quiz-question') {
+    if (item.scenarioId) {
+      const scenario = await store.getScenario(item.scenarioId);
+      if (!scenario || scenario.tenantId !== tenantId) return '测验题绑定场景不存在或跨租户';
+    }
+    if (item.skillPointId) {
+      const skill = await store.getSkillPoint(item.skillPointId);
+      if (!skill || skill.tenantId !== tenantId) return '测验题关联技能点不存在或跨租户';
+    }
+  }
+  if (target === 'methodology-config') {
+    const skillIds = new Set((await store.listSkillPoints(tenantId)).map((skill) => skill.id));
+    const weights = (item.skillWeights ?? {}) as Record<string, unknown>;
+    for (const id of Object.keys(weights)) {
+      if (!skillIds.has(id)) return '技能权重引用了不存在或跨租户的技能点';
+    }
+  }
   if (target === 'scenario-guidance') {
     const scenario = await store.getScenario(item.scenarioId);
     if (!scenario || scenario.tenantId !== tenantId) return '指引绑定场景不存在或跨租户';
@@ -188,6 +229,20 @@ export function validateRequired(target: Target, item: any): string | null {
   if (target === 'golden-case' && (!item.name?.trim() || !item.transcript?.length || !item.expected?.length)) return '回归案例名称、对话、期望判定必填';
   if ((target === 'briefing-standard' || target === 'realism-standard') && (!item.name?.trim() || !item.category?.trim() || !item.description?.trim())) return '标准名称、分类、说明必填';
   if (target === 'scenario-guidance' && (!item.name?.trim() || !item.scenarioId || !Array.isArray(item.qualifyQuestions))) return '指引名称、绑定场景、资格问题数组必填';
+  if (target === 'quiz-question') {
+    if (!item.prompt?.trim() || !QUIZ_TYPES.includes(item.type)) return '测验题题干与类型必填，类型无效';
+    if (CHOICE_QUIZ_TYPES.includes(item.type)) {
+      if (!Array.isArray(item.options) || item.options.length < 2) return '选择题必须提供至少两个选项';
+      const answers = item.correctAnswer;
+      if (!answers || (Array.isArray(answers) && answers.length === 0)) return '选择题必须提供正确答案';
+      if (typeof answers === 'string' && !answers.trim()) return '选择题必须提供正确答案';
+    }
+  }
+  if (target === 'methodology-config') {
+    if (!item.name?.trim()) return '方法论配置名称必填';
+    if (!Number.isFinite(item.passScore) || item.passScore < 0 || item.passScore > 100) return '方法论及格分必须为 0-100';
+    if (item.skillWeights !== undefined && (typeof item.skillWeights !== 'object' || Array.isArray(item.skillWeights))) return '技能权重必须为对象';
+  }
   return null;
 }
 
@@ -253,6 +308,32 @@ export async function applyResource(store: Store, target: Target, id: string | u
       item.levels = item.levels ?? [];
       await store.upsertScoreItemDef(item as ScoreItemDef);
       return item;
+    case 'quiz-question':
+      item.type = item.type ?? 'single_choice';
+      item.options = item.options ?? [];
+      item.correctAnswer = item.correctAnswer ?? [];
+      item.referencePoints = item.referencePoints ?? [];
+      item.explanation = item.explanation ?? '';
+      item.score = item.score ?? 5;
+      item.trigger = item.trigger ?? { kind: 'manual' };
+      item.required = item.required ?? false;
+      item.createdBy = current?.createdBy ?? userId;
+      item.updatedBy = userId;
+      await store.saveQuizQuestion(item as QuizQuestion);
+      return item;
+    case 'methodology-config': {
+      item.skillWeights = item.skillWeights ?? {};
+      item.redlinePhrases = item.redlinePhrases ?? [];
+      item.fillerWords = item.fillerWords ?? [];
+      item.passScore = item.passScore ?? 60;
+      // 租户内单例配置：沿用已有 id，避免重复建
+      const existing = await store.getMethodologyConfig(tenantId);
+      item.id = existing?.id ?? item.id;
+      item.createdBy = current?.createdBy ?? userId;
+      item.updatedBy = userId;
+      await store.upsertMethodologyConfig(item as MethodologyConfig);
+      return item;
+    }
     case 'golden-case': await store.saveGoldenCase(item as GoldenCase); return item;
     case 'briefing-standard': await store.saveBriefingStandard(item as BriefingStandard); return item;
     case 'realism-standard': await store.saveRealismStandard(item as RealismStandard); return item;
@@ -285,6 +366,11 @@ export async function affectedScenarios(store: Store, target: Target, current: a
   else if (target === 'score-item') affected = scenarios.filter((item) => item.scoreItemIds?.includes(current.id));
   else if (target === 'product-kb') affected = scenarios.filter((item) => item.productKBId === current.id);
   else if (target === 'scenario-guidance') affected = scenarios.filter((item) => item.id === current.scenarioId);
+  else if (target === 'quiz-question') {
+    // 绑定场景的题只影响该场景；未绑定的通用题对全部场景生效
+    affected = current.scenarioId ? scenarios.filter((item) => item.id === current.scenarioId) : scenarios;
+  }
+  else if (target === 'methodology-config') affected = scenarios;
   else return [];
   return affected.map((item) => ({ id: item.id, name: item.name }));
 }
