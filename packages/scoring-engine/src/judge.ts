@@ -229,7 +229,11 @@ function customerEndedWithFarewell(session: Session): boolean {
   return lastTurn?.speaker === 'persona' && CUSTOMER_FAREWELL_PATTERN.test(lastTurn.text);
 }
 
-/** 组装 judge prompt：评分标准定义 + 档位 JSON + 场景考核点 + 语音表现统计 + 带 seq 的转写（+ 可选的重点评分维度） */
+/**
+ * 组装 judge prompt：评分标准定义 + 档位 JSON + 场景考核点 + 语音表现统计 + 带 seq 的转写（+ 可选的重点评分维度）
+ * institutionKB：跨场景通用合规标准「合规表达通用规范」注入机构客观事实基准，
+ * 供“虚构或篡改机构客观事实”类承诺逐一核对；资料未覆盖的问题不得猜测或判定冲突。
+ */
 function buildJudgePrompt(
   def: ScoreItemDef,
   session: Session,
@@ -253,6 +257,13 @@ function buildJudgePrompt(
     def.name === '礼貌礼仪' && (scenario?.category ?? def.category) === '地推' && customerEndedWithFarewell(session)
       ? ['本场告别事实：最后一轮是客户主动说“先走了”“再见”或约定下次见面并自然结束演练，告别环节已经完整闭环。学员没有追加回复告别语不属于遗漏，禁止因此扣分或降低档位；此条优先于上方关于告别环节的通用要求。其他明确的不礼貌行为仍按标准判定。']
       : [];
+  const institutionLines =
+    def.id === 'item-universal-compliance' && institutionKB?.entries.length
+      ? [
+          '机构初始化资料（客观事实基准：判定“虚构或篡改机构客观事实”类承诺时以此为准；传递客户主观信心的表达不受资料约束；资料未覆盖的问题不得猜测或判定冲突）：',
+          ...institutionKB.entries.map((entry) => `- ${entry.title}：${entry.content}`),
+        ]
+      : [];
   const invitationHandoffTurn =
     def.name === '甄别客户意向' && (scenario?.category ?? def.category) === '地推'
       ? session.transcript.find((turn) => turn.speaker === 'trainee' && /(?:您|你)(?:先)?拿(?:上|着|一下)/.test(turn.text))
@@ -270,6 +281,7 @@ function buildJudgePrompt(
     def.judgePrompt,
     `评分标准：${def.name}`,
     `行为锚定：${def.behaviorAnchor}`,
+    ...institutionLines,
     ...customerFarewellLines,
     ...groundIntentLines,
     ...scenarioLines,
