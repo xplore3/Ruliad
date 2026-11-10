@@ -608,6 +608,7 @@ export interface VoiceConfigOperationPreview {
   general: boolean;
   generalReason?: string;
   planKind: string;
+  diagnosis?: import('./types').VoiceConfigDiagnosis;
 }
 
 /** 评分原因解读结果（询问上一场评分时返回，无可应用的编辑操作） */

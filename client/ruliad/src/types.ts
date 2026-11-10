@@ -288,6 +288,22 @@ export interface VoiceCommandSuggestion {
   reason: string;
 }
 
+export interface VoiceConfigDiagnosis {
+  kind: 'score-item-analysis';
+  aspect: string;
+  session: {
+    id: string;
+    scenarioId: string;
+    scenarioName: string;
+    endedAt?: string;
+  };
+  scoreItem: { id: string; name: string };
+  summary: string;
+  reasons: string[];
+  evidence: string[];
+  proposedChanges: string[];
+}
+
 export interface VoiceEditCommand {
   id: string;
   tenantId: string;
@@ -321,6 +337,7 @@ export interface VoiceEditCommand {
   scoreItemNames?: string[];
   drillScriptName?: string;
   suggestions?: VoiceCommandSuggestion[];
+  diagnoses?: VoiceConfigDiagnosis[];
 }
 
 /** ===== 资源库管理 ===== */

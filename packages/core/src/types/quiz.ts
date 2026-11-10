@@ -43,6 +43,10 @@ export interface QuizQuestion {
   trigger: QuizTrigger;
   /** 是否必答（不答不能继续对练） */
   required: boolean;
+  /** 创建人（JSON 载荷字段，用于权限与归属校验） */
+  createdBy?: string;
+  /** 最后更新人 */
+  updatedBy?: string;
 }
 
 /** 下发给前端的考题视图：剥离正确答案、参考要点、解析与触发条件 */

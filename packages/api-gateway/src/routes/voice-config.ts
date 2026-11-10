@@ -6,6 +6,7 @@ import type {
   Scenario,
   ScenarioParticipant,
   ScoreReport,
+  VoiceConfigDiagnosis,
   VoiceConfigOperation,
   VoiceEditCommand,
 } from '@grasp-mvp/core';
@@ -27,6 +28,7 @@ import {
   applyResource,
   affectedScenarios,
 } from './resource-ai.js';
+import { prepareScoreItemAnalysis, VoiceConfigAnalysisError } from './voice-config-analysis.js';
 
 /* ============================================================
  * 语音自动场景创建和配置
@@ -55,7 +57,7 @@ interface CommandContext {
 
 interface ParsedOperation {
   target: Target;
-  action: 'create' | 'update';
+  action: 'create' | 'update' | 'analyze-update';
   subject: string;
   resourceName?: string;
   fields: Patch;
@@ -64,6 +66,7 @@ interface ParsedOperation {
   scoreItemNames?: string[];
   drillScriptName?: string;
   conversation?: Patch;
+  analysis?: { category?: string; scenarioName?: string; aspect?: string };
   general: boolean;
   generalReason?: string;
 }
@@ -75,6 +78,7 @@ interface OpPlanResult {
   primary: VoiceConfigOperation;
   impact: Array<{ id: string; name: string }>;
   resolvedResourceId?: string;
+  diagnosis?: VoiceConfigDiagnosis;
 }
 
 function schemaText(): string {
@@ -132,6 +136,16 @@ async function locateResource(
     if (!q || matchesName(scenario.name ?? '', q)) return scenario;
   }
   if (action === 'create') return undefined;
+
+  // 租户单例资源：描述为空或指向单例时直接定位（方法论配置租户内唯一，直接返回）
+  if (action === 'update' && target === 'methodology-config') {
+    const single = await store.getMethodologyConfig(tenantId);
+    if (single) return single;
+  }
+  if (action === 'update' && target === 'product-kb' && !q) {
+    const single = await store.getProductKB(tenantId);
+    if (single) return single;
+  }
 
   // 编辑场景中提到的关联资源：仅当描述为空或指向当前绑定资源时才优先取绑定
   if (scenario) {
@@ -459,7 +473,8 @@ function decideScope(args: {
 }): { scope: 'direct' | 'copy-on-write' | 'general'; reason?: string } {
   if (args.general) return { scope: 'general', reason: args.generalReason };
   if (args.admin) return { scope: 'direct' };
-  if (args.action === 'create') return { scope: 'direct' };
+  // 方法论配置是租户共享配置：非管理员的新建同样进入通用建议，不直接落库
+  if (args.action === 'create' && args.target !== 'methodology-config') return { scope: 'direct' };
   if (args.target === 'scenario') {
     if (args.current?.createdBy === args.userId) return { scope: 'direct' };
     // 不能修改其他用户创建的场景：转为通用建议
@@ -471,8 +486,8 @@ function decideScope(args: {
   if (!args.hasContextScenario) {
     return { scope: 'general', reason: '共享资源修改缺少可绑定的场景，已转为通用建议' };
   }
-  if (args.target === 'product-kb' || args.target === 'scenario-guidance') {
-    return { scope: 'general', reason: '公共知识库/场景指引属于共享资源，已转为通用建议' };
+  if (args.target === 'product-kb' || args.target === 'scenario-guidance' || args.target === 'methodology-config') {
+    return { scope: 'general', reason: '公共知识库/场景指引/方法论配置属于租户共享配置，已转为通用建议' };
   }
   return {
     scope: 'copy-on-write',
@@ -488,6 +503,39 @@ const BINDING_FIELD: Partial<Record<Target, { field: string; mode: 'single' | 'l
   'skill-point': { field: 'skillPointIds', mode: 'list' },
   'product-kb': { field: 'productKBId', mode: 'single' },
 };
+
+/**
+ * 名称/描述 → 租户内资源 ID：LLM 只认识资源名称，服务端负责解析。
+ * 先按 ID 原样命中，再按名称精确/包含匹配。
+ */
+async function resolveResourceByName(store: Store, tenantId: string, target: Target, value: unknown): Promise<string | undefined> {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  const direct = await getResource(store, target, value.trim(), tenantId);
+  if (direct) return (direct as { id: string }).id;
+  const all = (await listResources(store, target, tenantId)) as Array<{ id: string }>;
+  const q = normalize(value);
+  if (!q) return undefined;
+  const exact = all.find((item) => normalize(String(item.id)) === q || normalize(nameOf(target, item)) === q);
+  if (exact) return exact.id;
+  return all.find((item) => matchesName(nameOf(target, item), q))?.id;
+}
+
+/** 测验题的场景/技能点引用可能是名称，统一解析为租户内 ID；解析失败抛出可读错误 */
+async function resolveQuizRefs(store: Store, tenantId: string, patch: Patch): Promise<Patch> {
+  const out: Patch = { ...patch };
+  const refs: Array<{ key: 'scenarioId' | 'skillPointId'; target: Target; label: string }> = [
+    { key: 'scenarioId', target: 'scenario', label: '场景' },
+    { key: 'skillPointId', target: 'skill-point', label: '技能点' },
+  ];
+  for (const ref of refs) {
+    const value = out[ref.key];
+    if (value === undefined || value === null || value === '') continue;
+    const id = await resolveResourceByName(store, tenantId, ref.target, value);
+    if (!id) throw new Error(`未找到引用的${ref.label}：${String(value)}，请说明准确名称`);
+    out[ref.key] = id;
+  }
+  return out;
+}
 
 function jsonSafe(value: unknown): unknown {
   return JSON.parse(JSON.stringify(value ?? null));
@@ -665,8 +713,14 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
       `- target 只能是：${TARGETS.join(' / ')}`,
       '  scenario=对练场景；persona=陪练角色；skill-point=技能点；element=角色要素；product-kb=产品知识库；',
       '  demo-faq=示范问答；demo-script=示范剧本；drill-script=演练剧本；score-item=评分标准；golden-case=评分回归案例；',
-      '  briefing-standard=讲解标准；realism-standard=演练真实度标准；scenario-guidance=场景指引配置。',
-      '- action = create 或 update。',
+      '  briefing-standard=讲解标准；realism-standard=演练真实度标准；scenario-guidance=场景指引配置；',
+      '  quiz-question=测验题；methodology-config=方法论配置。',
+      '- action = create、update 或 analyze-update。',
+      '- analyze-update 用于要求先查找历史演练、分析评分原因、再修改评分标准的复合指令；target=score-item，fields={}。',
+      '- analysis={category:"地推|电销|咨询接待|现场成交（可选）",scenarioName:"历史场景名称（可选）",aspect:"用户要求补充的评分维度"}；aspect 用简短中文保留用户原意，例如磕磕绊绊、礼貌礼仪、需求挖掘、预算异议，不要限定为固定枚举。',
+      '- 用户明确点名评分标准时，subject 返回该标准的准确名称；未点名时 subject 描述历史场景和目标维度即可。',
+      '- analyze-update 是单个历史场景的诊断并修改，general=false；是否复制共享资源或转通用建议由服务端权限策略决定。',
+      '- 普通创建或直接修改不要使用 analyze-update。',
       '- subject 用一句话描述对象名称/特征（如"首次电话邀约"、"需求挖掘技能点"、"客户甲"）。',
       '- 新建时在 resourceName 给出名称。',
       '',
@@ -694,6 +748,7 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
       '',
       '严格返回 JSON（不要输出多余文字）：',
       '{"reply":"一句话中文摘要","operations":[{"target":"scenario","action":"update","subject":"首次电话邀约","resourceName":"","fields":{},"persona":{},"skillPointNames":[],"scoreItemNames":[],"drillScriptName":"","conversation":{},"general":false,"generalReason":""}]}',
+      '诊断并修改示例：{"reply":"已定位最近地推演练并生成修改预览","operations":[{"target":"score-item","action":"analyze-update","subject":"上次地推场景的评分标准","fields":{},"analysis":{"category":"地推","scenarioName":"","aspect":"磕磕绊绊"},"general":false}]}',
     ].join('\n');
 
     const messages: ChatMessage[] = [
@@ -726,7 +781,7 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
       }
       operations.push({
         target,
-        action: raw.action === 'create' ? 'create' : 'update',
+        action: raw.action === 'create' ? 'create' : ['analyze-update', 'analyze_and_update'].includes(String(raw.action)) ? 'analyze-update' : 'update',
         subject: String(raw.subject ?? ''),
         resourceName: raw.resourceName ? String(raw.resourceName) : undefined,
         fields: (raw.fields ?? {}) as Patch,
@@ -735,6 +790,7 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
         scoreItemNames: Array.isArray(raw.scoreItemNames) ? raw.scoreItemNames : undefined,
         drillScriptName: raw.drillScriptName ? String(raw.drillScriptName) : undefined,
         conversation: (raw.conversation ?? {}) as Patch,
+        analysis: raw.analysis && typeof raw.analysis === 'object' ? raw.analysis : undefined,
         general: raw.general === true,
         generalReason: raw.generalReason ? String(raw.generalReason) : undefined,
       });
@@ -760,21 +816,65 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
 
     for (let opIndex = 0; opIndex < operations.length; opIndex++) {
       const op = operations[opIndex];
-      const current = (await locateResource(store, request.tenantId, op.target, op.action, op.subject, context)) as any;
-      if (op.action === 'update' && !current) {
-        return reply.code(404).send({ error: `未找到要修改的对象：${op.subject || RESOURCE_DEFS[op.target].label}。请说明名称，或改用新建。` });
+      let current: any;
+      let analysisScenario: Scenario | undefined;
+      let preparedAnalysis: Awaited<ReturnType<typeof prepareScoreItemAnalysis>> | undefined;
+      if (op.action === 'analyze-update') {
+        if (op.target !== 'score-item' || !op.analysis?.aspect?.trim()) {
+          return reply.code(422).send({ error: '诊断并修改任务需要明确评分维度和目标评分标准' });
+        }
+        if (op.analysis.category && !CATEGORIES.includes(op.analysis.category as (typeof CATEGORIES)[number])) {
+          return reply.code(422).send({ error: `不支持的场景分类：${op.analysis.category}` });
+        }
+        try {
+          preparedAnalysis = await prepareScoreItemAnalysis({
+            store,
+            gateway,
+            tenantId: request.tenantId,
+            userId: request.userId,
+            admin,
+            subject: op.subject,
+            question: text,
+            category: op.analysis.category,
+            scenarioName: op.analysis.scenarioName,
+            aspect: op.analysis.aspect.trim(),
+          });
+        } catch (error) {
+          if (error instanceof VoiceConfigAnalysisError) return reply.code(error.statusCode).send({ error: error.message });
+          throw error;
+        }
+        current = preparedAnalysis.current;
+        analysisScenario = preparedAnalysis.scenario;
+        op.fields = preparedAnalysis.patch;
+        op.action = 'update';
+        op.general = false;
+        op.generalReason = undefined;
+      } else {
+        current = (await locateResource(store, request.tenantId, op.target, op.action, op.subject, context)) as any;
       }
+      if (op.action === 'update' && !current) {
+        // 方法论配置为租户单例（upsert 语义）：尚不存在时按新建处理
+        if (op.target === 'methodology-config') {
+          op.action = 'create';
+        } else {
+          return reply.code(404).send({ error: `未找到要修改的对象：${op.subject || RESOURCE_DEFS[op.target].label}。请说明名称，或改用新建。` });
+        }
+      }
+      const action = op.action as 'create' | 'update';
       const impact = await affectedScenarios(store, op.target, current, request.tenantId);
+      const analysisPermissionReason = analysisScenario && !admin && analysisScenario.createdBy !== request.userId
+        ? '只能修改自己创建的历史场景及其评分配置，已转为通用建议'
+        : undefined;
       const scopeDecision = decideScope({
         admin,
         userId: request.userId,
         target: op.target,
-        action: op.action,
+        action,
         current,
         affected: impact,
-        hasContextScenario: Boolean(contextScenario),
-        general: op.general,
-        generalReason: op.generalReason,
+        hasContextScenario: Boolean(analysisScenario ?? contextScenario),
+        general: op.general || !!analysisPermissionReason,
+        generalReason: analysisPermissionReason ?? op.generalReason,
       });
       if (current) expectedRevisions[current.id] = revisionOf(current);
 
@@ -782,7 +882,7 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
       if (scopeDecision.scope === 'general') {
         const generalOp: VoiceConfigOperation = {
           key: `op-${opIndex}`,
-          kind: op.target === 'scenario' ? (op.action === 'create' ? 'create-scenario' : 'update-scenario') : 'update-resource',
+          kind: op.target === 'scenario' ? (action === 'create' ? 'create-scenario' : 'update-scenario') : 'update-resource',
           target: op.target,
           id: current?.id,
           name: op.resourceName,
@@ -791,7 +891,7 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
           generalReason: scopeDecision.reason,
         };
         planOperations.push(generalOp);
-        opPlans.push({ op, scope: 'general', scopeReason: scopeDecision.reason, primary: generalOp, impact, resolvedResourceId: current?.id });
+        opPlans.push({ op, scope: 'general', scopeReason: scopeDecision.reason, primary: generalOp, impact, resolvedResourceId: current?.id, diagnosis: preparedAnalysis?.diagnosis });
         continue;
       }
 
@@ -815,10 +915,9 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
           };
           planOperations.push(createPersonaOp);
           const scenarioPatch: Patch = { ...patch };
-          if (bindingsProvided || !bindings.skillPointIds.length) {
-            scenarioPatch.skillPointIds = bindings.skillPointIds;
-            scenarioPatch.scoreItemIds = bindings.scoreItemIds;
-          }
+          // 新建场景始终带上绑定：未指定技能点时用租户默认技能点，显式空白清单视为清空
+          scenarioPatch.skillPointIds = bindings.skillPointIds;
+          scenarioPatch.scoreItemIds = bindings.scoreItemIds;
           if (bindings.drillScriptId) scenarioPatch.drillScriptId = bindings.drillScriptId;
           const createScenarioOp: VoiceConfigOperation = {
             key: `op-${opIndex}`,
@@ -895,6 +994,14 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
       try { clean = cleanPatch(op.target, op.fields); } catch (error) {
         return reply.code(422).send({ error: error instanceof Error ? error.message : '提取结果无效' });
       }
+      // 测验题的引用字段允许用名称，服务端解析为租户内 ID；解析失败直接回读错误
+      if (op.target === 'quiz-question') {
+        try {
+          clean = await resolveQuizRefs(store, request.tenantId, clean);
+        } catch (error) {
+          return reply.code(422).send({ error: error instanceof Error ? error.message : '引用解析失败' });
+        }
+      }
 
       // 产品知识库：一个租户只允许一个默认库
       if (op.target === 'product-kb' && op.action === 'create') {
@@ -923,17 +1030,19 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
         };
         planOperations.push(copyOp);
         const binding = BINDING_FIELD[op.target];
-        if (binding && contextScenario) {
+        const bindingScenario = analysisScenario ?? contextScenario;
+        if (binding && bindingScenario) {
+          expectedRevisions[bindingScenario.id] = revisionOf(bindingScenario);
           planOperations.push({
             kind: 'update-scenario',
             target: 'scenario',
-            id: contextScenario.id,
-            expectedVersion: contextScenario.version ?? 1,
+            id: bindingScenario.id,
+            expectedVersion: bindingScenario.version ?? 1,
             patch: {},
             rebind: { field: binding.field, mode: binding.mode, oldId: current.id, ref: copyKey },
           });
         }
-        opPlans.push({ op, scope: 'copy-on-write', scopeReason: scopeDecision.reason, primary: copyOp, impact, resolvedResourceId: current.id });
+        opPlans.push({ op, scope: 'copy-on-write', scopeReason: scopeDecision.reason, primary: copyOp, impact, resolvedResourceId: current.id, diagnosis: preparedAnalysis?.diagnosis });
       } else {
         const resourceOp: VoiceConfigOperation = {
           key: `op-${opIndex}`,
@@ -944,7 +1053,17 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
           patch: clean,
         };
         planOperations.push(resourceOp);
-        opPlans.push({ op, scope: 'direct', scopeReason: scopeDecision.reason, primary: resourceOp, impact, resolvedResourceId: current?.id });
+        if (preparedAnalysis?.needsBinding && analysisScenario) {
+          expectedRevisions[analysisScenario.id] = revisionOf(analysisScenario);
+          planOperations.push({
+            kind: 'update-scenario',
+            target: 'scenario',
+            id: analysisScenario.id,
+            expectedVersion: analysisScenario.version ?? 1,
+            patch: { scoreItemIds: [...new Set([...(analysisScenario.scoreItemIds ?? []), current.id])] },
+          });
+        }
+        opPlans.push({ op, scope: 'direct', scopeReason: scopeDecision.reason, primary: resourceOp, impact, resolvedResourceId: current?.id, diagnosis: preparedAnalysis?.diagnosis });
       }
     }
 
@@ -968,6 +1087,7 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
       general: plan.scope === 'general' || plan.op.general === true,
       generalReason: plan.scope === 'general' ? (plan.scopeReason ?? plan.op.generalReason) : plan.op.generalReason,
       planKind: plan.primary.kind,
+      diagnosis: plan.diagnosis,
     }));
 
     const general = operationsPayload.some((op) => op.general);
@@ -980,7 +1100,7 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
       source: 'voice-config',
       target: operations[0].target,
       resourceId: opPlans.find((p) => p.resolvedResourceId)?.resolvedResourceId,
-      action: operations[0].action,
+      action: operations[0].action as 'create' | 'update',
       text: text.slice(0, 6000),
       transcript,
       patch: Object.assign({}, ...operationsPayload.map((op) => op.fields)) as Patch,
@@ -1004,6 +1124,7 @@ export async function voiceConfigRoutes(app: FastifyInstance, ctx: RouteContext)
       skillPointNames: operations[0].skillPointNames,
       scoreItemNames: operations[0].scoreItemNames,
       drillScriptName: operations[0].drillScriptName,
+      diagnoses: opPlans.flatMap((plan) => plan.diagnosis ? [plan.diagnosis] : []),
     };
     await store.saveVoiceEditCommand(command);
 
