@@ -610,6 +610,16 @@ export interface VoiceConfigOperationPreview {
   planKind: string;
 }
 
+/** 评分原因解读结果（询问上一场评分时返回，无可应用的编辑操作） */
+export interface ScoreExplainResult {
+  scenarioName: string;
+  sessionId: string;
+  sessionAt: string;
+  totalScore: number;
+  passed: boolean;
+  answer: string;
+}
+
 export interface VoiceConfigPreview {
   transcript?: string;
   reply: string;
@@ -618,6 +628,8 @@ export interface VoiceConfigPreview {
   hasPrivate: boolean;
   commandId: string;
   expectedRevisions: Record<string, string>;
+  /** 评分原因解读：存在时不渲染编辑操作，也没有确认应用按钮 */
+  scoreExplain?: ScoreExplainResult;
 }
 
 /** 文字指令 → 生成配置预览（不直接落库） */

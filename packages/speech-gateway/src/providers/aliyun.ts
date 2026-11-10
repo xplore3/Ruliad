@@ -29,7 +29,7 @@ export interface AliyunSpeechConfig {
 const DEFAULT_URL = 'wss://dashscope.aliyuncs.com/api-ws/v1/inference';
 const ASR_CHUNK_BYTES = 3200;
 const TASK_START_TIMEOUT_MS = 10_000;
-const ASR_FINISH_TIMEOUT_MS = 120_000;
+const ASR_FINISH_TIMEOUT_MS = 8_000;
 const TTS_TIMEOUT_MS = 30_000;
 
 /**
@@ -166,6 +166,20 @@ export class AliyunSpeechProvider implements ASRProvider, TTSProvider {
       clearFinishTimer();
       handlers.onError(err);
     };
+    const complete = () => {
+      if (closed || completed || failed) return;
+      completed = true;
+      clearTimeout(startTimer);
+      clearFinishTimer();
+      // 收尾时补上尚未落句的阶段文本，避免最后一个半句在已有完整句时被丢掉
+      if (finishRequested && (!finalEmitted || latestText !== emittedFinalText)) {
+        finalEmitted = true;
+        emittedFinalText = latestText;
+        handlers.onFinal(latestText);
+      }
+      handlers.onFinished?.();
+      ws.close();
+    };
     const sendCmd = (action: string, payload: Record<string, unknown>) => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ header: { action, task_id: taskId, streaming: 'duplex' }, payload }));
@@ -175,8 +189,12 @@ export class AliyunSpeechProvider implements ASRProvider, TTSProvider {
       sendCmd('finish-task', { input: {} });
       if (!finishTimer) {
         finishTimer = setTimeout(() => {
-          fail(new Error('ASR task-finished 超时'));
-          ws.close();
+          // 云端的 task-finished 丢失时，用已经识别出的文本完成本轮，避免一直卡在识别中
+          if (latestText.trim()) complete();
+          else {
+            fail(new Error('ASR task-finished 超时'));
+            ws.close();
+          }
         }, ASR_FINISH_TIMEOUT_MS);
       }
     };
@@ -230,18 +248,7 @@ export class AliyunSpeechProvider implements ASRProvider, TTSProvider {
           handlers.onFinal(finalText);
         }
       } else if (event === 'task-finished') {
-        if (closed || completed || failed) return;
-        completed = true;
-        clearTimeout(startTimer);
-        clearFinishTimer();
-        // 收尾时补上尚未落句的阶段文本，避免最后一个半句在已有完整句时被丢掉
-        if (finishRequested && (!finalEmitted || latestText !== emittedFinalText)) {
-          finalEmitted = true;
-          emittedFinalText = latestText;
-          handlers.onFinal(latestText);
-        }
-        handlers.onFinished?.();
-        ws.close();
+        complete();
       } else if (event === 'task-failed') {
         fail(new Error(`ASR task-failed: ${evt.header?.error_code ?? ''} ${evt.header?.error_message ?? ''}`));
         ws.close();

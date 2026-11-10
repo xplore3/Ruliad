@@ -90,7 +90,7 @@ describe('AliyunSpeechProvider 批量语音识别', () => {
     await expect(pending).resolves.toBe('完整回答');
   });
 
-  it('识别结束事件一直不返回时超时退出', async () => {
+  it('识别结束事件一直不返回时 8 秒超时退出', async () => {
     vi.useFakeTimers();
     try {
       wsMock.instances.length = 0;
@@ -102,8 +102,27 @@ describe('AliyunSpeechProvider 批量语音识别', () => {
       message(socket, 'task-started');
 
       const rejection = expect(pending).rejects.toThrow('ASR task-finished 超时');
-      await vi.advanceTimersByTimeAsync(120_000);
+      await vi.advanceTimersByTimeAsync(8_000);
       await rejection;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('结束事件丢失但有阶段文本时用已识别文本完成本轮', async () => {
+    vi.useFakeTimers();
+    try {
+      wsMock.instances.length = 0;
+      const provider = new AliyunSpeechProvider({ apiKey: 'test', asrModel: 'paraformer-realtime-v2', ttsModel: 'cosyvoice-v2', ttsVoice: 'longxiaochun_v2' });
+      const pending = provider.transcribe(Buffer.alloc(3200), 'pcm');
+      const socket = wsMock.instances[0];
+      socket.readyState = 1;
+      socket.emit('open');
+      message(socket, 'task-started');
+      message(socket, 'result-generated', { sentence: { text: '已经识别出的回答', end_time: null } });
+
+      await vi.advanceTimersByTimeAsync(8_000);
+      await expect(pending).resolves.toBe('已经识别出的回答');
     } finally {
       vi.useRealTimers();
     }
