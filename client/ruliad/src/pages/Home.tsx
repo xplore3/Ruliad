@@ -150,7 +150,7 @@ export default function Home() {
   const [practicedOnly, setPracticedOnly] = useState(false);
   const [startingId, setStartingId] = useState<string | null>(null);
   const [startError, setStartError] = useState('');
-  /** 点击未开放的实战训练模块时，弹出提示（暂时不开放，如需使用请联系公众号） */
+  /** 点击未开放的实战训练模块时，弹出提示（只对部分用户开放，如需使用请联系公众号） */
   const [lockedMod, setLockedMod] = useState<TrainingModule | null>(null);
 
   /** 实战训练卡片：从场景类型为「实战训练」的场景中匹配（优先按卡片类别，回退到该类型第一个） */
@@ -295,20 +295,11 @@ export default function Home() {
                     <div className="train-icon">
                       {mod.icon && <mod.icon className="h-6 w-6" />}
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <h3>{mod.label}</h3>
-                      {mod.locked && <span className="chip chip-gray">未开放</span>}
-                    </div>
+                    <h3>{mod.label}</h3>
                     <p className="desc">{available ? mod.desc : '该类别暂无可用场景'}</p>
                     <div className="train-meta">
-                      <span className="train-go" style={mod.locked ? { color: '#6B7280' } : undefined}>
-                        {starting
-                          ? '创建会话中…'
-                          : mod.locked
-                            ? '暂未开放，敬请期待'
-                            : mod.entry === 'call'
-                              ? '发起通话 →'
-                              : '开始练习 →'}
+                      <span className="train-go">
+                        {starting ? '创建会话中…' : mod.entry === 'call' ? '发起通话 →' : '开始练习 →'}
                       </span>
                     </div>
                   </div>
