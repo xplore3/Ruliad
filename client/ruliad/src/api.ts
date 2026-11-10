@@ -631,6 +631,8 @@ export interface VoiceConfigPreview {
   expectedRevisions: Record<string, string>;
   /** 评分原因解读：存在时不渲染编辑操作，也没有确认应用按钮 */
   scoreExplain?: ScoreExplainResult;
+  /** 现有规则已覆盖用户要求，无需修改 */
+  noChange?: boolean;
 }
 
 /** 文字指令 → 生成配置预览（不直接落库） */

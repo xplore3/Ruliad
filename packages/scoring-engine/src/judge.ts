@@ -232,7 +232,8 @@ function buildJudgePrompt(
   session: Session,
   scenario?: Scenario,
   scoringFocus?: string[],
-  stats?: ScoreReport['ruleStats']
+  stats?: ScoreReport['ruleStats'],
+  institutionKB?: ProductKB
 ): string {
   const transcriptLines = session.transcript
     .map((t) => `[${t.seq}] ${t.speaker === 'trainee' ? (t.addressedToChild ? '学员（对孩子说）' : '学员') : t.speaker === 'coach' ? '旁白' : t.speaker === 'child' ? '孩子' : '客户'}：${t.text}`)
@@ -269,6 +270,13 @@ function buildJudgePrompt(
     ...customerFarewellLines,
     ...groundIntentLines,
     ...scenarioLines,
+    // 忌讳项（信心指数扣减类）：注入机构实际资料，供"虚假承诺/事实不符"类判定作对照
+    ...(def.deductionOnly && institutionKB?.entries?.length
+      ? [
+          '机构实际资料（判定涉及可核验事实的承诺时，必须以此为实际值作对照；资料未覆盖的事实不得凭空断定）：',
+          ...institutionKB.entries.slice(0, 30).map((entry) => `- ${entry.title}：${String(entry.content ?? '').slice(0, 200)}`),
+        ]
+      : []),
     ...(def.scoringMode === 'score' ? [] : [`可选档位（JSON）：${JSON.stringify(def.levels)}`]),
     ...(stats ? buildStatsLines(stats) : []),
     ...buildProsodyLines(session),
@@ -444,7 +452,7 @@ export async function judgeItem(
     };
   }
 
-  const prompt = buildJudgePrompt(def, session, scenario, scoringFocus, stats);
+  const prompt = buildJudgePrompt(def, session, scenario, scoringFocus, stats, institutionKB);
   const primary = await runJudge(gateway.forTask('judge'), prompt, def);
   primary.betterScript = actionableGroundBetterScript(primary.betterScript, scenario?.category ?? def.category);
   const secondary = await runJudge(gateway.forTask('judge_secondary'), prompt, def);

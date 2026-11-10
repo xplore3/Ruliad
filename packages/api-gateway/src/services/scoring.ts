@@ -42,7 +42,8 @@ async function computeScoreReport(
     : undefined;
   const trainee = await store.getUser(session.userId);
   const voiceBaseline = trainee?.preferences?.voiceBaseline as VoiceBaseline | undefined;
-  const institutionKB = (scenario.flowType ? scenario.flowType === 'reception' : scenario.category === '咨询接待') ? await store.getProductKB(session.tenantId) : undefined;
+  // 机构资料全场景注入：忌讳项的"虚假承诺/事实不符"判定需要以 KB 实际值为对照，不再仅限咨询接待
+  const institutionKB = await store.getProductKB(session.tenantId);
   const persona = await store.getPersonaConfig(scenario.personaConfigId);
   const personaRate = typeof persona?.voiceProfile?.rate === 'number' ? persona.voiceProfile.rate : undefined;
   const customerRateMultiplier = guidance?.voiceProfile?.rate ?? personaRate ?? 1;

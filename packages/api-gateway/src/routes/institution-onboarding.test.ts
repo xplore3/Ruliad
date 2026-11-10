@@ -4,7 +4,7 @@ import multipart from '@fastify/multipart';
 import { institutionOnboardingRoutes } from './institution-onboarding.js';
 import type { RouteContext } from '../ctx.js';
 
-const qa = Array.from({ length: 20 }, (_, index) => ({
+const qa = Array.from({ length: 21 }, (_, index) => ({
   question: `问题 ${index + 1}`,
   answer: `答案 ${index + 1}`,
 }));
@@ -47,7 +47,7 @@ async function setup(chat: ReturnType<typeof vi.fn>, role: 'admin' | 'trainee' =
   return { app, transcribe, getProductKB, saveProductKB };
 }
 
-it('整段录音一次整理为固定20条问答', async () => {
+it('整段录音一次整理为固定21条问答', async () => {
   const chat = vi.fn(async (_messages: Array<{ content: string }>) => ({
     model: 'mock',
     content: JSON.stringify({ qa: qa.map((item) => ({ answer: item.answer })) }),
@@ -62,14 +62,16 @@ it('整段录音一次整理为固定20条问答', async () => {
     });
     expect(response.statusCode).toBe(200);
     const body = response.json<{ qa: Array<{ question: string; answer: string }> }>();
-    expect(body.qa).toHaveLength(20);
+    expect(body.qa).toHaveLength(21);
     expect(body.qa[0]).toEqual({ question: '机构的科目内容', answer: '答案 1' });
     expect(body.qa[19]).toEqual({ question: '退费政策如何', answer: '答案 20' });
+    expect(body.qa[20]).toEqual({ question: '一个班多少人', answer: '答案 21' });
     expect(transcribe).toHaveBeenCalledTimes(1);
     expect(chat).toHaveBeenCalledTimes(1);
     const messages = chat.mock.calls[0][0] as Array<{ content: string }>;
     expect(messages[0].content).toContain('客户的整段回答');
     expect(messages[0].content).toContain('20. 退费政策如何');
+    expect(messages[0].content).toContain('21. 一个班多少人');
   } finally {
     await app.close();
   }
@@ -117,7 +119,7 @@ it('语音修改后可再次核对，确认无误才保存资料库', async () =
       payload: { qa: confirmed.json().qa },
     });
     expect(completed.statusCode).toBe(200);
-    expect(completed.json()).toEqual({ completed: true, entries: 20 });
+    expect(completed.json()).toEqual({ completed: true, entries: 21 });
     expect(saveProductKB).toHaveBeenCalledTimes(1);
     expect(saveProductKB).toHaveBeenCalledWith(expect.objectContaining({
       name: '培训机构定制资料库',
@@ -145,7 +147,7 @@ it('普通测试账号可整理录音但不能写入正式资料库', async () =
       headers: { 'content-type': 'audio/pcm' },
     });
     expect(answered.statusCode).toBe(200);
-    expect(answered.json().qa).toHaveLength(20);
+    expect(answered.json().qa).toHaveLength(21);
 
     const completed = await app.inject({
       method: 'POST',
@@ -159,7 +161,7 @@ it('普通测试账号可整理录音但不能写入正式资料库', async () =
   }
 });
 
-it('已提交时返回现有20条问答供修改', async () => {
+it('已提交时返回现有21条问答供修改', async () => {
   const chat = vi.fn();
   const { app, getProductKB } = await setup(chat);
   getProductKB.mockResolvedValue({
@@ -172,7 +174,7 @@ it('已提交时返回现有20条问答供修改', async () => {
     });
     expect(response.statusCode).toBe(200);
     expect(response.json().completed).toBe(true);
-    expect(response.json().qa).toHaveLength(20);
+    expect(response.json().qa).toHaveLength(21);
     expect(response.json().qa[0]).toEqual({ question: '机构的科目内容', answer: '少儿围棋课程' });
     expect(response.json().qa[1]).toEqual({ question: '适龄年龄', answer: '未提供相关信息' });
   } finally {

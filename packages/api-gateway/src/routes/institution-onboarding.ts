@@ -24,6 +24,7 @@ const QUESTIONS = [
   '试听课老师和上课老师是否是一样的',
   '寒暑假的集训课程如何设置',
   '退费政策如何',
+  '一个班多少人',
 ] as const;
 
 interface QaItem {
