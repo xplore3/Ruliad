@@ -309,19 +309,12 @@ export default function Review() {
           )}
         </div>
 
-        {/* ===== 过程阶段拆解 ===== */}
-        {report.items.length > 0 && (
+        {/* ===== 表现维度 ===== */}
+        {radarDims.length >= 3 && (
           <>
-            <div className="sec-t bar-title">过程阶段拆解</div>
-            <div className="card stage sec">
-              {report.items.map((item) => (
-                <StageRow
-                  key={item.itemId}
-                  item={item}
-                  expanded={expandedId === item.itemId}
-                  onToggle={() => setExpandedId(expandedId === item.itemId ? null : item.itemId)}
-                />
-              ))}
+            <div className="sec-t bar-title">表现维度</div>
+            <div className="card radar-wrap sec">
+              <ReviewRadar items={radarDims} />
             </div>
           </>
         )}
@@ -341,31 +334,19 @@ export default function Review() {
           ))}
         </div>
 
-        {/* ===== 表现维度 ===== */}
-        {radarDims.length > 0 && (
+        {/* ===== 过程阶段拆解 ===== */}
+        {report.items.length > 0 && (
           <>
-            <div className="sec-t bar-title">表现维度</div>
-            <div className="card radar-wrap sec">
-              {radarDims.length >= 3 && <ReviewRadar items={radarDims} />}
-              <div className="dim-list">
-                {report.items.map((d) => (
-                  <div key={d.itemId} className="dim">
-                    <b style={d.isDeduction ? { color: '#2FAE7B' } : d.score < 60 ? { color: '#FF6B5B' } : undefined}>{d.isDeduction ? `指数 ${confidenceIndexLabel(d.score)}` : d.score}</b>
-                    <span>{d.itemName}</span>
-                    <span className="act">{d.rationale ?? ''}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </>
-        )}
-
-        {/* ===== 教练总结 ===== */}
-        {report.summary && (
-          <>
-            <div className="sec-t bar-title">教练总结</div>
-            <div className="card sec" style={{ padding: '20px 24px' }}>
-              <p style={{ fontSize: '14px', lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>{report.summary}</p>
+            <div className="sec-t bar-title">过程阶段拆解</div>
+            <div className="card stage sec">
+              {report.items.map((item) => (
+                <StageRow
+                  key={item.itemId}
+                  item={item}
+                  expanded={expandedId === item.itemId}
+                  onToggle={() => setExpandedId(expandedId === item.itemId ? null : item.itemId)}
+                />
+              ))}
             </div>
           </>
         )}

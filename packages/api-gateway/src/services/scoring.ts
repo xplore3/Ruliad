@@ -42,7 +42,8 @@ async function computeScoreReport(
     : undefined;
   const trainee = await store.getUser(session.userId);
   const voiceBaseline = trainee?.preferences?.voiceBaseline as VoiceBaseline | undefined;
-  // 机构资料全场景注入：忌讳项的"虚假承诺/事实不符"判定需要以 KB 实际值为对照，不再仅限咨询接待
+  // 机构资料库全场景注入：跨场景通用合规标准「合规表达通用规范」需按机构客观事实核对承诺，
+  // 不再仅限咨询接待（缺资料库时返回 undefined，判定按“资料未覆盖不猜测”处理）
   const institutionKB = await store.getProductKB(session.tenantId);
   const suggestionRules = await store.listSuggestionRules(session.tenantId);
   const persona = await store.getPersonaConfig(scenario.personaConfigId);
