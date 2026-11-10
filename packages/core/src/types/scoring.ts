@@ -283,3 +283,21 @@ export interface AppealReReview {
   /** 复评时间 */
   reviewedAt: string;
 }
+
+/**
+ * 改进建议库：点评/改进建议的唯一来源（替代代码内硬编码文案）。
+ * key 为稳定规则键（如 ground-push-incomplete / taboo-deterministic / generic-goal / summary-fallback），
+ * category 为业务分类（地推/电销/咨询接待/现场成交），缺省=通用；
+ * data 为该规则组的结构化内容（阶段定义、建议文本、模板等），由评分引擎按键读取。
+ */
+export interface SuggestionRule {
+  id: string;
+  tenantId: string;
+  name: string;
+  key: string;
+  category?: ScoreCategory;
+  data: Record<string, unknown>;
+  version?: number;
+  createdBy?: string;
+  updatedBy?: string;
+}

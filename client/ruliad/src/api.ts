@@ -518,6 +518,31 @@ export async function listBriefingStandards() {
   return data as { items: import('./lib/guidance').BriefingStandard[] };
 }
 
+/** 改进建议规则（点评/改进建议库） */
+export interface SuggestionRuleItem {
+  id: string;
+  tenantId: string;
+  name: string;
+  key: string;
+  category?: string;
+  data: Record<string, unknown>;
+}
+
+export async function listSuggestionRules() {
+  const { data } = await api.get('/library/suggestion-rules');
+  return data as { items: SuggestionRuleItem[] };
+}
+
+/** upsert：body 带 id 则更新，否则新建 */
+export async function saveSuggestionRule(payload: Partial<SuggestionRuleItem>) {
+  const { data } = await api.post('/library/suggestion-rules', payload);
+  return data as SuggestionRuleItem;
+}
+
+export async function deleteSuggestionRule(id: string) {
+  await api.delete(`/library/suggestion-rules/${id}`);
+}
+
 /** upsert：body 带 id 则更新，否则新建 */
 export async function saveBriefingStandard(payload: Partial<import('./lib/guidance').BriefingStandard>) {
   const { data } = await api.post('/library/briefing-standards', payload);

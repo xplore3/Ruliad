@@ -27,6 +27,7 @@ const TARGET_LABELS: Record<string, string> = {
   'scenario-guidance': '场景指引配置',
   'quiz-question': '测验题',
   'methodology-config': '方法论配置',
+  'suggestion-rule': '改进建议规则',
 };
 
 const KIND_LABELS: Record<string, string> = {

@@ -67,6 +67,7 @@ import type {
 } from '../lib/guidance';
 import { ElementLibrary, PersonaLibrary, ProductKBLibrary, SkillPointLibrary } from './AssetLibrary';
 import VoiceResourceEditor from './VoiceResourceEditor';
+import SuggestionRuleTab from './SuggestionRuleTab';
 import Pagination from '../components/Pagination';
 
 /** 各资源库列表的分页大小 */
@@ -605,7 +606,7 @@ function ParticipantsEditor({ participants, onChange }: {
 
 /** ===== 页面 ===== */
 
-type TabKey = 'voice-editor' | 'scenarios' | 'personas' | 'skill-points' | 'elements' | 'product-kb' | 'questions' | 'demo-scripts' | 'drill-scripts' | 'score-items' | 'golden-cases' | 'analysis-standards' | 'realism-standards' | 'guidance';
+type TabKey = 'voice-editor' | 'scenarios' | 'personas' | 'skill-points' | 'elements' | 'product-kb' | 'questions' | 'demo-scripts' | 'drill-scripts' | 'score-items' | 'golden-cases' | 'suggestion-rules' | 'analysis-standards' | 'realism-standards' | 'guidance';
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'scenarios', label: '对练场景库' },
@@ -618,6 +619,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'drill-scripts', label: '演练剧本库' },
   { key: 'score-items', label: '评分标准库' },
   { key: 'golden-cases', label: '评分回归案例库' },
+  { key: 'suggestion-rules', label: '改进建议库' },
   { key: 'analysis-standards', label: '讲解标准库' },
   { key: 'realism-standards', label: '演练真实度标准库' },
   { key: 'guidance', label: '新手指引流程配置' },
@@ -737,6 +739,7 @@ export default function Library() {
         <ScoreItemTab skillPoints={skillPoints} setNotice={setNotice} onChanged={() => listScoreItems().then((r) => setScoreItems(r.items)).catch(() => {})} />
       )}
       {tab === 'golden-cases' && <GoldenCaseTab scoreItems={scoreItems} setNotice={setNotice} />}
+      {tab === 'suggestion-rules' && <SuggestionRuleTab setNotice={setNotice} />}
       {tab === 'analysis-standards' && (
         <StandardTab
           categoryOptions={BRIEFING_CATEGORY_OPTIONS}

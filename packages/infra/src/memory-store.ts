@@ -23,6 +23,7 @@ import type {
   RealismStandard,
   RegressionRun,
   Scenario,
+  SuggestionRule,
   ScenarioGuidance,
   ScenarioTask,
   ScoreItemDef,
@@ -63,6 +64,7 @@ export class MemoryStore implements Store {
   private drillScripts = new Map<string, DrillScript>();
   private scenarioGuidances = new Map<string, ScenarioGuidance>();
   private briefingStandards = new Map<string, BriefingStandard>();
+  private suggestionRules = new Map<string, SuggestionRule>();
   private realismStandards = new Map<string, RealismStandard>();
   private appeals = new Map<string, Appeal>();
   private feedbacks = new Map<string, Feedback>();
@@ -343,6 +345,15 @@ private events: DomainEvent[] = [];
   }
   async deleteBriefingStandard(id: string) {
     this.briefingStandards.delete(id);
+  }
+  async listSuggestionRules(tenantId: string) {
+    return [...this.suggestionRules.values()].filter((s) => s.tenantId === tenantId);
+  }
+  async saveSuggestionRule(rule: SuggestionRule) {
+    this.suggestionRules.set(rule.id, rule);
+  }
+  async deleteSuggestionRule(id: string) {
+    this.suggestionRules.delete(id);
   }
   async listRealismStandards(tenantId: string) {
     return [...this.realismStandards.values()].filter((s) => s.tenantId === tenantId);

@@ -69,6 +69,6 @@ export async function analyzeReceptionTrialInvitation(
       quoteTurnSeq: turn.seq,
     };
   } catch {
-    return noDeduction('封闭式试听或活动邀约语义复核失败，保守不扣分。');
+    return noDeduction('试听或活动邀约检测未完成，本项未扣分。');
   }
 }

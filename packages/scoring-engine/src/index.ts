@@ -13,3 +13,4 @@ export { judgeItem } from './judge.js';
 export { judgeVideo } from './video-judge.js';
 export { scoreSession } from './engine.js';
 export type { ScoreOptions } from './engine.js';
+export { DEFAULT_SUGGESTION_RULES, SUGGESTION_KEYS, suggestionData, fillTemplate } from './suggestion-rules.js';

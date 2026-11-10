@@ -10,6 +10,7 @@ import type {
   DrillScript,
   GoldenCase,
   RealismStandard,
+  SuggestionRule,
   ScenarioGuidance,
   ScoreItemDef,
   ScoreLevel,
@@ -490,6 +491,43 @@ export async function libraryRoutes(app: FastifyInstance, ctx: RouteContext): Pr
     const usedBy = (await store.listScenarioGuidances(request.tenantId)).filter((guidance) => guidance.realismStandardIds.includes(request.params.id));
     if (usedBy.length) return reply.code(409).send({ error: `真实度标准仍被 ${usedBy.length} 个场景指引引用，请先解除绑定` });
     await store.deleteRealismStandard(request.params.id);
+    return { ok: true };
+  });
+
+  /** 改进建议库 —— 点评/改进建议的文案与阶段逻辑，评分引擎按 key+category 读取 */
+  app.get('/library/suggestion-rules', async (request) => ({
+    items: await store.listSuggestionRules(request.tenantId),
+  }));
+
+  app.post<{ Body: Partial<SuggestionRule> }>('/library/suggestion-rules', async (request, reply) => {
+    const body = request.body ?? {};
+    if (!body.name?.trim()) return reply.code(400).send({ error: 'name 必填' });
+    if (!body.key?.trim()) return reply.code(400).send({ error: 'key 必填' });
+    if (!body.data || typeof body.data !== 'object' || Array.isArray(body.data)) {
+      return reply.code(400).send({ error: 'data 必须为 JSON 对象' });
+    }
+    const existing = await store.listSuggestionRules(request.tenantId);
+    if (body.id && !existing.some((item) => item.id === body.id)) {
+      return reply.code(404).send({ error: '建议规则不存在' });
+    }
+    const rule: SuggestionRule = {
+      id: body.id ?? randomUUID(),
+      tenantId: request.tenantId,
+      name: body.name.trim(),
+      key: body.key.trim(),
+      category: (body.category as SuggestionRule['category']) || undefined,
+      data: body.data,
+    };
+    await store.saveSuggestionRule(rule);
+    return reply.code(201).send(rule);
+  });
+
+  app.delete<{ Params: { id: string } }>('/library/suggestion-rules/:id', async (request, reply) => {
+    const items = await store.listSuggestionRules(request.tenantId);
+    if (!items.some((s) => s.id === request.params.id)) {
+      return reply.code(404).send({ error: '建议规则不存在' });
+    }
+    await store.deleteSuggestionRule(request.params.id);
     return { ok: true };
   });
 

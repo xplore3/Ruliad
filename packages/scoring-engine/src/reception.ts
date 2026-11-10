@@ -100,7 +100,7 @@ export async function judgeReceptionAnswers(
     requestEvaluations(gateway.forTask('judge'), requestPrompt),
     requestEvaluations(gateway.forTask('judge_secondary'), requestPrompt),
   ]);
-  const fallback = { score: 50, rationale: '双评审输出缺失或解析失败，本题回退50分', improvement: '请重新评审本题。' };
+  const fallback = { score: 50, rationale: '本题评定信息不足，暂按 50 分计', improvement: '建议针对本题再练习一次回答。' };
   const trialDeclined = isReceptionTrialDeclined(session);
   const evaluations = session.receptionQuestions!.map((question, index) => {
     if (trialDeclined && question.question === RECEPTION_TRIAL_SCHEDULE_QUESTION) {
