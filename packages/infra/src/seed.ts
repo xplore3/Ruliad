@@ -784,7 +784,7 @@ export function buildSeedData(): SeedData {
         personaConfigId: 'persona-liu',
         skillPointIds: ['sp-icebreak', 'sp-need'],
         successCriteria: { passScore: 70 },
-        durationMinutes: 8,
+        durationMinutes: 10,
         difficulty: 2,
         coverageTopics: ['电话外呼开场', '30 秒价值主张', '前台转接应对'],
         personaTitle: '忙碌的家长，随时可能挂断',

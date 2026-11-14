@@ -572,7 +572,7 @@ export const SCENARIO_GUIDANCES: ScenarioGuidance[] = [
       },
     ],
     defaultDifficulty: 1,
-    duration: { targetMinutes: 4, minTurns: 6, maxTurns: 24, countdownSeconds: 240 },
+    duration: { targetMinutes: 10, minTurns: 6, maxTurns: 24, countdownSeconds: 600 },
     scoringFocus: ['开场破冰', '异议处理', '孩子互动', '下单指导', '信息留取'],
   },
 ];
