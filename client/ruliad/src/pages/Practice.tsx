@@ -80,15 +80,14 @@ function formatTime(seconds: number) {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
-/** 提示屏进度条：像视频播放器一样展示播放进度，向后拖动重播对应句（语音+文字），向前拖动不生效 */
+/** 提示屏进度条：像视频播放器一样展示播放进度，可点击或拖动到任意句子继续播放（语音+文字）。 */
 function GuideProgress({ index, total, onSeek }: { index: number; total: number; onSeek: (i: number) => void }) {
   const current = Math.max(0, index);
   const pct = total > 1 ? (current / (total - 1)) * 100 : 100;
   const seekFromEvent = (e: ReactPointerEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const ratio = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1);
-    const target = Math.round(ratio * (total - 1));
-    if (target < current) onSeek(target);
+    onSeek(Math.round(ratio * (total - 1)));
   };
   return (
     <div className="gprogress">
@@ -189,6 +188,8 @@ export default function Practice() {
   const guidanceRef = useRef<ScenarioGuidance | null>(null);
   /** 在途的 guidance 请求（「我准备好了」点击时若未落定会先等它） */
   const guidanceReqRef = useRef<Promise<void> | null>(null);
+  /** 示范播放期间提前生成讲解稿，避免示范结束后重新等待 */
+  const briefingReqRef = useRef<Promise<string[]> | null>(null);
   /** 中断在途自动聆听（stopGuidanceMedia / 组件清理时调用） */
   const guidanceCancelRef = useRef<(() => void) | null>(null);
   /** 自动聆听最大时长兜底定时器 */
@@ -212,7 +213,7 @@ export default function Practice() {
   const guideSrcRef = useRef<AudioBufferSourceNode | null>(null);
   /** 播放代数：打断后丢弃在途解码结果 */
   const guidePlayGenRef = useRef(0);
-  /** 提示屏进度条回拖的目标句下标（示范/讲解播放循环消费；null = 无回拖请求） */
+  /** 提示屏进度条选点的目标句下标（示范/讲解播放循环消费；null = 无选点请求） */
   const guideSeekRef = useRef<number | null>(null);
   /** 示范播放代数：重播/进入练习时使在途播放循环失效 */
   const demoTokenRef = useRef(0);
@@ -680,17 +681,14 @@ export default function Practice() {
     setGuideRec('idle');
   };
 
-  /**
-   * 提示屏进度条回拖：打断当前句的播放/解码，示范/讲解播放循环随即从目标句重播（语音+文字）。
-   * 仅支持向后拖动重播；拖到当前句之后（向前）直接忽略。
-   */
+  /** 进度条任意选点：打断当前句的播放/解码，示范/讲解播放循环随即从目标句继续（语音+文字）。 */
   const seekGuidance = (i: number) => {
     if (phaseRef.current !== 'guide') return;
     const total = demoStage === 'playing' ? demoLines.length : demoStage === 'briefing' ? briefLines.length : 0;
     if (total === 0) return;
-    const current = demoStage === 'playing' ? demoIndex : briefIndex;
     const target = Math.min(Math.max(0, i), total - 1);
-    if (target >= current) return;
+    if (demoStage === 'playing') setDemoIndex(target);
+    else setBriefIndex(target);
     guideSeekRef.current = target;
     // 打断在播/在解码的当前句：src.stop 触发 playClip 的 onended，gen 递增使在途解码结果被丢弃
     guidePlayGenRef.current += 1;
@@ -937,27 +935,36 @@ export default function Practice() {
   };
 
   // ===== 新手指引：示范对话 =====
-  const beginGuide = async (version: number) => {
+  const beginGuide = async (version: number, resume = false) => {
     if (!sessionId || phaseRef.current === 'live') return;
     stopGuidanceMedia();
     const token = demoTokenRef.current;
     setPhaseBoth('guide');
     setDemoVersion(version);
-    setDemoLines([]);
-    setDemoIndex(-1);
-    setBriefLines([]);
-    setBriefIndex(-1);
+    if (!resume) {
+      setDemoLines([]);
+      setDemoIndex(-1);
+      setBriefLines([]);
+      setBriefIndex(-1);
+    }
     setGuideText('');
     setGuideHint('');
     setErrorMsg('');
+    briefingReqRef.current = fetchBriefing(sessionId).then((result) => result.lines).catch(() => []);
     // 无示范模式（如现场成交，guidance.demoScriptId 为 null）：跳过示范直接进讲解
     if (guidanceRef.current && guidanceRef.current.demoScriptId == null) {
       await beginBriefing(token, false);
       return;
     }
-    setDemoStage('loading');
+    setDemoStage(resume && demoLines.length > 0 ? 'playing' : 'loading');
     try {
-      const { lines, hasDemo } = await fetchDemo(sessionId, version);
+      let lines = resume && demoLines.length > 0 ? demoLines : [];
+      let hasDemo: boolean | undefined = true;
+      if (lines.length === 0) {
+        const result = await fetchDemo(sessionId, version);
+        lines = result.lines;
+        hasDemo = result.hasDemo;
+      }
       if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
       // 后端声明无示范：跳过示范直接进讲解
       if (hasDemo === false || lines.length === 0) {
@@ -980,16 +987,16 @@ export default function Practice() {
       };
       const inflight = new Map<number, Promise<{ audioBase64: string } | null>>();
       const prefetch = (i: number) => {
-        if (i < lines.length && !inflight.has(i)) inflight.set(i, synthLine(lines[i]));
+        for (let j = i; j < Math.min(lines.length, i + 6); j += 1) {
+          if (!inflight.has(j)) inflight.set(j, synthLine(lines[j]));
+        }
       };
       prefetch(0);
-      prefetch(1);
-      prefetch(2);
-      // 音频缓存：进度条回拖重播时直接复用，不再重新合成
+      // 音频缓存：进度条选点重播时直接复用，不再重新合成
       const audioCache = new Map<number, string>();
       guideSeekRef.current = null;
-      // 逐句播放：前一句播完再播下一句；进度条回拖时跳到目标句重播
-      let i = 0;
+      // 逐句播放：前一句播完再播下一句；暂停恢复或进度选点时从目标句继续
+      let i = resume ? Math.min(Math.max(0, demoIndex), lines.length - 1) : 0;
       while (i < lines.length) {
         if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
         if (guideSeekRef.current != null) {
@@ -1001,7 +1008,7 @@ export default function Practice() {
         if (!clipB64) {
           const pending = inflight.get(i) ?? synthLine(lines[i]);
           inflight.delete(i);
-          prefetch(i + 3);
+          prefetch(i + 1);
           try {
             const clip = await pending;
             if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
@@ -1013,11 +1020,11 @@ export default function Practice() {
             /* 单句音频失败：文字已展示，继续下一句 */
           }
         }
-        // 合成等待期间用户回拖：跳过本次播放，回到循环顶部应用跳转
+        // 合成等待期间用户选点：跳过本次播放，回到循环顶部应用跳转
         if (guideSeekRef.current != null) continue;
         if (clipB64) await playClip(clipB64);
         if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
-        // 播放中被回拖打断：回到循环顶部应用跳转
+        // 播放中被选点打断：回到循环顶部应用跳转
         if (guideSeekRef.current != null) continue;
         i += 1;
       }
@@ -1036,28 +1043,30 @@ export default function Practice() {
    * 第3步讲解：拉取口播稿用教练音色逐条 TTS 播放（复用示范的预取管线模式）。
    * hasDemo=true 时讲完问「再听一版还是开始练习」；无示范场景讲解完直接进 live。
    */
-  const beginBriefing = async (token: number, hasDemo: boolean) => {
+  const beginBriefing = async (token: number, hasDemo: boolean, resume = false) => {
     if (!sessionId || demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
     setDemoStage('briefing');
     setDemoLines([]);
     setDemoIndex(-1);
     try {
-      const { lines } = await fetchBriefing(sessionId);
+      const lines = resume && briefLines.length > 0
+        ? briefLines
+        : await (briefingReqRef.current ?? fetchBriefing(sessionId).then((result) => result.lines));
       if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
       setBriefLines(lines);
-      // 与示范相同的预取管线：播当前句时提前合成后 3 句
+      // 与示范相同的预取管线：播放当前句时提前合成后续句子，减少句间停顿
       const synth = (text: string) => ttsClip(sessionId, text, 'coach').catch(() => null);
       const inflight = new Map<number, Promise<{ audioBase64: string } | null>>();
       const prefetch = (i: number) => {
-        if (i < lines.length && !inflight.has(i)) inflight.set(i, synth(lines[i]));
+        for (let j = i; j < Math.min(lines.length, i + 6); j += 1) {
+          if (!inflight.has(j)) inflight.set(j, synth(lines[j]));
+        }
       };
       prefetch(0);
-      prefetch(1);
-      prefetch(2);
-      // 音频缓存：进度条回拖重播时直接复用，不再重新合成
+      // 音频缓存：进度条选点重播时直接复用，不再重新合成
       const audioCache = new Map<number, string>();
       guideSeekRef.current = null;
-      let i = 0;
+      let i = resume ? Math.min(Math.max(0, briefIndex), lines.length - 1) : 0;
       while (i < lines.length) {
         if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
         if (guideSeekRef.current != null) {
@@ -1069,7 +1078,7 @@ export default function Practice() {
         if (!clipB64) {
           const pending = inflight.get(i) ?? synth(lines[i]);
           inflight.delete(i);
-          prefetch(i + 3);
+          prefetch(i + 1);
           const clip = await pending;
           if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
           if (clip) {
@@ -1077,11 +1086,11 @@ export default function Practice() {
             clipB64 = clip.audioBase64;
           }
         }
-        // 合成等待期间用户回拖：跳过本次播放，回到循环顶部应用跳转
+        // 合成等待期间用户选点：跳过本次播放，回到循环顶部应用跳转
         if (guideSeekRef.current != null) continue;
         if (clipB64) await playClip(clipB64);
         if (demoTokenRef.current !== token || phaseRef.current !== 'guide') return;
-        // 播放中被回拖打断：回到循环顶部应用跳转
+        // 播放中被选点打断：回到循环顶部应用跳转
         if (guideSeekRef.current != null) continue;
         i += 1;
       }
@@ -1373,7 +1382,8 @@ export default function Practice() {
             else if (p === 'guide') {
               if (demoStage === 'ask') void askGuideChoice();
               else if (demoStage === 'narration') startLive();
-              else void beginGuide(demoVersion);
+              else if (demoStage === 'briefing') void beginBriefing(demoTokenRef.current, true, true);
+              else void beginGuide(demoVersion, true);
             }
             // ready_wait：回到「我准备好了」界面即可，无需额外动作
           }

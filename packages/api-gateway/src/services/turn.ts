@@ -479,7 +479,7 @@ export async function runTurn(
       replyText = '好的，我回去琢磨琢磨，先走了。';
       shouldClose = true;
       completionStatus = 'incomplete';
-      completionReason = `客户已给“我回去琢磨琢磨”的最后推进机会，但学员仍未作出售卖邀请函、填写信息、选择支付方式或约定时间等实质动作。${groundPushProgress.reason}`;
+      completionReason = `客户之前表示要考虑一下，销售仍没有继续请家长购买邀请函、留下姓名电话、选择付款方式或定下体验时间。${groundPushProgress.reason}`;
     } else {
       replyText = '好的，我回去琢磨琢磨。';
       groundPushLastChance = true;

@@ -32,7 +32,7 @@ export async function assessGroundPushProgress(
         content:
           rule.intro +
           (lastChance ? rule.lastChance : rule.normal) +
-          '只输出JSON：{"substantive":true或false,"reason":"简短说明学员原话是否构成实质推进"}',
+          '只输出JSON：{"substantive":true或false,"reason":"用学员能看懂的通俗中文，准确说明已经做了什么、还缺哪一步，不使用技术术语"}',
       },
       { role: 'user', content: `最近对话：\n${context}\n\n请判断销售最新一轮是否作出了当前阶段应有的实质推进。` },
     ], { jsonMode: true, temperature: 0, maxTokens: 1000 });

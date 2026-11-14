@@ -138,7 +138,7 @@ export async function guidanceRoutes(app: FastifyInstance, ctx: RouteContext): P
     if (!script || script.tenantId !== session.tenantId) return { lines: [], hasDemo: false };
     const pool = await resolveFaqPool(store, session.tenantId, script.faqPoolRef, script.faqPick ?? 0);
     const version = Math.max(1, Math.floor(Number(request.body?.version ?? 1)) || 1);
-    return { lines: await performDemoScript(gateway, script, pool, version), hasDemo: true };
+    return { lines: await performDemoScript(gateway, script, pool, version, script.category), hasDemo: true };
   });
 
   // 教练讲解口播稿：keyPoints + 引用的讲解标准库条目渲染成参照稿后，交给大模型理解改写成自然口播

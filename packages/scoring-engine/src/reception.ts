@@ -67,6 +67,7 @@ function prompt(def: ScoreItemDef, session: Session, institutionKB?: ProductKB):
       ]
     : [];
   return [
+    def.judgePrompt,
     '请评价咨询接待演练的“对答得当”。以下是本场固定抽取的10道题，必须逐题评分，不能合并、漏评或更换题目。',
     ...questions.flatMap((item, index) => [
       `第${index + 1}题：${item.question}`,
@@ -77,7 +78,6 @@ function prompt(def: ScoreItemDef, session: Session, institutionKB?: ProductKB):
     institutionFacts,
     '完整对话记录：',
     transcript,
-    def.judgePrompt,
     ...trialDeclinedRules,
     '评分纪律：',
     '1. 每题满分100分，只评价该题对应的学员回答；未作答或答非所问给0分。答案不必与参考回答逐字一致，能够满足该题详解中的客户动机、评分标准和关键事实即可。',

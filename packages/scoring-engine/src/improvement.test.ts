@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
-import type { Scenario, ScoreItemDef, ScoreItemResult, Session, TranscriptTurn } from '@grasp-mvp/core';
-import { buildGroundPushIncompleteGoal, buildImprovementGoal } from './improvement.js';
+import type { LLMGateway, Scenario, ScoreItemDef, ScoreItemResult, Session, TranscriptTurn } from '@grasp-mvp/core';
+import { MockLLMProvider } from '@grasp-mvp/llm-gateway';
+import { buildGroundPushIncompleteGoal, buildGroundPushIncompleteGoalWithLLM, buildImprovementGoal } from './improvement.js';
 import { buildFallbackSummary } from './summary.js';
 
 const defs: ScoreItemDef[] = [
@@ -151,44 +152,176 @@ it('客户看过但没接邀请函时只建议先完成递卡', () => {
 
   expect(goal.title).toBe('先让家长拿上邀请函');
   expect(goal.rationale).toContain('实际接过邀请函');
-  expect(goal.rationale).toContain('地推客户通常比较被动');
+  expect(goal.rationale).toContain('没有听清楚下一步');
   expect(goal.rationale).toContain('直接离开');
   expect(goal.suggestion).toContain('您拿上邀请函');
   expect(goal.suggestion).not.toMatch(/填写|电话|支付|周六|订一张|购买/);
 });
 
-it('客户已经接卡但未售卖时只建议现场销售邀请函', () => {
+it('接过介绍单但尚未购买时给出活动介绍和孩子沟通两项建议', () => {
   const goal = buildGroundPushIncompleteGoal(groundSession([
-    turn(6, 'trainee', '来，您拿上邀请函，我给您介绍一下。'),
-    turn(7, 'persona', '客户接过邀请函看了看。'),
+    turn(6, 'trainee', '这是活动介绍给您拿上。这次体验活动由老师带小朋友玩围棋游戏，边玩边学。'),
+    turn(7, 'persona', '客户放慢脚步，接过介绍单看了看。'),
   ]));
 
-  expect(goal.title).toBe('明确现场销售邀请函');
-  expect(goal.suggestion).toBe('直接说：“这张邀请函5元，您现在给孩子订一张。”');
-  expect(goal.suggestion).not.toMatch(/姓名|电话|支付|周六/);
+  expect(goal.title).toBe('递卡后，把活动介绍清楚，并让孩子产生兴趣');
+  expect(goal.rationale).toContain('客户已经接过介绍材料，递卡这一步已经完成');
+  expect(goal.suggestion).toContain('试听活动流程、学校地址');
+  expect(goal.suggestion).toContain('年龄、有没有基础');
+  expect(goal.suggestion).toContain('2. 主动跟孩子沟通');
+});
+
+it('已经和孩子沟通时只保留活动介绍建议', () => {
+  const goal = buildGroundPushIncompleteGoal(groundSession([
+    turn(6, 'trainee', '这是活动介绍给您拿上。这次体验活动由老师带小朋友玩围棋游戏，边玩边学。'),
+    turn(7, 'persona', '客户接过介绍单看了看。'),
+    turn(8, 'trainee', '小朋友，你喜欢围棋吗？'),
+  ]));
+
+  expect(goal.title).toBe('递卡后，把试听活动介绍完整');
+  expect(goal.rationale).toContain('你已经和孩子沟通过了');
+  expect(goal.suggestion).toContain('1. 继续介绍试听活动流程');
+  expect(goal.suggestion).not.toContain('2. 主动跟孩子沟通');
 });
 
 it('已经售卖但未登记信息时只建议填写姓名和电话', () => {
   const goal = buildGroundPushIncompleteGoal(groundSession([
-    turn(6, 'trainee', '来，您拿上邀请函。'),
-    turn(7, 'persona', '客户接过邀请函看了看。'),
-    turn(8, 'trainee', '这张邀请函5元，您现在给孩子订一张。'),
+    turn(6, 'trainee', '这次体验活动由老师带小朋友玩围棋游戏，学校在××大厦二层。我姓陈，这是我电话。邀请函5元，您现在给孩子订一张。'),
+    turn(7, 'persona', '客户接过介绍单看了看。'),
   ]));
 
-  expect(goal.title).toBe('引导填写姓名和电话');
-  expect(goal.suggestion).toBe('直接说：“来，您在这里填一下姓名和电话。”');
+  expect(goal.title).toBe('让客户填写资料并付款');
+  expect(goal.suggestion).toBe('客户已经口头答应购买邀请函，下一次应该让其填写资料并且付款。');
   expect(goal.suggestion).not.toMatch(/支付|周六|试听时间/);
 });
 
 it('已经登记信息但未支付时只建议完成支付', () => {
   const goal = buildGroundPushIncompleteGoal(groundSession([
-    turn(6, 'trainee', '来，您拿上邀请函。'),
-    turn(7, 'persona', '客户接过邀请函看了看。'),
-    turn(8, 'trainee', '这张邀请函5元，您现在给孩子订一张。'),
+    turn(6, 'trainee', '这次体验活动由老师带小朋友玩围棋游戏，学校在××大厦二层。我姓陈，这是我电话。邀请函5元，您现在给孩子订一张。'),
+    turn(7, 'persona', '客户接过介绍单看了看。'),
     turn(9, 'trainee', '来，您在这里填一下姓名和电话。'),
   ]));
 
-  expect(goal.title).toBe('引导选择支付方式');
+  expect(goal.title).toBe('问清家长怎么付款');
   expect(goal.suggestion).toBe('直接问：“您是微信还是支付宝？现在完成付款。”');
   expect(goal.suggestion).not.toMatch(/周六|试听时间/);
+});
+
+
+function stageGateway(stage: string, childCommunicated: boolean): LLMGateway {
+  return {
+    forTask: () => new MockLLMProvider(() => JSON.stringify({ stage, childCommunicated, reason: '已完成动作和当前缺失步骤说明' })),
+  };
+}
+
+it('语义识别为递卡后指导时给出活动介绍和孩子沟通两项建议', async () => {
+  const goal = await buildGroundPushIncompleteGoalWithLLM(groundSession([
+    turn(6, 'trainee', '这是活动介绍，您拿上。'),
+    turn(7, 'persona', '客户接过介绍单。'),
+  ]), stageGateway('after-card-guidance', false));
+
+  expect(goal.title).toBe('递卡后，把活动介绍清楚，并让孩子产生兴趣');
+  expect(goal.suggestion).toContain('试听活动流程、学校地址');
+  expect(goal.suggestion).toContain('2. 主动跟孩子沟通');
+});
+
+it('语义识别为尝试售卖且尚未沟通孩子时建议先激发孩子兴趣', async () => {
+  const goal = await buildGroundPushIncompleteGoalWithLLM(groundSession([
+    turn(6, 'trainee', '这是活动介绍，您拿上。'),
+    turn(7, 'persona', '客户接过介绍单。'),
+  ]), stageGateway('sell', false));
+
+  expect(goal.title).toBe('尝试和孩子沟通并售卖邀请函');
+  expect(goal.suggestion).toContain('主动和孩子沟通、激发兴趣');
+  expect(goal.suggestion).not.toContain('填写资料并且付款');
+});
+
+it('已经和孩子沟通后进入售卖阶段时不再重复孩子沟通建议', async () => {
+  const goal = await buildGroundPushIncompleteGoalWithLLM(groundSession([
+    turn(6, 'trainee', '这是活动介绍，您拿上。'),
+    turn(7, 'persona', '客户接过介绍单。'),
+    turn(8, 'trainee', '小朋友，你喜欢围棋吗？'),
+  ]), stageGateway('sell', false));
+
+  expect(goal.suggestion).toBe('基本介绍和孩子沟通已经完成，接下来请家长订购邀请函。');
+  expect(goal.suggestion).not.toContain('主动和孩子沟通、激发兴趣');
+});
+
+it('客户口头答应购买但未填资料时建议填写资料并付款', async () => {
+  const goal = await buildGroundPushIncompleteGoalWithLLM(groundSession([
+    turn(6, 'trainee', '这是活动介绍，您拿上。'),
+    turn(7, 'persona', '客户接过介绍单。'),
+    turn(8, 'persona', '好，那我给孩子订一张。'),
+  ]), stageGateway('contact', true));
+
+  expect(goal.title).toBe('让客户填写资料并付款');
+  expect(goal.suggestion).toBe('客户已经口头答应购买邀请函，下一次应该让其填写资料并且付款。');
+});
+
+it('已填写资料但未付款时建议明确付款方式', async () => {
+  const goal = await buildGroundPushIncompleteGoalWithLLM(groundSession([
+    turn(6, 'trainee', '这是活动介绍，您拿上。'),
+    turn(7, 'persona', '客户接过介绍单。'),
+    turn(8, 'trainee', '来，您在这里填一下姓名和电话。'),
+  ]), stageGateway('payment', true));
+
+  expect(goal.title).toBe('问清家长怎么付款');
+  expect(goal.suggestion).toContain('微信还是支付宝');
+});
+
+it('已付款但未约试听时建议确定体验时间', async () => {
+  const goal = await buildGroundPushIncompleteGoalWithLLM(groundSession([
+    turn(6, 'trainee', '这是活动介绍，您拿上。'),
+    turn(7, 'persona', '客户接过介绍单。'),
+    turn(8, 'persona', '我已经付款了。'),
+  ]), stageGateway('schedule', true));
+
+  expect(goal.title).toBe('和家长定好体验时间');
+  expect(goal.suggestion).toContain('周六上午');
+});
+
+
+it('电销邀约后给出活动介绍和孩子沟通两项建议', async () => {
+  const goal = await buildGroundPushIncompleteGoalWithLLM(groundSession([
+    turn(1, 'trainee', '我们有一个199元4次体验课活动，想邀请您参加。'),
+    turn(2, 'persona', '我考虑一下。'),
+  ]), stageGateway('after-card-guidance', false), undefined, '电销');
+
+  expect(goal.title).toBe('邀约后，把活动和孩子兴趣都介绍清楚');
+  expect(goal.suggestion).toContain('199元4次体验课');
+  expect(goal.suggestion).toContain('2. 主动跟孩子沟通');
+  expect(goal.suggestion).toContain('大众点评');
+});
+
+it('电销口头答应后建议填写孩子资料并完成付款', async () => {
+  const goal = await buildGroundPushIncompleteGoalWithLLM(groundSession([
+    turn(1, 'trainee', '我们有一个199元4次体验课活动，想邀请您参加。'),
+    turn(2, 'persona', '好，那我给孩子订一张。'),
+  ]), stageGateway('contact', true), undefined, '电销');
+
+  expect(goal.title).toBe('让客户填写孩子资料并完成下单');
+  expect(goal.suggestion).toContain('孩子姓名、年龄、基础和联系方式');
+  expect(goal.suggestion).toContain('大众点评完成付款');
+});
+
+it('电销已沟通孩子后直接进入大众点评下单建议', async () => {
+  const goal = await buildGroundPushIncompleteGoalWithLLM(groundSession([
+    turn(1, 'trainee', '我们有一个199元4次体验课活动，想邀请您参加。'),
+    turn(2, 'trainee', '小朋友，你喜欢这个活动吗？'),
+  ]), stageGateway('sell', false), undefined, '电销');
+
+  expect(goal.suggestion).toBe('基本介绍和孩子沟通已经完成，接下来请家长打开大众点评下单。');
+  expect(goal.suggestion).not.toContain('邀请函');
+});
+
+
+it('电销尚未有效邀约时回退也使用电销建议而非递卡建议', async () => {
+  const goal = await buildGroundPushIncompleteGoalWithLLM(groundSession([
+    turn(1, 'trainee', '您好。'),
+    turn(2, 'persona', '我考虑一下。'),
+  ]), stageGateway('accept-card', false), undefined, '电销');
+
+  expect(goal.title).toBe('先说明活动并邀请家长参加');
+  expect(goal.suggestion).toContain('199元4次体验课');
+  expect(goal.suggestion).not.toContain('拿上邀请函');
 });

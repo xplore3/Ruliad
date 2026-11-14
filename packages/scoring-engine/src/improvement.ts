@@ -1,8 +1,18 @@
-import type { ImprovementCandidate, RuleViolation, ScoreItemDef, ScoreItemResult, Session, SuggestionRule } from '@grasp-mvp/core';
+import type { ImprovementCandidate, LLMGateway, RuleViolation, ScoreItemDef, ScoreItemResult, Session, SuggestionRule } from '@grasp-mvp/core';
 import { fillTemplate, suggestionData, SUGGESTION_KEYS } from './suggestion-rules.js';
 
 function firstLine(text: string | undefined): string {
   return text?.split('\n').find((line) => line.trim())?.trim() ?? '';
+}
+
+function hasChildCommunication(session: Session): boolean {
+  return session.transcript.some((turn) =>
+    turn.speaker === 'child' || (
+      turn.speaker === 'trainee' && (
+        turn.addressedToChild === true || /(?:小朋友|宝贝|宝宝)[，,]?\s*(?=你喜欢|你想|你好|您好|过来|喜欢|想|见过|好不好|听|看|要不要)/.test(turn.text)
+      )
+    )
+  );
 }
 
 interface GenericGoalData {
@@ -132,6 +142,16 @@ interface GroundIncompleteData {
   childFailure: { completionReasonContains: string; title: string; suggestion: string };
   stages: GroundIncompleteStage[];
   fallback: { title: string; missing: string; suggestion: string };
+  afterCardGuidance?: {
+    title: string;
+    titleChildDone: string;
+    rationale: string;
+    rationaleChildDone: string;
+    activitySuggestion: string;
+    childSuggestion: string;
+  };
+  stageAssessmentPrompt?: string;
+  sellChildDoneSuggestion?: string;
   rationaleTemplate: string;
   acceptCard: {
     textPattern: string;
@@ -145,8 +165,8 @@ interface GroundIncompleteData {
   };
 }
 
-export function buildGroundPushIncompleteGoal(session: Session, rules?: SuggestionRule[]): ImprovementCandidate {
-  const data = suggestionData<GroundIncompleteData>(rules, SUGGESTION_KEYS.groundPushIncomplete, '地推');
+export function buildGroundPushIncompleteGoal(session: Session, rules?: SuggestionRule[], category: '地推' | '电销' = '地推'): ImprovementCandidate {
+  const data = suggestionData<GroundIncompleteData>(rules, SUGGESTION_KEYS.groundPushIncomplete, category);
   if (session.completionReason?.includes(data.childFailure.completionReasonContains)) {
     return {
       title: data.childFailure.title,
@@ -157,6 +177,7 @@ export function buildGroundPushIncompleteGoal(session: Session, rules?: Suggesti
   }
 
   const traineeTurns = session.transcript.filter((turn) => turn.speaker === 'trainee');
+  const traineeText = traineeTurns.map((turn) => turn.text).join('\n');
   const accept = data.acceptCard;
   const customerAcceptedInvitation = session.transcript.some((turn) => {
     if (turn.speaker !== 'persona' || !new RegExp(accept.textPattern).test(turn.text)) return false;
@@ -164,17 +185,31 @@ export function buildGroundPushIncompleteGoal(session: Session, rules?: Suggesti
     return new RegExp(accept.positivePattern).test(turn.text);
   });
   const traineeSaid = (pattern: RegExp, also?: RegExp) =>
-    traineeTurns.some((turn) => pattern.test(turn.text) && (!also || also.test(turn.text)));
+    pattern.test(traineeText) && (!also || also.test(traineeText));
   const isStageDone = (stage: GroundIncompleteStage): boolean => {
     if (stage.done.type === 'customerAcceptedInvitation') return customerAcceptedInvitation;
     return traineeSaid(new RegExp(stage.done.all?.[0] ?? ''), stage.done.also?.[0] ? new RegExp(stage.done.also[0]) : undefined);
   };
+  const sellStage = data.stages.find((entry) => entry.key === 'sell');
+  const afterCard = data.afterCardGuidance;
+  if (afterCard && customerAcceptedInvitation && sellStage && !isStageDone(sellStage)) {
+    const childCommunicated = hasChildCommunication(session);
+    return {
+      title: childCommunicated ? afterCard.titleChildDone : afterCard.title,
+      impact: Number.MAX_SAFE_INTEGER,
+      rationale: `客户已经接过介绍材料，递卡这一步已经完成。${childCommunicated ? afterCard.rationaleChildDone : afterCard.rationale}`,
+      suggestion: [afterCard.activitySuggestion, childCommunicated ? '' : afterCard.childSuggestion].filter(Boolean).join('\n'),
+    };
+  }
   const stage = data.stages.find((entry) => !isStageDone(entry)) ?? data.fallback;
   const customerDeclinedCard = session.transcript.some((turn) =>
     turn.speaker === 'persona' && new RegExp(accept.textPattern).test(turn.text) && new RegExp(accept.declinedNegativePattern).test(turn.text)
   );
   const retreatHandoff = traineeTurns.some((turn) => new RegExp(accept.retreatPattern).test(turn.text));
   const isFirstStage = data.stages.length > 0 && stage === data.stages[0];
+  const acceptedEvidence = !isFirstStage && customerAcceptedInvitation
+    ? '客户已经接过介绍材料，递卡这一步已经完成。'
+    : '';
   const currentEvidence = isFirstStage
     ? [
         customerDeclinedCard ? accept.declinedEvidence : accept.noAcceptEvidence,
@@ -185,9 +220,74 @@ export function buildGroundPushIncompleteGoal(session: Session, rules?: Suggesti
     title: stage.title,
     impact: Number.MAX_SAFE_INTEGER,
     rationale: fillTemplate(data.rationaleTemplate, {
-      evidence: currentEvidence ? `${currentEvidence}。` : '',
+      evidence: `${acceptedEvidence}${currentEvidence ? `${currentEvidence}。` : ''}`,
       missing: stage.missing,
     }),
     suggestion: stage.suggestion,
   };
+}
+
+
+interface GroundStageAssessment {
+  stage?: 'accept-card' | 'after-card-guidance' | 'sell' | 'contact' | 'payment' | 'schedule' | 'complete';
+  childCommunicated?: boolean;
+  reason?: string;
+}
+
+export async function buildGroundPushIncompleteGoalWithLLM(
+  session: Session,
+  gateway: LLMGateway,
+  rules?: SuggestionRule[],
+  category: '地推' | '电销' = '地推'
+): Promise<ImprovementCandidate> {
+  const data = suggestionData<GroundIncompleteData>(rules, SUGGESTION_KEYS.groundPushIncomplete, category);
+  if (!data.stageAssessmentPrompt || session.completionReason?.includes(data.childFailure.completionReasonContains)) {
+    return buildGroundPushIncompleteGoal(session, rules, category);
+  }
+  try {
+    const transcript = session.transcript
+      .slice(-40)
+      .map((turn) => `[${turn.seq}] ${turn.speaker === 'trainee' ? '销售' : turn.speaker === 'persona' ? '客户' : turn.speaker === 'child' ? '孩子' : '旁白'}：${turn.text}`)
+      .join('\n');
+    const result = await gateway.forTask('judge').chat([
+      { role: 'system', content: `${data.stageAssessmentPrompt}\n只输出JSON：{"stage":"accept-card|after-card-guidance|sell|contact|payment|schedule|complete","childCommunicated":true或false,"reason":"当前阶段的通俗说明"}` },
+      { role: 'user', content: `完整对话：\n${transcript}` },
+    ], { jsonMode: true, temperature: 0, maxTokens: 1000 });
+    const match = result.content.match(/\{[\s\S]*\}/);
+    if (!match) return buildGroundPushIncompleteGoal(session, rules, category);
+    const assessment = JSON.parse(match[0]) as GroundStageAssessment;
+    const childCommunicated = assessment.childCommunicated === true || hasChildCommunication(session);
+    const reason = assessment.reason?.trim();
+
+    if (assessment.stage === 'accept-card') return buildGroundPushIncompleteGoal(session, rules, category);
+    if (assessment.stage === 'after-card-guidance' && data.afterCardGuidance) {
+      const afterCard = data.afterCardGuidance;
+      return {
+        title: childCommunicated ? afterCard.titleChildDone : afterCard.title,
+        impact: Number.MAX_SAFE_INTEGER,
+        rationale: reason ?? `客户已经接过介绍材料，递卡这一步已经完成。${childCommunicated ? afterCard.rationaleChildDone : afterCard.rationale}`,
+        suggestion: [afterCard.activitySuggestion, childCommunicated ? '' : afterCard.childSuggestion].filter(Boolean).join('\n'),
+      };
+    }
+    if (assessment.stage === 'complete') {
+      return {
+        title: data.fallback.title,
+        impact: Number.MAX_SAFE_INTEGER,
+        rationale: reason ?? data.fallback.missing,
+        suggestion: data.fallback.suggestion,
+      };
+    }
+    const stage = data.stages.find((entry) => entry.key === assessment.stage);
+    if (!stage) return buildGroundPushIncompleteGoal(session, rules, category);
+    return {
+      title: stage.title,
+      impact: Number.MAX_SAFE_INTEGER,
+      rationale: reason ?? fillTemplate(data.rationaleTemplate, { evidence: '', missing: stage.missing }),
+      suggestion: assessment.stage === 'sell' && childCommunicated
+        ? data.sellChildDoneSuggestion ?? stage.suggestion
+        : stage.suggestion,
+    };
+  } catch {
+    return buildGroundPushIncompleteGoal(session, rules, category);
+  }
 }

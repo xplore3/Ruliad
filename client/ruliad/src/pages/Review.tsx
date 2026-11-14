@@ -31,7 +31,6 @@ export default function Review() {
   const [data, setData] = useState<ReviewData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showTranscript, setShowTranscript] = useState(false);
   const [creating, setCreating] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
@@ -340,12 +339,7 @@ export default function Review() {
             <div className="sec-t bar-title">过程阶段拆解</div>
             <div className="card stage sec">
               {report.items.map((item) => (
-                <StageRow
-                  key={item.itemId}
-                  item={item}
-                  expanded={expandedId === item.itemId}
-                  onToggle={() => setExpandedId(expandedId === item.itemId ? null : item.itemId)}
-                />
+                <StageRow key={item.itemId} item={item} />
               ))}
             </div>
           </>
@@ -432,43 +426,13 @@ function renderNumbered(text: string): React.ReactNode {
   );
 }
 
-function StageRow({ item, expanded, onToggle }: { item: ScoreItem; expanded: boolean; onToggle: () => void }) {
-  const hasEvidence = !!(item.quote || item.betterScript || item.rationale);
+function StageRow({ item }: { item: ScoreItem }) {
   return (
     <div className="stage-row">
       <b className="stage-title">{item.itemName}</b>
       <div className="bar"><i className={barClass(item.score)} style={{ width: item.isDeduction ? 0 : `${item.score}%` }} /></div>
       <b style={{ color: item.isDeduction ? '#2FAE7B' : scoreColor(item.score), fontSize: '13px', fontWeight: 700 }}>{item.isDeduction ? `指数 ${confidenceIndexLabel(item.score)}` : item.score}</b>
-      <div className="stage-note">
-        {item.rationale ? renderNumbered(item.rationale) : ''}
-        {hasEvidence && (
-          <a style={{ color: '#FF6B5B', fontWeight: 600, cursor: 'pointer', flexShrink: 0 }} onClick={onToggle}>
-            {expanded ? '收起证据 ↑' : '查看证据 ↗'}
-          </a>
-        )}
-      </div>
-      {expanded && (
-        <div style={{ gridColumn: '1 / -1', fontSize: '13px', lineHeight: 1.7, background: '#F7F7FA', borderRadius: '10px', padding: '12px 14px' }}>
-          {item.quote && (
-            <p style={{ marginBottom: '8px' }}>
-              <b className="small muted">话术证据</b>
-              <br />「{item.quote}」
-            </p>
-          )}
-          {item.rationale && (
-            <p style={{ marginBottom: '8px' }}>
-              <b className="small muted">评分解析</b>
-              <br />{renderNumbered(item.rationale)}
-            </p>
-          )}
-          {item.betterScript && (
-            <p>
-              <b className="small muted">建议话术</b>
-              <br />{renderNumbered(item.betterScript)}
-            </p>
-          )}
-        </div>
-      )}
+      <div className="stage-note">{item.rationale ? renderNumbered(item.rationale) : ''}</div>
     </div>
   );
 }

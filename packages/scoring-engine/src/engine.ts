@@ -16,7 +16,7 @@ import { judgeItem } from './judge.js';
 import { runRuleChecks } from './rules.js';
 import { generateSummary } from './summary.js';
 import { judgeVideo } from './video-judge.js';
-import { buildGroundPushIncompleteGoal, buildImprovementGoal } from './improvement.js';
+import { buildGroundPushIncompleteGoalWithLLM, buildImprovementGoal } from './improvement.js';
 import { applyConfidenceIndex } from './confidence.js';
 
 function weightedAverage(items: Array<{ score: number; weight: number }>): number {
@@ -68,6 +68,7 @@ export interface ScoreLogger {
  * 评分主流程：规则层 + 双 judge 评分标准 + 汇总报告。
  * 评分标准选取：优先使用场景显式绑定的 scoreItemIds；存量数据未绑定时，
  * 有 category 则评该分类及通用标准，无 category 则按 skillPointIds 过滤。观察项进 items 但不计分。
+ * 「通用评分规则」不独立评分，其行为锚定前置到所有实际评分项的 judge prompt。
  * options.videoFrames 存在时附带视频表现评审（videoReview，独立维度不计总分）。
  */
 export async function scoreSession(
@@ -82,13 +83,27 @@ export async function scoreSession(
   // 规则层只产出统计指标（供 judge 判定语声语调类标准），不产出库外违规项；无分类的存量场景保持完整规则层
   const violations = scenario.category ? [] : ruleViolations;
 
+  const generalScoringAnchor = defs.find((d) => d.name === '通用评分规则' && d.behaviorAnchor?.trim())?.behaviorAnchor?.trim();
+  const scoringDefs = defs.filter((d) => d.name !== '通用评分规则');
   const trialDeclined = isReceptionTrialDeclined(session);
   const relevantDefs = (scenario.scoreItemIds !== undefined
-    ? defs.filter((d) => scenario.scoreItemIds!.includes(d.id))
+    ? scoringDefs.filter((d) => scenario.scoreItemIds!.includes(d.id))
     : scenario.category
-      ? defs.filter((d) => !d.category || d.category === scenario.category)
-      : defs.filter((d) => scenario.skillPointIds.includes(d.skillPointId))
-  ).filter((d) => !(trialDeclined && d.name === '主动性确定试听时间'));
+      ? scoringDefs.filter((d) => !d.category || d.category === scenario.category)
+      : scoringDefs.filter((d) => scenario.skillPointIds.includes(d.skillPointId))
+  )
+    .filter((d) => !(trialDeclined && d.name === '主动性确定试听时间'))
+    .map((def) => generalScoringAnchor
+      ? {
+          ...def,
+          judgePrompt: [
+            '【通用评分裁量原则（具体评分前必须阅读）】',
+            generalScoringAnchor,
+            '以上原则不设置评分权重、不独立评分、不新增扣分条件，仅用于理解场景并在有争议或无法确定时参照裁量；具体评分标准已有明确规定时按具体标准执行。',
+            def.judgePrompt,
+          ].join('\n'),
+        }
+      : def);
 
   const startedAt = Date.now();
   const log = options.log;
@@ -181,7 +196,9 @@ export async function scoreSession(
     : undefined;
 
   const improvementGoal = incomplete
-    ? buildGroundPushIncompleteGoal(session, options.suggestionRules)
+    ? scenario.category === '地推' || scenario.category === '电销'
+      ? await buildGroundPushIncompleteGoalWithLLM(session, gateway, options.suggestionRules, scenario.category)
+      : buildImprovementGoal(items, relevantDefs, violations, baseScore, options.suggestionRules)
     : buildImprovementGoal(items, relevantDefs, violations, baseScore, options.suggestionRules);
 
   // ---- 教练总结：LLM 优先生成，失败回退模板，保证报告始终带 summary ----

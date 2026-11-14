@@ -198,6 +198,91 @@ describe('scoreSession', () => {
     expect(report.items.map((item) => item.itemId)).toEqual(['item-selected']);
   });
 
+  it('通用评分规则在四类场景注入主副评审且不独立评分', async () => {
+    const calls: Array<{ task: string; prompt: string }> = [];
+    const capturingGateway: LLMGateway = {
+      forTask: (task) => new MockLLMProvider((messages) => {
+        calls.push({ task, prompt: messages.map((message) => message.content).join('\n') });
+        return JSON.stringify({ levelKey: 'good', quote: '课时费', quoteTurnSeq: 5, rationale: '回答完整', betterScript: '' });
+      }),
+    };
+    const generalDef: ScoreItemDef = {
+      ...defs[0],
+      id: 'general-scoring-rule',
+      name: '通用评分规则',
+      behaviorAnchor: '先分析每句话的目的，不得机械地把转换沟通对象判为缺乏条理性。',
+      judgePrompt: '这段内容不得成为独立评分项',
+      category: undefined,
+      weight: 0,
+      scoringMode: 'score',
+    };
+    const selectedDef = { ...defs[0], id: 'item-selected' };
+
+    for (const category of ['地推', '电销', '咨询接待', '现场成交'] as const) {
+      const report = await scoreSession(
+        session,
+        { ...scenario, category, scoreItemIds: ['item-selected', generalDef.id] },
+        [selectedDef, generalDef],
+        capturingGateway
+      );
+      expect(report.items.map((item) => item.itemId)).toEqual(['item-selected']);
+    }
+
+    const itemCalls = calls.filter((call) => call.prompt.includes('评分标准：异议处理首反应'));
+    expect(itemCalls).toHaveLength(8);
+    for (const call of itemCalls) {
+      expect(['judge', 'judge_secondary']).toContain(call.task);
+      expect(call.prompt.startsWith('【通用评分裁量原则（具体评分前必须阅读）】')).toBe(true);
+      expect(call.prompt.indexOf(generalDef.behaviorAnchor)).toBeLessThan(call.prompt.indexOf(defs[0].judgePrompt));
+    }
+    expect(calls.some((call) => call.prompt.includes('评分标准：通用评分规则'))).toBe(false);
+  });
+
+  it('咨询接待对答得当的双评审也先阅读通用评分规则', async () => {
+    const prompts: string[] = [];
+    const capturingGateway: LLMGateway = {
+      forTask: () => new MockLLMProvider((messages) => {
+        prompts.push(messages.map((message) => message.content).join('\n'));
+        return JSON.stringify({
+          evaluations: Array.from({ length: 10 }, () => ({ score: 100, rationale: '回答完整', improvement: '' })),
+        });
+      }),
+    };
+    const receptionDef: ScoreItemDef = {
+      ...defs[0],
+      id: 'item-reception-answers',
+      name: '对答得当',
+      category: '咨询接待',
+      scoringMode: 'score',
+      levels: [],
+    };
+    const generalDef: ScoreItemDef = {
+      ...defs[0],
+      id: 'general-scoring-rule',
+      name: '通用评分规则',
+      behaviorAnchor: '间接回应也可以构成合理回应。',
+      weight: 0,
+    };
+
+    const report = await scoreSession(
+      {
+        ...session,
+        receptionQuestions: RECEPTION_QUESTION_POOL.slice(0, 10).map((item) => ({ ...item })),
+      },
+      { ...scenario, category: '咨询接待', scoreItemIds: [receptionDef.id] },
+      [receptionDef, generalDef],
+      capturingGateway
+    );
+
+    expect(report.items.map((item) => item.itemId)).toEqual([receptionDef.id]);
+    const receptionPrompts = prompts.filter((prompt) => prompt.includes('请评价咨询接待演练的“对答得当”'));
+    expect(receptionPrompts).toHaveLength(2);
+    for (const prompt of receptionPrompts) {
+      expect(prompt.startsWith('【通用评分裁量原则（具体评分前必须阅读）】')).toBe(true);
+      expect(prompt.indexOf(generalDef.behaviorAnchor)).toBeLessThan(prompt.indexOf('请评价咨询接待演练的“对答得当”'));
+    }
+  });
+
   it('skillPointNames 选项把技能点 id 映射为名称', async () => {
     const report = await scoreSession(session, scenario, defs, gateway, {
       skillPointNames: { 'sp-objection': '异议处理' },

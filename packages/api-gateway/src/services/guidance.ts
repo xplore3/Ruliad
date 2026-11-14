@@ -255,7 +255,8 @@ export async function performDemoScript(
   gateway: LLMGateway,
   template: DemoScriptTemplate,
   faqPool: DemoFaqPoolItem[],
-  version = 1
+  version = 1,
+  category?: string
 ): Promise<DemoLine[]> {
   const reference = renderDemoScript(template, faqPool);
   const scriptText = reference
@@ -275,6 +276,7 @@ export async function performDemoScript(
             '3. 可以微调台词拆分与顺序衔接，但总行数与参照稿接近，客户提问与对应应答必须成对出现',
             version > 1 ? '4. 这是再听一版的请求：换一种演绎风格（节奏/用词/客户性格微调），事实不变' : '',
             '5. 销售对小朋友（孩子角色）说话的台词，该条额外加 "soft": true（播报时会放轻放缓，避免吓到孩子）',
+            category === '电销' ? '6. 电销示范中，客户提出第一个问题后，销售的第一次回答要简短，先回应核心问题，不要急于展开长篇介绍；对小朋友说话的语气保持温柔轻缓' : '',
             '只输出 JSON：{"lines":[{"role":"sales|customer|child|narrator","text":"台词","excitement":1-10 整数（情绪强度，销售开场高、旁白低；对小朋友说话的台词不超过 4）}]}',
             '不要输出任何其他内容。',
             '',
@@ -288,7 +290,19 @@ export async function performDemoScript(
     const parsed = JSON.parse(extractJson(result.content)) as { lines?: unknown };
     const lines = (Array.isArray(parsed.lines) ? parsed.lines : [])
       .map(sanitizePerformedLine)
-      .filter((l): l is DemoLine => !!l);
+      .filter((l): l is DemoLine => !!l)
+      .map((line) => category === '电销' && line.role === 'sales' && !line.soft
+        ? { ...line, arousal: 1, excitement: 9 }
+        : line);
+    if (category === '电销') {
+      const ageAnswerIndex = lines.findIndex((line) => line.role === 'customer' && /\d+\s*岁/.test(line.text));
+      if (ageAnswerIndex >= 0) {
+        const askedAge = lines.slice(0, ageAnswerIndex).some((line) => line.role === 'sales' && /几岁|多大/.test(line.text));
+        if (!askedAge) {
+          lines.splice(ageAnswerIndex, 0, { role: 'sales', text: '对了，您家孩子今年几岁了？', arousal: 1, excitement: 9 });
+        }
+      }
+    }
     // 演绎结果行数过少视为失败（剧本被截断），回退参照稿
     if (lines.length >= Math.max(4, Math.floor(reference.length / 2))) return lines;
   } catch {
