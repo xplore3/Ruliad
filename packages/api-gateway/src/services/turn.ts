@@ -2,7 +2,7 @@ import { EventTypes, type PersonaConfig, type QuizQuestion, type QuizQuestionPub
 import { analyzeExpressionIntent, bandFor, checkConsistency, classifyAddressTarget, compilePersona, EmotionTracker, GROUND_PUSH_CLOSE_CONTROL, PersonaActor, replyAsChild, ruleCheck } from '@grasp-mvp/role-engine';
 import type { RouteContext } from '../ctx.js';
 import { mkEvent } from '../events.js';
-import { drillScriptPrompt, institutionKnowledgePrompt, archetypePrompt, resolveDrillScript, initialCustomerArchetype, FIRST_SCENE_MAX_MS, GIVE_UP_PATTERN, SCENE_TRANSITION_NARRATION } from './drill.js';
+import { drillScriptPrompt, institutionKnowledgePrompt, receptionCustomerPrompt, resolveDrillScript, dualSceneEnabledFor, firstSceneTimeLimitMs, GIVE_UP_PATTERN, SCENE_TRANSITION_NARRATION } from './drill.js';
 import { receptionQuestionPrompt } from './reception-questions.js';
 import { receptionTrialFollowup } from './reception-followup.js';
 import { assessGroundPushProgress } from './ground-push-progress.js';
@@ -64,12 +64,11 @@ function fallbackPersona(scenario: Scenario): PersonaConfig {
   };
 }
 
-/** 加载 persona 运行时（编译后的 bundle + 原始配置 + 演练剧本 + 本场客户类型）；陪练员缺失时用中性兜底角色，保证演练只受场景与剧本影响 */
+/** 加载 persona 运行时（编译后的 bundle + 原始配置 + 演练剧本）；陪练员缺失时用中性兜底角色，保证演练只受场景与剧本影响 */
 export async function loadRuntime(
   ctx: RouteContext,
   scenario: Scenario,
   difficulty?: number,
-  archetype?: 'uninterested' | 'interested',
   receptionQuestions?: ReceptionQuestion[],
   receptionTrialDisposition?: Session['receptionTrialDisposition']
 ) {
@@ -141,10 +140,9 @@ export async function loadRuntime(
   if ((scenario.flowType ? scenario.flowType === 'reception' : scenario.category === '咨询接待')) {
     bundle.systemPrompt = `${bundle.systemPrompt}\n\n${receptionQuestionPrompt(receptionQuestions, receptionTrialDisposition)}`;
   }
-  // 注入本场客户类型：地推按双场制执行；咨询接待固定为有兴趣客户（包括旧会话）
-  const effectiveArchetype = (scenario.flowType ? scenario.flowType === 'reception' : scenario.category === '咨询接待') ? 'interested' : archetype;
-  if (effectiveArchetype) {
-    bundle.systemPrompt = `${bundle.systemPrompt}\n\n${archetypePrompt(effectiveArchetype, scenario.category)}`;
+  // 咨询接待固定为有兴趣客户（包括旧会话，不读 session 状态）；地推双场制的客户行为要求全部来自演练剧本库，代码不再注入
+  if (scenario.flowType ? scenario.flowType === 'reception' : scenario.category === '咨询接待') {
+    bundle.systemPrompt = `${bundle.systemPrompt}\n\n${receptionCustomerPrompt()}`;
   }
   return { personaConfig, bundle, productKB, drillScript };
 }
@@ -241,7 +239,7 @@ export async function preparePersonaReply(
 ): Promise<PrecomputedPersonaReply | null> {
   try {
     if (!text.trim() || session.childMode || (scenario.flowType ? scenario.flowType === 'reception' : scenario.category === '咨询接待')) return null;
-    const runtime = await loadRuntime(ctx, scenario, session.difficulty, session.customerArchetype, session.receptionQuestions, session.receptionTrialDisposition);
+    const runtime = await loadRuntime(ctx, scenario, session.difficulty, session.receptionQuestions, session.receptionTrialDisposition);
     const lastTrace = session.emotionTrace[session.emotionTrace.length - 1];
     const tracker = new EmotionTracker(runtime.bundle.dynamics, runtime.bundle.behaviorBands, lastTrace?.arousal);
     const snapshot = tracker.update(text);
@@ -426,7 +424,7 @@ export async function runTurn(
 
   // 结束时机：AI 判断（replyWithSignal 的 shouldClose）+ 倒计时到点自动结束；
   // MAX_LIVE_TURNS 仅作防止对话无限进行的极端兜底
-  const runtime = await loadRuntime(ctx, scenario, session.difficulty, session.customerArchetype, session.receptionQuestions, session.receptionTrialDisposition);
+  const runtime = await loadRuntime(ctx, scenario, session.difficulty, session.receptionQuestions, session.receptionTrialDisposition);
   if (!runtime) {
     console.error('[runTurn] persona 运行时加载失败, scenarioId=', scenario.id, 'personaConfigId=', scenario.personaConfigId);
     return null;
@@ -436,12 +434,10 @@ export async function runTurn(
     bundle.systemPrompt = `${bundle.systemPrompt}\n\n【六连问末题替换（必须执行）】\n销售已提前说服孩子，孩子已明确喜欢或愿意参加。六连问最后一问不得再使用“孩子不喜欢/宝贝你想去吗”，改从以下问题中选择一道本场尚未问过的问题：孩子学的太多了、我太忙了、一周上几次课、我们家有点远、学费怎么收、你们根据年龄分班吗、这个需要孩子练习很长时间吗、你们有内部教材和课程体系吗。检查完整对话，任何问题都不得重复。`;
   }
 
-  // 双场制只适用于地推：咨询接待永不进入固定无兴趣小场
+  // 双场制由场景编辑器开关启用（仅地推/现场成交）；其他分类永不进入双场制
   const dualScene =
-    (scenario.flowType ? scenario.flowType === 'ground_push' : scenario.category === '地推') &&
     session.customerArchetype === 'uninterested' &&
-    !!drillScript &&
-    initialCustomerArchetype(drillScript.content, scenario.category) === 'uninterested';
+    dualSceneEnabledFor(scenario, !!drillScript);
   // 学员明确放弃当前客户（"那打扰您了"等话术）：跳过 LLM 回复，客户直接离场，立即切场
   const traineeGaveUp = GIVE_UP_PATTERN.test(text);
 
@@ -591,16 +587,19 @@ export async function runTurn(
     }
   }
 
-  // ---- 双场制切场：第一场（不感兴趣）满 100 秒、学员说出放弃类话术、或 LLM 判定对话自然结束时，
-  // 旁白切换到第二场（潜在意向）。第一场客户离开是预期剧情，不结束整场演练；
+  // ---- 双场制切场：学员说出放弃类话术、或 LLM 判定第一小场自然结束（第一位客户拒绝/离场）时，
+  // 旁白切换到第二小场；地推第一小场另有 100 秒硬上限（firstSceneTimeLimitMs），谈判型场景不设。
+  // 第一小场客户离开是预期剧情，不结束整场演练；
+  // 两小场的客户行为均由剧本库文本约束，LLM 读到切场旁白后按剧本进入第二小场；
   // 旁白轮 speaker=coach，不计入轮次与评分统计
   let narratorTurn: TranscriptTurn | undefined;
   const firstSceneElapsedMs =
     Date.now() - new Date(session.liveStartedAt ?? session.startedAt).getTime() - (session.pausedMs ?? 0);
+  const firstSceneTimeLimit = dualScene ? firstSceneTimeLimitMs(scenario) : undefined;
   if (
     !isSystemGreeting &&
     dualScene &&
-    (firstSceneElapsedMs >= FIRST_SCENE_MAX_MS || traineeGaveUp || shouldClose)
+    ((firstSceneTimeLimit !== undefined && firstSceneElapsedMs >= firstSceneTimeLimit) || traineeGaveUp || shouldClose)
   ) {
     shouldClose = false;
     narratorTurn = {
@@ -609,7 +608,7 @@ export async function runTurn(
       text: SCENE_TRANSITION_NARRATION,
       at: new Date().toISOString(),
     };
-    // 新客户情绪重置为基线，并将会话客户类型切换为"潜在意向"（下一轮起生效）
+    // 新客户情绪重置为基线，并将会话小场状态切换为"潜在意向"（下一轮起不再满足切场条件）
     const baseArousal = bundle.dynamics.baseArousal;
     emotionTrace.push({
       seq: narratorTurn.seq,

@@ -153,9 +153,9 @@ export interface Session {
   /** 演练难度等级（对应新手指引流程配置 difficultyLevels.level；缺省用指引配置 defaultDifficulty） */
   difficulty?: number;
   /**
-   * 本场客户类型（建会话时系统随机确定，整场不变）：uninterested=不感兴趣客户 / interested=潜在意向客户。
-   * 仅当演练剧本声明了概率化客户类型（如"10次应该有5次客户表现出不感兴趣"）时抽取；
-   * LLM 无法执行概率原则，由代码随机后写死进 prompt。
+   * 双场制演练的当前小场状态：uninterested=第一小场（不感兴趣客户）/ interested=第二小场（潜在意向客户）。
+   * 仅当地推演练剧本在剧本库中声明"双场制/两小场"时启用，建会话时固定从第一小场开始；
+   * 两小场的客户行为提示词全部承载于剧本库文本，此状态仅用于代码的切场编排，不再注入 prompt。
    */
   customerArchetype?: 'uninterested' | 'interested';
   /** 孩子对话模式：客户转头问孩子后激活；激活期间学员发言经路由器判定对话对象，对孩子说的由孩子角色应答 */

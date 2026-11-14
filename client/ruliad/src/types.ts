@@ -76,6 +76,8 @@ export interface Scenario {
   category?: ScoreCategory;
   flowType?: 'generic' | 'ground_push' | 'reception';
   drillScriptId?: string;
+  /** 双场制演练开关（仅地推/现场成交适用）：开启后分两小场，系统自动切场 */
+  dualSceneEnabled?: boolean;
   scoreItemIds?: string[];
   /** 剧本（实用场景） */
   script?: ScenarioScript;

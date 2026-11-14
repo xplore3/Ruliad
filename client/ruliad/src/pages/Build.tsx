@@ -76,6 +76,7 @@ interface BuildForm {
   sceneType: 'drill' | 'practical';
   productKBId: string;
   drillScriptId: string;
+  dualSceneEnabled: boolean;
   scoreItemIds: string[];
   status: 'draft' | 'published';
   goal: string;
@@ -105,7 +106,7 @@ const EMPTY_PARTICIPANT: ScenarioParticipant = {
 
 const EMPTY_FORM: BuildForm = {
   name: '', category: '电销', flowType: 'generic', methodology: '', description: '', difficulty: 1, duration: 10,
-  sceneType: 'practical', productKBId: '', drillScriptId: '', scoreItemIds: [], status: 'published', goal: '',
+  sceneType: 'practical', productKBId: '', drillScriptId: '', dualSceneEnabled: false, scoreItemIds: [], status: 'published', goal: '',
   successCriteria: '60', doNot: '', roleName: '', roleTitle: '', roleIndustry: '', personalities: [],
   decisionStyle: DECISION_STYLES[0], objections: '', hiddenInfo: '', speechRate: 2, challenge: 3,
   interruptLevel: 'weak', skillPointIds: [], scriptExecutionOrder: '', scriptTopics: '',
@@ -280,6 +281,7 @@ export default function Build() {
       sceneType: scenario.sceneType ?? 'practical',
       productKBId: scenario.productKBId ?? '',
       drillScriptId: scenario.drillScriptId ?? '',
+      dualSceneEnabled: scenario.dualSceneEnabled ?? false,
       scoreItemIds: scenario.scoreItemIds ?? [],
       status: scenario.status ?? 'published',
       goal: scenario.script?.purpose ?? '',
@@ -438,6 +440,7 @@ export default function Build() {
       passScore, durationMinutes: form.duration, difficulty: form.difficulty,
       description: form.description.trim() || null, methodology: form.methodology.trim(),
       sceneType: form.sceneType, category: form.category, flowType: form.flowType, productKBId: form.productKBId || null, drillScriptId: form.drillScriptId || null,
+      dualSceneEnabled: form.dualSceneEnabled,
       script: scriptPayload, participants: participantsPayload, status: form.status,
       conversation: { speechRate: form.speechRate, challenge: form.challenge, interruptLevel: form.interruptLevel },
     };
@@ -749,6 +752,7 @@ export default function Build() {
                         onClick={() => updateForm({
                           category: cat.key,
                           drillScriptId: drillScripts.some((s) => s.id === form.drillScriptId && s.category === cat.key) ? form.drillScriptId : '',
+                          dualSceneEnabled: cat.key === '地推' || cat.key === '现场成交' ? form.dualSceneEnabled : false,
                           scoreItemIds: scoreItems.filter((item) => form.scoreItemIds.includes(item.id) && (!item.category || item.category === cat.key)).map((item) => item.id),
                         })}
                         className={`chip ${form.category === cat.key ? 'on' : ''}`}
@@ -927,6 +931,18 @@ export default function Build() {
                     {drillScripts.filter((script) => script.category === form.category).map((script) => <option key={script.id} value={script.id}>{script.name}</option>)}
                   </select>
                   <div className="hint">引用后由该剧本主导客户行为；其他同分类场景不会与此场景自动共用剧本。</div>
+                  {(form.category === '地推' || form.category === '现场成交') && (
+                    <div className="field">
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={form.dualSceneEnabled} onChange={(e) => updateForm({ dualSceneEnabled: e.target.checked })} />
+                        双场制演练（两位客户）
+                      </label>
+                      <div className="hint">开启后本场分为两小场：第一小场客户拒绝/离场后由系统自动切场到第二位客户；两小场各自的客户行为规则在演练剧本库文本中定义，预计时长为两小场合计的整场总时长。</div>
+                      {form.dualSceneEnabled && !form.drillScriptId && (
+                        <div className="hint">需先在上方绑定演练剧本，双场制才会生效。</div>
+                      )}
+                    </div>
+                  )}
                 </div>
                 {form.sceneType === 'practical' && (
                   <>

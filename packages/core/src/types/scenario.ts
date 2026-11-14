@@ -87,6 +87,12 @@ export interface Scenario {
   productKBId?: string;
   /** 场景级演练剧本引用；不再按分类隐式选择剧本 */
   drillScriptId?: string;
+  /**
+   * 双场制演练开关（场景编辑器配置，仅地推/现场成交适用）：
+   * 开启且绑定演练剧本时，第一小场固定"不感兴趣/最终拒绝"客户，切场后进入第二小场；
+   * 两小场的客户行为规则由剧本库文本承载，此开关只控制是否启用双场编排。
+   */
+  dualSceneEnabled?: boolean;
   /** 场景级评分标准引用；定义后评分只使用这些标准 */
   scoreItemIds?: string[];
   skillPointIds: string[];

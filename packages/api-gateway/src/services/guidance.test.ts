@@ -58,8 +58,7 @@ it('电销家长说出年龄前必须有销售提问', async () => {
   expect(lines[2]).toMatchObject({ role: 'customer', text: '孩子6岁了。' });
 });
 
-import { describe, expect, it } from 'vitest';
-import type { LLMGateway } from '@grasp-mvp/core';
+import { describe } from 'vitest';
 import { SCENARIO_GUIDANCES } from '../seed-guidance.data.js';
 import { composeBriefing } from './guidance.js';
 

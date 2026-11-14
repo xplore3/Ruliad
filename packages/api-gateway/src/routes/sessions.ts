@@ -6,7 +6,7 @@ import { analyzeReceptionFluency, judgeItem, runRuleChecks } from '@grasp-mvp/sc
 import type { RouteContext } from '../ctx.js';
 import { mkEvent } from '../events.js';
 import { effectiveCountdownSeconds, loadRuntime, remainingSeconds, runTurn } from '../services/turn.js';
-import { decideOpening, initialCustomerArchetype, resolveDrillScript } from '../services/drill.js';
+import { decideOpening, dualSceneEnabledFor, resolveDrillScript } from '../services/drill.js';
 import { createReceptionPlan, pickReceptionQuestions } from '../services/reception-questions.js';
 import { clearScoringCache, scoreSessionWithCache } from '../services/scoring.js';
 import { personaVoice } from './voice.js';
@@ -277,21 +277,16 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
         }
       }
 
-      // 本场客户类型：剧本声明了概率化原则（如"10次应该有5次客户表现出不感兴趣"）时采用双场制——
-      // 第一场必定"不感兴趣"（最多 3 轮后旁白切场），第二场必定"潜在意向"，不再随机
+      // 双场制小场状态：场景编辑器开启 dualSceneEnabled（仅地推/现场成交）且绑定演练剧本时启用——
+      // 第一小场固定"不感兴趣/最终拒绝"客户，切场后翻转为第二小场；两小场的行为要求全部写在剧本库文本里
       const drillScriptForRoll = await resolveDrillScript(store, scenario).catch(() => undefined);
-      const customerArchetype = (scenario.flowType ? scenario.flowType === 'reception' : scenario.category === '咨询接待')
-        ? 'interested'
-        : scenario.flowType === 'generic'
-          ? undefined
-          : drillScriptForRoll
-            ? initialCustomerArchetype(drillScriptForRoll.content, scenario.category)
-            : undefined;
+      const customerArchetype: Session['customerArchetype'] =
+        dualSceneEnabledFor(scenario, !!drillScriptForRoll) ? 'uninterested' : undefined;
 
       const receptionPlan = (scenario.flowType ? scenario.flowType === 'reception' : scenario.category === '咨询接待') ? createReceptionPlan() : undefined;
       const receptionQuestions = receptionPlan?.questions;
       const receptionTrialDisposition = receptionPlan?.receptionTrialDisposition;
-      const runtime = await loadRuntime(ctx, scenario, undefined, customerArchetype, receptionQuestions, receptionTrialDisposition);
+      const runtime = await loadRuntime(ctx, scenario, undefined, receptionQuestions, receptionTrialDisposition);
       if (!runtime) return reply.code(500).send({ error: '场景对应的 persona 配置缺失' });
       const { personaConfig, bundle, drillScript } = runtime;
 
@@ -465,7 +460,7 @@ export async function sessionsRoutes(app: FastifyInstance, ctx: RouteContext): P
       if (session.status !== 'active') return reply.code(409).send({ error: '会话已结束' });
       const scenario = await store.getScenario(session.scenarioId);
       if (!scenario) return reply.code(404).send({ error: '场景已被删除' });
-      const runtime = await loadRuntime(ctx, scenario, session.difficulty, session.customerArchetype, session.receptionQuestions, session.receptionTrialDisposition);
+      const runtime = await loadRuntime(ctx, scenario, session.difficulty, session.receptionQuestions, session.receptionTrialDisposition);
       if (!runtime) return reply.code(500).send({ error: '场景对应的 persona 配置缺失' });
       const { personaConfig } = runtime;
 

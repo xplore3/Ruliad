@@ -523,7 +523,7 @@ export const SCENARIO_GUIDANCES: ScenarioGuidance[] = [
       },
     ],
     defaultDifficulty: 1,
-    duration: { targetMinutes: 6, minTurns: 8, maxTurns: 40, countdownSeconds: 360 },
+    duration: { targetMinutes: 60, minTurns: 8, maxTurns: 40, countdownSeconds: 3600 },
     scoringFocus: ['需求确认', '价格异议处理', '临门一脚', '成交收尾'],
   },
   // ══ 4. 电话销售 ══

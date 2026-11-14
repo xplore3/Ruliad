@@ -35,6 +35,7 @@ interface ScenarioBody {
   description?: string | null;
   productKBId?: string | null;
   drillScriptId?: string | null;
+  dualSceneEnabled?: boolean;
   scoreItemIds?: string[];
   methodology?: string;
   source?: string;
@@ -178,6 +179,7 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
       personaConfigId: body.personaConfigId ?? '',
       productKBId: body.productKBId || undefined,
       drillScriptId: body.drillScriptId || undefined,
+      dualSceneEnabled: body.dualSceneEnabled || undefined,
       scoreItemIds: body.scoreItemIds,
       skillPointIds: body.skillPointIds ?? [],
       successCriteria: { passScore: body.passScore ?? Number.NaN },
@@ -220,6 +222,7 @@ export async function catalogRoutes(app: FastifyInstance, ctx: RouteContext): Pr
       personaConfigId: body.personaConfigId ?? existing.personaConfigId,
       productKBId: body.productKBId !== undefined ? body.productKBId || undefined : existing.productKBId,
       drillScriptId: body.drillScriptId !== undefined ? body.drillScriptId || undefined : existing.drillScriptId,
+      dualSceneEnabled: body.dualSceneEnabled !== undefined ? body.dualSceneEnabled || undefined : existing.dualSceneEnabled,
       scoreItemIds: body.scoreItemIds ?? existing.scoreItemIds,
       skillPointIds: body.skillPointIds ?? existing.skillPointIds,
       successCriteria: body.passScore !== undefined ? { ...existing.successCriteria, passScore: body.passScore } : existing.successCriteria,

@@ -49,20 +49,29 @@ export function institutionKnowledgePrompt(kb?: ProductKB): string {
   ].join('\n');
 }
 
+/** 双场制仅地推与现场成交适用；其他分类（电销/咨询接待等）不开放该编排能力 */
+export function supportsDualScene(category?: Scenario['category']): boolean {
+  return category === '地推' || category === '现场成交';
+}
+
 /**
- * 双场制演练判定：剧本中声明了类似"10次应该有5次客户表现出不感兴趣"的概率原则时，
- * 不再随机——一场演练固定编排为两小场：第一场必定"不感兴趣"（最多 3 轮后旁白切场），
- * 第二场必定"潜在意向"，避免用户连续随机到无兴趣客户。
- * 未声明返回 undefined（不干预）。
+ * 双场制启用判定：场景编辑器显式开启 dualSceneEnabled + 分类支持（地推/现场成交）+ 绑定演练剧本。
+ * 两小场的客户行为要求全部写在剧本库文本里，代码不注入任何客户行为提示词，只负责切场编排：
+ * 第一小场固定从"不感兴趣/最终拒绝"开始，满足切场条件后插入旁白并切换为第二小场。
  */
-export function initialCustomerArchetype(
-  content: string,
-  category?: Scenario['category']
-): 'uninterested' | 'interested' | undefined {
-  if (category === '咨询接待') return 'interested';
-  if (category !== '地推') return undefined;
-  if (!/10次应该有5次|一半.*不感兴趣|5次.*不感兴趣/.test(content)) return undefined;
-  return 'uninterested';
+export function dualSceneEnabledFor(scenario: Scenario, hasDrillScript: boolean): boolean {
+  return !!scenario.dualSceneEnabled && supportsDualScene(scenario.category) && hasDrillScript;
+}
+
+/**
+ * 第一小场时长上限：仅地推第一小场（不感兴趣客户快速离场）设 100 秒硬上限；
+ * 现场成交等谈判型双场制第一小场需要完整谈判过程，不设硬时限，
+ * 由学员放弃话术或 LLM 判定第一小场自然结束（第一位客户拒绝离场）来切场。
+ */
+export function firstSceneTimeLimitMs(scenario: Scenario): number | undefined {
+  return (scenario.flowType ? scenario.flowType === 'ground_push' : scenario.category === '地推')
+    ? FIRST_SCENE_MAX_MS
+    : undefined;
 }
 
 /** 第一场（不感兴趣）时长上限：开场满 100 秒后由系统旁白切换到有意向客户 */
@@ -72,33 +81,15 @@ export const GIVE_UP_PATTERN = /打扰[你您]?了?|那算了|不打扰|那您�
 /** 切场旁白文案（第一小场结束 → 第二小场开始，学员先开口） */
 export const SCENE_TRANSITION_NARRATION = '这次演练结束，现在开始下一场，请你先说话。';
 
-/** 本场客户类型注入 prompt 的硬约束段落 */
-export function archetypePrompt(
-  archetype: 'uninterested' | 'interested',
-  category?: Scenario['category']
-): string {
-  if (category === '咨询接待') {
-    return [
-      '【本场客户类型（必须严格遵守，优先级高于其他行为要求）】明确有兴趣、主动上门咨询的客户。',
-      '客户对课程或服务有明确兴趣，愿意了解并配合咨询流程，不得使用地推第一小场的固定无兴趣反应。',
-      '按咨询接待剧本自然提问、了解课程、预约或成交；不得无故离开或把潜在客户特有的地推拒绝流程带入本场景。',
-      '学员已在开场白中报出机构名称（例如“文杰围棋，有什么能帮您”）时，说明客户已经联系上文杰围棋，不得再询问“是文杰围棋吗”或重复确认机构、姓名；直接自然说明咨询需求，例如“您好，我想给孩子咨询一下围棋课程，他5岁能学吗？”。',
-      '客户虽然有兴趣，但永远不会主动提出想试听课、主动约试听时间或要求安排试听；试听只能由销售主动提出并推动。客户可以回答销售提出的时间选择，但不能替销售发起邀约。',
-    ].join('\n');
-  }
-  return archetype === 'uninterested'
-    ? [
-        '【本场客户类型（系统随机确定，必须严格遵守，优先级高于其他行为要求）】不感兴趣的客户。',
-        '按剧本中该类客户的行为要求执行：不表现出兴趣，主要用身体语言拒绝（不停下脚步/没有放慢脚步/摇手），',
-        '或简短表明（如"我们不学""我们赶时间"），不展开提问；这种类型的演练很快就会结束。',
-      ].join('\n')
-    : [
-        '【本场客户类型（系统随机确定，必须严格遵守，优先级高于其他行为要求）】潜在意向客户。',
-        '按剧本中该类客户的行为要求执行：用肢体语言表达兴趣（放慢脚步/停下脚步/转头问孩子），',
-        '被动配合销售的引导推进流程；在剧本规定的提问/拒绝环节（如成交阶段的六连问）到来之前不主动提问；',
-        '销售介绍或递出物料时，要像真人一样给出简短的口头回应（如"嗯""哦，是吗""这样啊""嗯嗯，你说"），',
-        '表示在听和初步兴趣，可配合旁白描述动作神态（如"（客户接过邀请函看了看）"），不要一直沉默不语，也不要用提问维持对话。',
-      ].join('\n');
+/** 咨询接待固定客户类型注入 prompt 的硬约束段落（地推双场制的行为要求已迁移至演练剧本库） */
+export function receptionCustomerPrompt(): string {
+  return [
+    '【本场客户类型（必须严格遵守，优先级高于其他行为要求）】明确有兴趣、主动上门咨询的客户。',
+    '客户对课程或服务有明确兴趣，愿意了解并配合咨询流程，不得使用地推第一小场的固定无兴趣反应。',
+    '按咨询接待剧本自然提问、了解课程、预约或成交；不得无故离开或把潜在客户特有的地推拒绝流程带入本场景。',
+    '学员已在开场白中报出机构名称（例如“文杰围棋，有什么能帮您”）时，说明客户已经联系上文杰围棋，不得再询问“是文杰围棋吗”或重复确认机构、姓名；直接自然说明咨询需求，例如“您好，我想给孩子咨询一下围棋课程，他5岁能学吗？”。',
+    '客户虽然有兴趣，但永远不会主动提出想试听课、主动约试听时间或要求安排试听；试听只能由销售主动提出并推动。客户可以回答销售提出的时间选择，但不能替销售发起邀约。',
+  ].join('\n');
 }
 
 export interface OpeningDecision {
