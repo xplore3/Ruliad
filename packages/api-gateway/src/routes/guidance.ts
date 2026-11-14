@@ -37,7 +37,7 @@ async function extractAudio(request: FastifyRequest): Promise<{ audio?: Buffer; 
  * - POST /sessions/:id/qualify-answer?q=N  资格提问的语音回答 → ASR → LLM 判断是否做过（最后一题给结论并落库）；
  *   也接受 JSON {text}（流式识别已出文本时跳过 ASR）
  * - POST /sessions/:id/demo             示范剧本交给大模型理解演绎成双人对话（无资源时声明无示范，前端跳过该步骤）
- * - POST /sessions/:id/briefing         教练讲解口播稿（keyPoints + 讲解标准库 → 大模型理解改写，不照念原文）
+ * - POST /sessions/:id/briefing         教练讲解口播稿（默认大模型改写；verbatim 模式按 keyPoints 原文返回）
  * - POST /sessions/:id/demo-choice      示范后的语音选择 → 再听一版 / 开始练习；也接受 JSON {text}
  * - GET  /sessions/:id/asr-stream       流式识别通道（WebSocket）：边说边识别，实时出 partial
  */
@@ -141,8 +141,8 @@ export async function guidanceRoutes(app: FastifyInstance, ctx: RouteContext): P
     return { lines: await performDemoScript(gateway, script, pool, version, script.category), hasDemo: true };
   });
 
-  // 教练讲解口播稿：keyPoints + 引用的讲解标准库条目渲染成参照稿后，交给大模型理解改写成自然口播
-  // （不照念资源库原文；LLM 失败回退参照稿）；无资源返回空口播
+  // 教练讲解口播稿：默认将 keyPoints + 引用的讲解标准库条目交给大模型改写（失败回退参照稿）；
+  // briefingMode=verbatim 时按 keyPoints 原文逐段返回；无资源返回空口播
   app.post<{ Params: { id: string } }>('/sessions/:id/briefing', async (request, reply) => {
     const session = await store.getSession(request.params.id);
     if (!session || session.userId !== request.userId) return reply.code(404).send({ error: '会话不存在' });

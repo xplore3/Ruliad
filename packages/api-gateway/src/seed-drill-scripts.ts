@@ -6,7 +6,7 @@ import { renderDemoScript, resolveFaqPool } from './services/guidance.js';
 /**
  * 演练剧本库种子：四类各一条，仅在库为空时灌入（之后用户的增删改归用户所有，重启不恢复不覆盖）。
  * 地推/电销/咨询接待的内容用对应示范剧本渲染成剧情模板（优先读示范剧本库，库中缺该剧本时回退种子数据，
- * 避免与 seed:guidance 的执行顺序耦合）；现场成交无示范剧本，给骨架模板待补充。
+ * 避免与 seed:guidance 的执行顺序耦合）；现场成交演练使用独立谈判模板。
  */
 
 const ROLE_LABELS: Record<string, string> = {
@@ -25,8 +25,8 @@ async function renderDemoContent(store: Store, tenantId: string, demoScriptId: s
   return lines.map((l) => `${ROLE_LABELS[l.role] ?? l.role}：${l.text}`).join('\n');
 }
 
-/** 现场成交骨架模板（示范剧本库无对应剧本，待用户在库中补充完善） */
-const CLOSING_TEMPLATE = `（现场成交演练剧本模板，待完善——请把标准剧情与演练原则写在这里，演练开始时 AI 会阅读本文，决定谁先开口、客户如何回应、何时结束）
+/** 现场成交自由演练模板：AI 按剧情背景和演练原则扮演谈判客户 */
+const CLOSING_TEMPLATE = `（现场成交演练剧本：演练开始时 AI 会阅读本文，决定谁先开口、客户如何回应、何时结束）
 
 剧情背景：学员扮演课程顾问，AI 扮演家长。试听课结束后进入现场谈判，家长对价格与条款有顾虑。
 
