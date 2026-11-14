@@ -65,7 +65,6 @@ const TRAINING_MODULES: readonly TrainingModule[] = [
     desc: '外呼开场与异议应对，练在 30 秒内抓住客户注意力',
     entry: 'call',
     categoryLabel: '电话销售',
-    locked: true,
   },
   {
     key: 'inquiry',
@@ -86,7 +85,6 @@ const TRAINING_MODULES: readonly TrainingModule[] = [
     desc: '价格谈判与签约推进，练临门一脚的成交能力',
     entry: 'practice',
     categoryLabel: '现场成交',
-    locked: true,
   },
 ];
 

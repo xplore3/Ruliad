@@ -98,6 +98,8 @@ export interface ScenarioGuidance {
   demoScriptId: string | null;
   /** 第3步 讲解要点 */
   keyPoints: string[];
+  /** 第3步 讲解方式；缺省为由大模型改写，verbatim=按 keyPoints 原文逐段讲解 */
+  briefingMode?: 'rewrite' | 'verbatim';
   /** 第3步 讲解标准库引用 */
   briefingStandardIds: string[];
   voiceProfile: VoiceProfile;

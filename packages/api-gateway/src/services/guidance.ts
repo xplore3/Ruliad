@@ -13,8 +13,9 @@ import { DEMO_FAQ_ITEMS } from '../demo-faq.data.js';
  * 新手指引流程：资格判断 + 示范剧本演绎 + 讲解口播稿组装。
  * 资源库化以后，示范剧本存示范剧本库（DemoScript），由 ScenarioGuidance.demoScriptId 引用。
  * 示范执行方式：先把模板确定性渲染成参照稿（变量 + FAQ 池抽取），再交给大模型理解演绎成自然对话；
- * 讲解口播稿同理：要点与讲解标准先渲染成参照稿，再由大模型理解改写成自然口播，不照念资源库原文。
- * LLM 失败/输出不合法时回退参照稿，保证 mock/弱网环境可跑通。
+ * 讲解口播稿默认把要点与讲解标准渲染成参照稿，再由大模型理解改写成自然口播；
+ * briefingMode=verbatim 时跳过改写，按 keyPoints 原文逐段返回。
+ * 默认模式下 LLM 失败/输出不合法时回退参照稿，保证 mock/弱网环境可跑通。
  * 场景无指引配置或剧本引用失效时不提供兜底示范剧本，由路由声明无示范（hasDemo=false），前端跳过示范步骤。
  */
 
@@ -330,9 +331,9 @@ function renderBriefingReference(guidance: ScenarioGuidance, standards: Briefing
 }
 
 /**
- * 组装教练口播稿（第3步）：资源库内容不照念，先把要点与讲解标准渲染成参照稿，
- * 再交给大模型理解后重新组织成教练对学员说话的自然口播（意思保留、措辞口语化）。
- * LLM 失败/输出不合法时回退参照稿，保证 mock/弱网环境可跑通。
+ * 组装教练口播稿（第3步）：verbatim 模式直接返回 keyPoints 原文；
+ * 默认模式把要点与讲解标准渲染成参照稿，再由大模型重新组织成自然口播。
+ * 默认模式下 LLM 失败/输出不合法时回退参照稿，保证 mock/弱网环境可跑通。
  * 返回纯文本数组，每项一段口播。
  */
 export async function composeBriefing(
@@ -340,6 +341,7 @@ export async function composeBriefing(
   guidance: ScenarioGuidance,
   standards: BriefingStandard[]
 ): Promise<string[]> {
+  if (guidance.briefingMode === 'verbatim') return guidance.keyPoints;
   const reference = renderBriefingReference(guidance, standards);
   if (reference.length === 0) return [];
   try {

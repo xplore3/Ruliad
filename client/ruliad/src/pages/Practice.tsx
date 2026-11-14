@@ -950,7 +950,7 @@ export default function Practice() {
     setGuideText('');
     setGuideHint('');
     setErrorMsg('');
-    // 无示范模式（如现场成交，guidance.demoScriptId 为 null）：跳过示范直接进讲解
+    // 无示范模式（guidance.demoScriptId 为 null）：跳过示范直接进讲解
     if (guidanceRef.current && guidanceRef.current.demoScriptId == null) {
       await beginBriefing(token, false);
       return;

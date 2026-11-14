@@ -2488,6 +2488,7 @@ function newGuidanceDraft(scenarioId = '', name = ''): GuidanceRowData {
     qualifyQuestions: [],
     demoScriptId: null,
     keyPoints: [],
+    briefingMode: 'rewrite',
     briefingStandardIds: [],
     realismStandardIds: [],
     difficultyLevels: [],
@@ -2507,6 +2508,7 @@ function toGuidanceRow(g: ScenarioGuidance): GuidanceRowData {
     qualifyQuestions: g.qualifyQuestions ?? [],
     demoScriptId: g.demoScriptId ?? null,
     keyPoints: g.keyPoints ?? [],
+    briefingMode: g.briefingMode ?? 'rewrite',
     briefingStandardIds: g.briefingStandardIds ?? [],
     realismStandardIds: g.realismStandardIds ?? [],
     difficultyLevels: g.difficultyLevels ?? [],
@@ -2761,9 +2763,21 @@ function GuidanceTab({ focus, onFocusHandled, onChanged, setNotice }: {
           <Field label="讲解要点（第3步）" wide>
             <LinesTextarea value={detailRow.data.keyPoints} onChange={(v) => updateRow(detailRow.key, { keyPoints: v })} placeholder="每行一个要点" />
           </Field>
-          <Field label="引用讲解标准" wide>
-            <IdNameChecks value={detailRow.data.briefingStandardIds} options={briefingStandards} onChange={(ids) => updateRow(detailRow.key, { briefingStandardIds: ids })} />
+          <Field label="讲解方式（第3步）" wide>
+            <select
+              className="input"
+              value={detailRow.data.briefingMode ?? 'rewrite'}
+              onChange={(e) => updateRow(detailRow.key, { briefingMode: e.target.value as 'rewrite' | 'verbatim' })}
+            >
+              <option value="rewrite">大模型自然改写</option>
+              <option value="verbatim">按原文逐段讲解（不改写、不引用讲解标准）</option>
+            </select>
           </Field>
+          {detailRow.data.briefingMode !== 'verbatim' && (
+            <Field label="引用讲解标准" wide>
+              <IdNameChecks value={detailRow.data.briefingStandardIds} options={briefingStandards} onChange={(ids) => updateRow(detailRow.key, { briefingStandardIds: ids })} />
+            </Field>
+          )}
           <Field label="引用演练真实度标准" wide>
             <IdNameChecks value={detailRow.data.realismStandardIds} options={realismStandards} onChange={(ids) => updateRow(detailRow.key, { realismStandardIds: ids })} />
           </Field>
@@ -2809,7 +2823,7 @@ function GuidanceTab({ focus, onFocusHandled, onChanged, setNotice }: {
                 checked={detailRow.data.demoScriptId === null}
                 onChange={(e) => updateRow(detailRow.key, { demoScriptId: e.target.checked ? null : '' })}
               />
-              无示范模式（如现场成交，保存为 null，练习页跳过示范直接进讲解）
+              无示范模式（保存为 null，练习页跳过示范直接进讲解）
             </label>
             {detailRow.data.demoScriptId !== null && (
               <>
