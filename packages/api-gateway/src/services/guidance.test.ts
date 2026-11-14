@@ -1,7 +1,8 @@
-import { expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { DemoScriptTemplate, LLMGateway } from '@grasp-mvp/core';
 import { MockLLMProvider } from '@grasp-mvp/llm-gateway';
-import { performDemoScript } from './guidance.js';
+import { SCENARIO_GUIDANCES } from '../seed-guidance.data.js';
+import { composeBriefing, performDemoScript } from './guidance.js';
 
 it('电销示范改写后销售保持高激情，柔和句与客户语气不被覆盖', async () => {
   const template: DemoScriptTemplate = {
@@ -58,10 +59,6 @@ it('电销家长说出年龄前必须有销售提问', async () => {
   expect(lines[2]).toMatchObject({ role: 'customer', text: '孩子6岁了。' });
 });
 
-import { describe, expect, it } from 'vitest';
-import type { LLMGateway } from '@grasp-mvp/core';
-import { SCENARIO_GUIDANCES } from '../seed-guidance.data.js';
-import { composeBriefing } from './guidance.js';
 
 describe('现场成交示范讲解', () => {
   it('按配置的原文逐段返回，不调用大模型改写', async () => {
@@ -81,4 +78,33 @@ describe('现场成交示范讲解', () => {
     expect(lines.at(-1)).toBe('假如客户暂时不适合购买产品，那就给他留下好印象，也许将来他会向很多人推荐你的产品，如果通过虚假承诺或者夸大其词，让他购买了不合适的产品，他将会跟很多人说你的坏话。');
     expect(lines.every((line) => line.length <= 500)).toBe(true);
   });
+});
+
+
+it('电销示范遗漏客户对白或连续销售独白时回退完整剧本', async () => {
+  const template: DemoScriptTemplate = {
+    lines: [
+      { role: 'sales', text: '您好。' },
+      { role: 'customer', text: '孩子6岁了。' },
+      { role: 'sales', text: '6岁正是黄金年龄。' },
+      { role: 'customer', text: '那我问问孩子。' },
+      { role: 'sales', text: '好的。' },
+    ],
+  };
+  const gateway: LLMGateway = {
+    forTask: () => new MockLLMProvider(() => JSON.stringify({
+      lines: [
+        { role: 'sales', text: '您好。' },
+        { role: 'sales', text: '6岁正是黄金年龄。' },
+        { role: 'sales', text: '现在有199元4次体验课。' },
+        { role: 'sales', text: '您打开大众点评下单。' },
+      ],
+    })),
+  };
+
+  const lines = await performDemoScript(gateway, template, [], 1, '电销');
+
+  expect(lines).toHaveLength(5);
+  expect(lines.filter((line) => line.role === 'customer')).toHaveLength(2);
+  expect(lines.some((_, index) => index + 2 < lines.length && lines[index].role === 'sales' && lines[index + 1].role === 'sales' && lines[index + 2].role === 'sales')).toBe(false);
 });

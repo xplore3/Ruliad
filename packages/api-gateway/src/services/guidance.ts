@@ -247,6 +247,14 @@ function sanitizePerformedLine(raw: unknown): DemoLine | null {
   return out;
 }
 
+function roleCount(lines: DemoLine[], role: DemoLine['role']): number {
+  return lines.filter((line) => line.role === role).length;
+}
+
+function hasSalesMonologue(lines: DemoLine[]): boolean {
+  return lines.some((_, index) => index + 2 < lines.length && lines[index].role === 'sales' && lines[index + 1].role === 'sales' && lines[index + 2].role === 'sales');
+}
+
 /**
  * 示范执行（第2步）：剧本库内容不照念，而是先确定性渲染成参照稿，再交给大模型理解演绎成自然的双人对话。
  * 事实内容（称呼/年龄/FAQ 问答要点/流程顺序）以参照稿为准，措辞由 LLM 口语化演绎；
@@ -304,8 +312,11 @@ export async function performDemoScript(
         }
       }
     }
-    // 演绎结果行数过少视为失败（剧本被截断），回退参照稿
-    if (lines.length >= Math.max(4, Math.floor(reference.length / 2))) return lines;
+    // 演绎结果行数过少、客户对白大量缺失或出现连续销售独白时，回退完整参照稿
+    const referenceCustomers = roleCount(reference, 'customer');
+    const performedCustomers = roleCount(lines, 'customer');
+    const customerCoverage = referenceCustomers === 0 || performedCustomers >= Math.max(1, Math.ceil(referenceCustomers * 0.75));
+    if (lines.length >= Math.max(4, Math.floor(reference.length / 2)) && customerCoverage && !hasSalesMonologue(lines)) return lines;
   } catch {
     /* 落入兜底 */
   }
